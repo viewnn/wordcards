@@ -1213,9 +1213,6 @@ class VocabApp {
       ['example', ['example', '例句']],
       ['category', ['category', '分类']],
       ['language', ['language', '语言']],
-      ['jyutping', ['jyutping', '粤拼']],
-      ['cantonese', ['cantonese', '粤语写法', '粤语词条']],
-      ['cantoneseExample', ['cantoneseexample', 'cantonese_example', '粤语例句']]
     ];
     for (const [key, aliases] of pairs) {
       for (const a of aliases) {
