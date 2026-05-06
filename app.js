@@ -1191,7 +1191,7 @@ class VocabApp {
 
   /** 与导入/导出 Excel、CSV 一致的列顺序（第一行为表头） */
   importExportHeaders() {
-    return ['word', 'meaning', 'phonetic', 'example', 'category', 'language', 'jyutping', 'cantonese', 'cantoneseExample'];
+    return ['word', 'meaning', 'phonetic', 'example', 'category', 'language'];
   }
 
   escapeHtml(text) {
@@ -2194,10 +2194,7 @@ class VocabApp {
       word.phonetic || '',
       word.example || '',
       word.category || '未分类',
-      this.formatLanguageForExport(word),
-      word.jyutping || '',
-      word.cantonese || '',
-      word.cantoneseExample || ''
+      this.formatLanguageForExport(word)
     ]);
 
     // 创建工作簿和工作表
