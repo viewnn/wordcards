@@ -232,7 +232,7 @@ class VocabApp {
     this.todayWords = [];
     this.isFlipped = false;
     this.settings = {
-      dailyGoal: 20,
+      dailyGoal: 50,
       cardBgColor: '#E8F5E9',
       fontSize: 'medium',
       soundEnabled: false,
@@ -359,7 +359,7 @@ class VocabApp {
 
   // 加载设置
   async loadSettings() {
-    this.settings.dailyGoal = await this.db.getSetting('dailyGoal', 20);
+    this.settings.dailyGoal = await this.db.getSetting('dailyGoal', 50);
     this.settings.cardBgColor = await this.db.getSetting('cardBgColor', '#E8F5E9');
     this.settings.fontSize = await this.db.getSetting('fontSize', 'medium');
     this.settings.soundEnabled = await this.db.getSetting('soundEnabled', false);
