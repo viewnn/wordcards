@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#4A90D9">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="application-name" content="单词卡">
+  <meta name="description" content="一款简洁高效的背单词应用，随时随地学习新词汇">
+  <meta name="msapplication-TileColor" content="#4A90D9">
+  <meta name="msapplication-TileImage" content="icons/icon-144.png">
+  <meta name="msapplication-config" content="browserconfig.xml">
+  <title>单词卡</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+</head>
+<body>
+  <div class="app-container">
+    <!-- 头部 -->
+    <header class="header">
+      <h1>📚 单词卡</h1>
+      <div class="header-actions">
+        <button class="header-btn" id="addWordBtn" title="添加单词">
+          <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+        </button>
+        <button class="header-btn" id="importBtn" title="导入词库">
+          <svg viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- 页面内容 -->
+    <main class="page-content">
+      <!-- 学习页面 -->
+      <div id="learnPage" class="page active">
+        <div class="learn-container">
+          <!-- 进度条 -->
+          <div class="progress-bar">
+            <div class="progress-track">
+              <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+            </div>
+            <span class="progress-text" id="progressText">0/0</span>
+          </div>
+          <!-- 提示信息 -->
+          <div class="notice">手指右滑->表示已掌握；左滑<-表示跳过至下一词</div>
+          <!-- 统计卡片 -->
+          <div class="stats-row">
+            <div class="stat-card">
+              <div class="stat-value" id="statMastered">0</div>
+              <div class="stat-label">已掌握</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="statReview">0</div>
+              <div class="stat-label">待复习</div>
+            </div>
+          </div>
+
+          <!-- 卡片区域 -->
+          <div class="card-stack">
+            <div class="flashcard" id="flashcard">
+              <div class="flashcard-inner">
+                <div class="flashcard-front">
+                  <button class="speak-btn" id="speakBtn">
+                    <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.74 2.5-2.26 2.5-4.02zM14 3.23v2.06c2.89 1.19 5 3.65 5 6.71s-2.11 5.52-5 6.71v2.06c4.01-1.29 7-4.95 7-9.77s-2.99-8.48-7-9.77z"/></svg>
+                  </button>
+                  <button class="favorite-btn" id="favoriteBtn">
+                    <!-- 收藏图标 -->
+                    <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+                  </button>
+                  <div class="word">serendipity</div>
+                  <div class="phonetic">/ˌserənˈdɪpɪti/</div>
+                  <div class="tap-hint">点击查看释义</div>
+                </div>
+                <div class="flashcard-back">
+                  <div class="meaning">意外发现美好事物的运气</div>
+                  <div class="example">"Finding that book was pure serendipity."</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 空状态（无可学习单词时显示） -->
+          <div class="empty-state" id="learnEmptyState" style="display: none;">
+            <div class="empty-icon">
+              <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+            </div>
+            <h3 class="empty-title">还没有可学习的单词</h3>
+            <p class="empty-desc">点击右上角+单词或导入词库</p>
+          </div>
+
+          <!-- 完成页面 -->
+          <div class="complete-container" style="display: none;">
+            <!-- 完成图标 -->
+            <!-- <div class="complete-icon">
+              <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+            </div> -->
+            <h2 class="complete-title">太棒了！</h2>
+            <p class="complete-subtitle">今日学习目标已完成</p>
+            <div class="complete-stats">
+              <div class="complete-stat">
+                <div class="complete-stat-value masters" id="completeMastered">0</div>
+                <div class="complete-stat-label">已掌握</div>
+              </div>
+              <div class="complete-stat">
+                <div class="complete-stat-value reviews" id="completeReview">0</div>
+                <div class="complete-stat-label">待复习</div>
+              </div>
+            </div>
+            <button class="btn-primary" id="restartBtn">继续学习</button>
+          </div>
+
+          <!-- 操作按钮 -->
+          <div class="card-actions">
+            <button class="action-btn mastered" id="btnMastered">
+              <svg viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
+              <span>掌握</span>
+            </button>
+            <button class="action-btn skip" id="btnSkip">
+              <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+              <span>跳过</span>
+            </button>
+            <button class="action-btn difficult" id="btnDifficult">
+              <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+              <span>陌生</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 词库页面 -->
+      <div id="libraryPage" class="page">
+        <div class="library-header">
+          <div class="search-box">
+            <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+            <input type="text" class="search-input" id="searchInput" placeholder="搜索单词...">
+            <button class="search-clear" id="searchClearBtn" style="display: none;">
+              <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+            </button>
+          </div>
+          <div class="category-dropdown" id="categoryDropdown">
+            <div class="dropdown-trigger">
+              <span id="categoryLabel">分类</span>
+              <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5H7z"/></svg>
+            </div>
+            <div class="dropdown-content">
+              <label class="dropdown-item">
+                <input type="checkbox" id="category-all">
+                <span id="category-all-label">全部</span>
+              </label>
+              <div id="categoryOptions"></div>
+            </div>
+          </div>
+          <div class="filter-row">
+            <div class="filter-tabs">
+              <button class="filter-tab active" data-filter="all">全部</button>
+              <button class="filter-tab" data-filter="new">新词</button>
+              <button class="filter-tab" data-filter="review">待复习</button>
+              <button class="filter-tab" data-filter="mastered">已掌握</button>
+              <button class="filter-tab" data-filter="favorite">收藏</button>
+            </div>
+          </div>
+        </div>
+        <div class="library-container" id="libraryWords">
+          <!-- 动态生成 -->
+        </div>
+      </div>
+
+      <!-- 设置页面 -->
+      <div id="settingsPage" class="page">
+        <div class="settings-container">
+          <!-- 学习设置 -->
+          <div class="settings-section">
+            <h3 class="settings-section-title">学习设置</h3>
+            <div class="setting-item">
+              <div class="setting-info">
+                <h4>每日学习目标</h4>
+                <p>每天学习的单词数量</p>
+              </div>
+              <div class="slider-container">
+                <input type="range" class="slider" id="goalSlider" min="5" max="100" value="20">
+                <span class="slider-value" id="goalValue">20</span>
+              </div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <h4>学习模式</h4>
+                <p>单词出现的顺序</p>
+              </div>
+              <div class="mode-options">
+                <button class="mode-option active" data-mode="sequential">顺序</button>
+                <button class="mode-option" data-mode="random">随机</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 外观设置 -->
+          <div class="settings-section">
+            <h3 class="settings-section-title">外观设置</h3>
+            <div class="setting-item">
+              <div class="setting-info">
+                <h4>卡片背景色</h4>
+                <p>学习卡片的背景颜色</p>
+              </div>
+            </div>
+            <div style="padding: 16px 20px 16px;">
+              <div class="color-options">
+                <div class="color-option" data-color="#E8F5E9" style="background: #E8F5E9;"></div>
+                <div class="color-option" data-color="#E3F2FD" style="background: #E3F2FD;"></div>
+                <div class="color-option" data-color="#FFF3E0" style="background: #FFF3E0;"></div>
+                <div class="color-option" data-color="#F3E5F5" style="background: #F3E5F5;"></div>
+                <div class="color-option" data-color="#ECEFF1" style="background: #ECEFF1;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 朗读设置 -->
+          <div class="settings-section">
+            <h3 class="settings-section-title">朗读设置</h3>
+            <div class="setting-item">
+              <div class="setting-info">
+                <h4>例句朗读</h4>
+                <p>显示释义时，2秒后朗读例句</p>
+              </div>
+              <div class="toggle" id="soundToggle"></div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <h4>音标朗读</h4>
+                <p>卡片切换时，自动朗读音标2遍</p>
+              </div>
+              <div class="toggle" id="phoneticReadToggle"></div>
+            </div>
+          </div>
+
+          <!-- 卡片设置 -->
+          <div class="settings-section">
+            <h3 class="settings-section-title">卡片设置</h3>
+            <div class="setting-item">
+              <div class="setting-info">
+                <h4>卡片翻转</h4>
+                <p>开启后，卡片默认先展示释义和例句</p>
+              </div>
+              <div class="toggle" id="cardDefinitionFirstToggle"></div>
+            </div>
+          </div>
+
+          <!-- 数据管理 -->
+          <div class="settings-section">
+            <h3 class="settings-section-title">数据管理</h3>
+            <div class="setting-item">
+              <div class="setting-info">
+                <h4>清除学习记录</h4>
+                <p>重置学习记录，保留单词数据</p>
+              </div>
+              <button class="btn-secondary attention" id="clearProgressBtn" style="padding: 8px 16px;">清除</button>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <h4>清除所有数据</h4>
+                <p>删除所有单词和设置</p>
+              </div>
+              <button class="btn-secondary attention" id="clearDataBtn" style="padding: 8px 16px;">清除</button>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <h4>导出词库</h4>
+                <p>将词库导出为Excel文件</p>
+              </div>
+              <button class="btn-secondary" id="exportBtn" style="padding: 8px 16px;">导出</button>
+            </div>
+          </div>
+
+          <!-- 关于软件 -->
+          <div class="settings-section">
+            <h3 class="settings-section-title">关于软件</h3>
+            <div class="setting-item about-card">
+              <div class="setting-info">
+                <p>单词卡是一款卡片式单词记录软件，通过正反卡片，显示单词/音标、释义/例句。</p>
+                <!-- <br>
+                <h5>联系我们</h5>
+                <p>作者ccw，欢迎您的意见或建议，邮箱：xxxxx6@qq.com</p>
+                <br> -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- 底部导航 -->
+    <nav class="bottom-nav">
+      <button class="nav-item active" data-page="learn">
+        <svg viewBox="0 0 24 24"><path d="M12 3L1 9l4 2.18v6L12 21l7-3.82v-6l2-1.09V17h2V9L12 3zm6.82 6L12 12.72 5.18 9 12 5.28 18.82 9zM17 15.99l-5 2.73-5-2.73v-3.72L12 15l5-2.73v3.72z"/></svg>
+        <span>学习</span>
+      </button>
+      <button class="nav-item" data-page="library">
+        <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg>
+        <span>词库</span>
+      </button>
+      <button class="nav-item" data-page="settings">
+        <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+        <span>设置</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- 添加单词模态框 -->
+  <div class="modal-overlay" id="addWordModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="modalTitle">添加单词</h2>
+        <button class="modal-close">
+          <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <form id="wordForm">
+          <input type="hidden" id="wordId">
+          <!-- <div class="form-group">
+            <label class="form-label">语言类型</label>
+            <div class="language-options">
+              <button class="language-option active" data-lang="mandarin">英语</button>
+              <button class="language-option" data-lang="cantonese">粤语</button>
+            </div>
+          </div> -->
+          <div class="form-group">
+            <label class="form-label">词汇 *</label>
+            <input type="text" class="form-input" id="wordInput" placeholder="请输入词汇" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">音标 *</label>
+            <input type="text" class="form-input" id="phoneticInput" placeholder="请输入音标">
+          </div>
+          <div class="form-group">
+            <label class="form-label">释义 *</label>
+            <input type="text" class="form-input" id="meaningInput" placeholder="请输入释义" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">例句</label>
+            <textarea class="form-textarea" id="exampleInput" placeholder="请输入例句（可选）"></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">分类</label>
+            <input type="text" class="form-input" id="categoryInput" placeholder="如：日常、旅游、学习、自定义">
+          </div>
+          
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="app.closeModals()">取消</button>
+        <button class="btn-primary" id="saveWordBtn">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导入词库模态框 -->
+  <div class="modal-overlay" id="importModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title">导入词库</h2>
+        <button class="modal-close">
+          <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="import-zone" id="importZone">
+          <svg viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
+          <p>上传Excel文件，请 <span>点击选择</span></p>
+        </div>
+        <input type="file" id="importFile" accept=".json,.csv,.xlsx,.xls" style="display: none;">
+        
+        <div class="import-options">
+          <label class="radio-label">
+            <input type="radio" name="importMode" value="overwrite" checked>
+            <span>覆盖词库</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="importMode" value="append">
+            <span>追加到词库</span>
+          </label>
+        </div>
+        
+        <div class="import-preview" id="importPreview"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="app.closeModals()">取消</button>
+        <button class="btn-primary" id="confirmImportBtn">确认导入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script src="app.js"></script>
+  <script>
+    // 文件上传点击处理
+    document.getElementById('importZone').addEventListener('click', () => {
+      document.getElementById('importFile').click();
+    });
+  </script>
+</body>
+</html>

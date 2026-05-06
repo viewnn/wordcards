@@ -1,0 +1,2504 @@
+// ==================== IndexedDB 数据库操作 ====================
+class VocabDB {
+  constructor() {
+    this.dbName = 'VocabAppDB';
+    this.version = 3;
+    this.db = null;
+  }
+  
+  async deleteDatabase() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(this.dbName);
+      request.onsuccess = () => resolve();
+      request.onerror = () => resolve(); // 忽略删除失败，可能数据库不存在
+      request.onblocked = () => {
+        console.warn('Database deletion blocked');
+        resolve();
+      };
+    });
+  }
+
+  async init() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.dbName, this.version);
+      
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        this.db = request.result;
+        resolve(this.db);
+      };
+      
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        const oldVersion = event.oldVersion;
+        
+        // 词汇表
+        if (!db.objectStoreNames.contains('words')) {
+          const wordStore = db.createObjectStore('words', { keyPath: 'id', autoIncrement: true });
+          wordStore.createIndex('category', 'category', { unique: false });
+          wordStore.createIndex('status', 'status', { unique: false });
+          wordStore.createIndex('createdAt', 'createdAt', { unique: false });
+          wordStore.createIndex('favorite', 'favorite', { unique: false });
+          wordStore.createIndex('language', 'language', { unique: false });
+        } else {
+          const wordStore = event.target.transaction.objectStore('words');
+          // 从版本1升级：添加 favorite 索引
+          if (oldVersion < 2 && !wordStore.indexNames.contains('favorite')) {
+            wordStore.createIndex('favorite', 'favorite', { unique: false });
+          }
+          // 从版本2升级：添加 language 索引
+          if (oldVersion < 3 && !wordStore.indexNames.contains('language')) {
+            wordStore.createIndex('language', 'language', { unique: false });
+          }
+        }
+        
+        // 分类表
+        if (!db.objectStoreNames.contains('categories')) {
+          db.createObjectStore('categories', { keyPath: 'id', autoIncrement: true });
+        }
+        
+        // 设置表
+        if (!db.objectStoreNames.contains('settings')) {
+          db.createObjectStore('settings', { keyPath: 'key' });
+        }
+      };
+    });
+  }
+
+  // 词汇操作
+  async addWord(word) {
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['words'], 'readwrite');
+      const store = transaction.objectStore('words');
+      word.createdAt = new Date().toISOString();
+      word.status = 'new';
+      const request = store.add(word);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async updateWord(word) {
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['words'], 'readwrite');
+      const store = transaction.objectStore('words');
+      const request = store.put(word);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async deleteWord(id) {
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['words'], 'readwrite');
+      const store = transaction.objectStore('words');
+      const request = store.delete(id);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getAllWords() {
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['words'], 'readonly');
+      const store = transaction.objectStore('words');
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getWordsByCategory(category) {
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['words'], 'readonly');
+      const store = transaction.objectStore('words');
+      const index = store.index('category');
+      const request = index.getAll(category);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getWordsByStatus(status) {
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['words'], 'readonly');
+      const store = transaction.objectStore('words');
+      const index = store.index('status');
+      const request = index.getAll(status);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+  
+  async getFavoriteWords() {
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['words'], 'readonly');
+      const store = transaction.objectStore('words');
+      const index = store.index('favorite');
+      const request = index.getAll(true);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async batchAddWords(words) {
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['words'], 'readwrite');
+      const store = transaction.objectStore('words');
+      let count = 0;
+      
+      words.forEach(word => {
+        word.createdAt = new Date().toISOString();
+        word.status = 'new';
+        const request = store.add(word);
+        request.onsuccess = () => count++;
+      });
+      
+      transaction.oncomplete = () => resolve(count);
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+
+  async clearAllWords() {
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['words'], 'readwrite');
+      const store = transaction.objectStore('words');
+      const request = store.clear();
+      
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  // 分类操作
+  async getAllCategories() {
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['categories'], 'readonly');
+      const store = transaction.objectStore('categories');
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async addCategory(category) {
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['categories'], 'readwrite');
+      const store = transaction.objectStore('categories');
+      const request = store.add(category);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async deleteCategory(id) {
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['categories'], 'readwrite');
+      const store = transaction.objectStore('categories');
+      const request = store.delete(id);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  // 设置操作
+  async getSetting(key, defaultValue = null) {
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['settings'], 'readonly');
+      const store = transaction.objectStore('settings');
+      const request = store.get(key);
+      request.onsuccess = () => resolve(request.result ? request.result.value : defaultValue);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async setSetting(key, value) {
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['settings'], 'readwrite');
+      const store = transaction.objectStore('settings');
+      const request = store.put({ key, value });
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+}
+
+// ==================== 主应用类 ====================
+class VocabApp {
+  constructor() {
+    this.db = new VocabDB();
+    this.currentPage = 'learn';
+    this.currentCardIndex = 0;
+    this.todayWords = [];
+    this.isFlipped = false;
+    this.settings = {
+      dailyGoal: 20,
+      cardBgColor: '#E8F5E9',
+      fontSize: 'medium',
+      soundEnabled: false,
+      phoneticAutoRead: false,
+      /** 默认先展示释义面；点击后翻到词汇面 */
+      cardDefinitionFirst: false,
+      learnMode: 'sequential'
+    };
+    this.todayStats = {
+      mastered: 0,
+      review: 0,
+      total: 0
+    };
+    this.searchQuery = '';
+    this.filterStatus = 'all';
+    /** 触摸翻面后浏览器会合成 click，需忽略下一次点击避免立刻翻回正面 */
+    this._suppressNextCardClickFlip = false;
+    this._phoneticReadTimer = null;
+    /** 词库列表当前展示的词条 id → 对象，避免点击喇叭时 await IndexedDB 导致用户手势失效而无法发声 */
+    this._librarySpeakWordsById = new Map();
+  }
+
+  async init() {
+    try {
+      this.measureScrollbarWidth();
+      await this.db.init();
+      await this.loadSettings();
+      await this.loadTodayStats();
+      this.initServiceWorker();
+      this.bindEvents();
+      this.primeSpeechSynthesis();
+      this.render();
+      
+      const words = await this.db.getAllWords();
+      // 尝试自动加载 dict.xlsx 文件（每次启动都检查）
+      await this.autoLoadDict();
+    } catch (error) {
+      console.error('App initialization failed:', error);
+      this.showToast('应用初始化失败，正在尝试修复...');
+      await this.recoverFromError();
+    }
+  }
+  
+  // 自动加载 dict.xlsx 文件
+  async autoLoadDict() {
+    try {
+      const response = await fetch('dict.xlsx');
+      if (!response.ok) {
+        console.log('dict.xlsx 文件不存在，跳过自动加载');
+        return;
+      }
+      
+      const arrayBuffer = await response.arrayBuffer();
+      const data = new Uint8Array(arrayBuffer);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+      
+      const words = this.parseExcel(jsonData);
+      if (!Array.isArray(words) || words.length === 0) {
+        console.log('dict.xlsx 文件内容为空或格式错误');
+        return;
+      }
+      
+      // 获取已存在的单词用于去重
+      const existingWords = await this.db.getAllWords();
+      const existingWordSet = new Set(existingWords.map(w => w.word.toLowerCase()));
+      
+      // 过滤掉已存在的单词
+      const newWords = words.filter(w => !existingWordSet.has(w.word.toLowerCase()));
+      
+      if (newWords.length === 0) {
+        console.log('dict.xlsx 中没有新单词');
+        return;
+      }
+      
+      await this.db.batchAddWords(newWords);
+      this.showToast(`已自动导入 ${newWords.length} 个新单词`);
+      
+      // 如果当前在学习页面，刷新学习会话
+      if (this.currentPage === 'learn') {
+        this.prepareLearnSession();
+      }
+    } catch (error) {
+      console.error('自动加载 dict.xlsx 失败:', error);
+      // 忽略错误，不影响应用启动
+    }
+  }
+  
+  // 测量滚动条宽度
+  measureScrollbarWidth() {
+    const scrollDiv = document.createElement('div');
+    scrollDiv.style.cssText = 'width: 100px; height: 100px; overflow: scroll; position: absolute; top: -9999px;';
+    document.body.appendChild(scrollDiv);
+    const scrollbarWidth = scrollDiv.offsetWidth - scrollDiv.clientWidth;
+    document.body.removeChild(scrollDiv);
+    document.documentElement.style.setProperty('--scrollbar-width', `${scrollbarWidth}px`);
+  }
+  
+  async recoverFromError() {
+    try {
+      await this.db.deleteDatabase();
+      await this.db.init();
+      await this.loadSettings();
+      await this.loadTodayStats();
+      this.bindEvents();
+      this.render();
+      await this.addSampleWords();
+      this.showToast('数据已重置，应用恢复正常');
+    } catch (recoverError) {
+      console.error('Recovery failed:', recoverError);
+      this.showToast('无法恢复，请刷新页面重试');
+    }
+  }
+
+  // 初始化 Service Worker
+  initServiceWorker() {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js')
+        .then(reg => console.log('Service Worker registered'))
+        .catch(err => console.log('Service Worker registration failed:', err));
+    }
+  }
+
+  // 加载设置
+  async loadSettings() {
+    this.settings.dailyGoal = await this.db.getSetting('dailyGoal', 20);
+    this.settings.cardBgColor = await this.db.getSetting('cardBgColor', '#E8F5E9');
+    this.settings.fontSize = await this.db.getSetting('fontSize', 'medium');
+    this.settings.soundEnabled = await this.db.getSetting('soundEnabled', false);
+    this.settings.phoneticAutoRead = await this.db.getSetting('phoneticAutoRead', false);
+    this.settings.cardDefinitionFirst = await this.db.getSetting('cardDefinitionFirst', false);
+    this.settings.learnMode = await this.db.getSetting('learnMode', 'sequential');
+  }
+
+  // 加载今日统计
+  async loadTodayStats() {
+    const today = new Date().toDateString();
+    const savedDate = await this.db.getSetting('statsDate', '');
+    
+    if (savedDate !== today) {
+      this.todayStats = { mastered: 0, review: 0, total: 0 };
+      await this.db.setSetting('statsDate', today);
+      await this.db.setSetting('todayStats', this.todayStats);
+    } else {
+      this.todayStats = await this.db.getSetting('todayStats', { mastered: 0, review: 0, total: 0 });
+    }
+  }
+
+  // 添加示例词汇
+  async addSampleWords() {
+    const sampleWords = [
+      { word: 'serendipity', meaning: '意外发现美好事物的运气', phonetic: '/ˌserənˈdɪpɪti/', example: 'Finding that book was pure serendipity.', category: 'CET-6' },
+      { word: 'ephemeral', meaning: '短暂的，转瞬即逝的', phonetic: '/ɪˈfemərəl/', example: 'Fame is ephemeral.', category: 'CET-6' },
+      { word: 'ubiquitous', meaning: '无处不在的，普遍存在的', phonetic: '/juːˈbɪkwɪtəs/', example: 'Smartphones have become ubiquitous.', category: 'CET-6' },
+      { word: 'eloquent', meaning: '雄辩的，口才好的', phonetic: '/ˈeləkwənt/', example: 'She gave an eloquent speech.', category: 'CET-6' },
+      { word: 'resilient', meaning: '有弹性的，能恢复的', phonetic: '/rɪˈzɪliənt/', example: 'Children are often more resilient than adults.', category: 'CET-6' },
+      { word: 'pragmatic', meaning: '务实的，实用主义的', phonetic: '/præɡˈmætɪk/', example: 'We need a pragmatic approach.', category: 'CET-6' },
+      { word: 'ambiguous', meaning: '模糊的，含糊不清的', phonetic: '/æmˈbɪɡjuəs/', example: 'His statement was ambiguous.', category: 'CET-6' },
+      { word: 'meticulous', meaning: '一丝不苟的，极度仔细的', phonetic: '/məˈtɪkjʊləs/', example: 'She is meticulous about her work.', category: 'CET-6' },
+      { word: 'procrastinate', meaning: '拖延，耽搁', phonetic: '/prəˈkræstɪneɪt/', example: "Don't procrastinate!", category: 'CET-6' },
+      { word: 'catalyst', meaning: '催化剂，诱因', phonetic: '/ˈkætəlɪst/', example: 'Technology was a catalyst for change.', category: 'CET-6' },
+      { word: 'paradigm', meaning: '范式，模式', phonetic: '/ˈpærədaɪm/', example: 'This discovery changed the paradigm.', category: 'GRE' },
+      { word: 'ebullient', meaning: '热情奔放的', phonetic: '/ɪˈbʊliənt/', example: 'She was in an ebullient mood.', category: 'GRE' },
+      { word: 'laconic', meaning: '简洁的，话少的', phonetic: '/ləˈkɒnɪk/', example: 'His laconic reply surprised everyone.', category: 'GRE' },
+      { word: 'sycophant', meaning: '谄媚者，马屁精', phonetic: '/ˈsɪkəfænt/', example: 'He is a sycophant.', category: 'GRE' },
+      { word: 'obsequious', meaning: '谄媚的，奴性的', phonetic: '/əbˈsiːkwiəs/', example: 'The waiter was obsequious.', category: 'GRE' },
+      { word: 'perspicacious', meaning: '敏锐的，有洞察力的', phonetic: '/ˌpɜːspɪˈkeɪʃəs/', example: 'A perspicacious analysis.', category: 'GRE' },
+      { word: 'pulchritude', meaning: '美丽，美貌', phonetic: '/ˈpʌlkrɪtjuːd/', example: 'She possesses remarkable pulchritude.', category: 'GRE' },
+      { word: 'ineffable', meaning: '难以形容的', phonetic: '/ɪnˈefəbl/', example: 'Ineffable joy.', category: 'GRE' },
+      { word: 'quintessential', meaning: '精华的，典型的', phonetic: '/ˌkwɪntɪˈsenʃəl/', example: 'He is the quintessential gentleman.', category: 'GRE' },
+      { word: 'sanguine', meaning: '乐观的，血红的', phonetic: '/ˈsæŋɡwɪn/', example: 'She remained sanguine about the future.', category: 'GRE' }
+    ].map((w) => ({ ...w, definition: w.meaning, language: w.language || '英语' }));
+    
+    await this.db.batchAddWords(sampleWords);
+  }
+
+  // 绑定事件
+  bindEvents() {
+    const self = this;
+    
+    // 导航切换
+    document.querySelectorAll('.nav-item').forEach(item => {
+      item.addEventListener('click', handleNavClick);
+      item.addEventListener('touchstart', handleNavClick);
+    });
+    
+    function handleNavClick(e) {
+      e.preventDefault();
+      // 使用 closest 确保获取到正确的 nav-item 元素
+      const navItem = e.target.closest('.nav-item');
+      if (navItem) {
+        const page = navItem.dataset.page;
+        self.switchPage(page);
+      }
+    }
+
+    // 添加单词按钮
+    const addWordBtn = document.getElementById('addWordBtn');
+    addWordBtn.addEventListener('click', () => self.showAddWordModal());
+    addWordBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.showAddWordModal(); });
+
+    // 学习页空状态快捷添加
+    const emptyAddBtn = document.getElementById('emptyAddBtn');
+    if (emptyAddBtn) {
+      emptyAddBtn.addEventListener('click', () => self.showAddWordModal());
+      emptyAddBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.showAddWordModal(); });
+    }
+    
+    // 导入按钮
+    const importBtn = document.getElementById('importBtn');
+    importBtn.addEventListener('click', () => self.showImportModal());
+    importBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.showImportModal(); });
+    
+    // 模态框关闭
+    document.querySelectorAll('.modal-overlay').forEach(el => {
+      el.addEventListener('click', (e) => {
+        if (e.target === el) self.closeModals();
+      });
+      el.addEventListener('touchstart', (e) => {
+        if (e.target === el) self.closeModals();
+      });
+    });
+    
+    // 关闭按钮
+    document.querySelectorAll('.modal-close').forEach(el => {
+      el.addEventListener('click', () => self.closeModals());
+      el.addEventListener('touchstart', (e) => { e.preventDefault(); self.closeModals(); });
+    });
+    
+    // 首页统计数字点击跳转
+    const statMastered = document.getElementById('statMastered');
+    if (statMastered) {
+      statMastered.addEventListener('click', () => self.handleStatClick('mastered'));
+      statMastered.addEventListener('touchstart', (e) => { e.preventDefault(); self.handleStatClick('mastered'); });
+    }
+    
+    const statReview = document.getElementById('statReview');
+    if (statReview) {
+      statReview.addEventListener('click', () => self.handleStatClick('review'));
+      statReview.addEventListener('touchstart', (e) => { e.preventDefault(); self.handleStatClick('review'); });
+    }
+
+    // 保存单词表单
+    const saveWordBtn = document.getElementById('saveWordBtn');
+    saveWordBtn.addEventListener('click', () => self.saveWord());
+    saveWordBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.saveWord(); });
+    
+    // 导入确认
+    const confirmImportBtn = document.getElementById('confirmImportBtn');
+    confirmImportBtn.addEventListener('click', () => self.confirmImport());
+    confirmImportBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.confirmImport(); });
+    
+    // 文件选择
+    document.getElementById('importFile').addEventListener('change', (e) => self.handleFileSelect(e));
+    
+    // 导入拖拽
+    const importZone = document.getElementById('importZone');
+    importZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      importZone.classList.add('dragover');
+    });
+    importZone.addEventListener('dragleave', () => {
+      importZone.classList.remove('dragover');
+    });
+    importZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      importZone.classList.remove('dragover');
+      if (e.dataTransfer.files.length) {
+        self.handleFileSelect({ target: { files: e.dataTransfer.files } });
+      }
+    });
+
+    // 卡片点击翻转（仅非触摸设备）
+    const flashcard = document.getElementById('flashcard');
+    flashcard.addEventListener('click', handleCardClick);
+    
+    function handleCardClick(e) {
+      if (self._suppressNextCardClickFlip) {
+        self._suppressNextCardClickFlip = false;
+        return;
+      }
+      if (
+        !e.target.closest('.speak-btn') &&
+        !e.target.closest('.favorite-btn') &&
+        !e.target.closest('.language-badge')
+      ) {
+        self.flipCard();
+      }
+    }
+    
+    // 发音 / 收藏：移动端会先 touchstart 再合成 click；document 默认 passive 导致 preventDefault 无效，
+    // 会连续触发两次。用 passive:false + 短时间忽略紧随其后的 click。
+    let lastSpeakTouchTs = 0;
+    let lastFavoriteTouchTs = 0;
+
+    document.addEventListener('click', handleSpeakClick);
+    document.addEventListener('touchstart', handleSpeakClick, { passive: false });
+
+    function handleSpeakClick(e) {
+      const btn = e.target.closest('.speak-btn');
+      if (!btn) return;
+      const isVisible = window.getComputedStyle(btn).display !== 'none';
+      if (!isVisible) return;
+
+      e.stopPropagation();
+      if (e.type === 'click') {
+        if (Date.now() - lastSpeakTouchTs < 450) {
+          if (e.cancelable) e.preventDefault();
+          return;
+        }
+        self.speakCurrentWord();
+        return;
+      }
+      lastSpeakTouchTs = Date.now();
+      if (e.cancelable) e.preventDefault();
+      self.speakCurrentWord();
+    }
+
+    document.addEventListener('click', handleFavoriteClick);
+    document.addEventListener('touchstart', handleFavoriteClick, { passive: false });
+
+    function handleFavoriteClick(e) {
+      const btn = e.target.closest('.favorite-btn');
+      if (!btn) return;
+      const isVisible = window.getComputedStyle(btn).display !== 'none';
+      if (!isVisible) return;
+
+      e.stopPropagation();
+      if (e.type === 'click') {
+        if (Date.now() - lastFavoriteTouchTs < 450) {
+          if (e.cancelable) e.preventDefault();
+          return;
+        }
+        self.toggleFavorite();
+        return;
+      }
+      lastFavoriteTouchTs = Date.now();
+      if (e.cancelable) e.preventDefault();
+      self.toggleFavorite();
+    }
+    
+    // 卡片滑动
+    this.initCardSwipe();
+    
+    // 操作按钮
+    const btnDifficult = document.getElementById('btnDifficult');
+    btnDifficult.addEventListener('click', () => self.markDifficult());
+    btnDifficult.addEventListener('touchstart', (e) => { e.preventDefault(); self.markDifficult(); });
+    
+    const btnSkip = document.getElementById('btnSkip');
+    btnSkip.addEventListener('click', () => self.skipCard());
+    btnSkip.addEventListener('touchstart', (e) => { e.preventDefault(); self.skipCard(); });
+    
+    const btnMastered = document.getElementById('btnMastered');
+    btnMastered.addEventListener('click', () => self.markMastered());
+    btnMastered.addEventListener('touchstart', (e) => { e.preventDefault(); self.markMastered(); });
+    
+    // 重新开始按钮
+    const restartBtn = document.getElementById('restartBtn');
+    restartBtn.addEventListener('click', () => self.restartLearn());
+    restartBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.restartLearn(); });
+
+    // 设置相关
+    this.bindSettingsEvents();
+    
+    // 搜索和筛选
+    this.bindLibraryEvents();
+    
+    // 语言选项切换
+    this.bindLanguageEvents();
+  }
+  
+  // 语言选项事件绑定
+  bindLanguageEvents() {
+    document.querySelectorAll('.language-option').forEach(option => {
+      option.addEventListener('click', (e) => {
+        e.preventDefault();
+        document.querySelectorAll('.language-option').forEach(o => o.classList.remove('active'));
+        option.classList.add('active');
+        
+        const lang = option.dataset.lang;
+        this.applyLanguageFormVisibility(lang);
+      });
+    });
+  }
+
+  applyLanguageFormVisibility(lang) {
+    document.querySelectorAll('.cantonese-fields').forEach(field => {
+      field.style.display = lang === 'cantonese' ? 'block' : 'none';
+    });
+  }
+  
+  // 词库页面事件绑定
+  bindLibraryEvents() {
+    const searchInput = document.getElementById('searchInput');
+    const searchClearBtn = document.getElementById('searchClearBtn');
+    
+    searchInput.addEventListener('input', (e) => {
+      this.searchQuery = e.target.value.toLowerCase();
+      searchClearBtn.style.display = this.searchQuery ? 'flex' : 'none';
+      this.resetPageNum();
+      this.renderLibrary();
+    });
+    
+    searchClearBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      this.searchQuery = '';
+      searchClearBtn.style.display = 'none';
+      this.resetPageNum();
+      this.renderLibrary();
+    });
+    
+    document.querySelectorAll('.filter-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        this.filterStatus = tab.dataset.filter;
+        this.resetPageNum();
+        this.renderLibrary();
+      });
+    });
+    
+    // 分类下拉多选
+    const dropdown = document.getElementById('categoryDropdown');
+    const dropdownTrigger = dropdown.querySelector('.dropdown-trigger');
+    const categoryAll = document.getElementById('category-all');
+    
+    dropdownTrigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dropdown.classList.toggle('active');
+    });
+    
+    // 点击其他地方关闭下拉
+    document.addEventListener('click', (e) => {
+      if (!dropdown.contains(e.target)) {
+        dropdown.classList.remove('active');
+      }
+    });
+    
+    // 全选/取消全选
+    categoryAll.addEventListener('change', (e) => {
+      const checkboxes = document.querySelectorAll('#categoryOptions input[type="checkbox"]');
+      checkboxes.forEach(cb => {
+        cb.checked = e.target.checked;
+      });
+      this.updateSelectedCategories();
+    });
+    
+    // 分类选项变化
+    document.addEventListener('change', (e) => {
+      if (e.target.dataset.category) {
+        const allChecked = document.querySelectorAll('#categoryOptions input[type="checkbox"]:checked').length;
+        const allTotal = document.querySelectorAll('#categoryOptions input[type="checkbox"]').length;
+        categoryAll.checked = allChecked === allTotal && allTotal > 0;
+        this.updateSelectedCategories();
+      }
+    });
+  }
+  
+  // 更新选中的分类
+  updateSelectedCategories() {
+    const checkedBoxes = document.querySelectorAll('#categoryOptions input[type="checkbox"]:checked');
+    this.selectedCategories = Array.from(checkedBoxes).map(cb => cb.dataset.category);
+    
+    const label = document.getElementById('categoryLabel');
+    if (this.selectedCategories.length === 0) {
+      label.textContent = '选择分类';
+    } else if (this.selectedCategories.length === 1) {
+      label.textContent = this.selectedCategories[0];
+    } else {
+      label.textContent = `全部`;
+      // label.textContent = `已选 ${this.selectedCategories.length} 个分类`;
+    }
+    
+    this.resetPageNum();
+    this.renderLibrary();
+  }
+  
+  // 渲染分类选项
+  async renderCategoryOptions() {
+    const words = await this.db.getAllWords();
+    const categories = [...new Set(words.map(w => w.category || '未分类'))];
+    const container = document.getElementById('categoryOptions');
+    
+    // 更新"全部"选项的标签，显示分类总数
+    const allLabel = document.getElementById('category-all-label');
+    if (allLabel) {
+      allLabel.textContent = `全部 (${categories.length})`;
+    }
+    
+    container.innerHTML = categories.map(cat => `
+      <label class="dropdown-item">
+        <input type="checkbox" data-category="${cat}">
+        <span>${cat}</span>
+      </label>
+    `).join('');
+    
+    // 默认全选
+    document.querySelectorAll('#categoryOptions input[type="checkbox"]').forEach(cb => {
+      cb.checked = true;
+    });
+    document.getElementById('category-all').checked = categories.length > 0;
+    this.selectedCategories = categories;
+  }
+  
+  // 渲染分页
+  renderPagination(totalPages) {
+    // 移除旧的分页
+    document.getElementById('pagination')?.remove();
+    
+    if (totalPages <= 1) return;
+    
+    const pagination = document.createElement('div');
+    pagination.id = 'pagination';
+    pagination.className = 'pagination';
+    
+    let html = '';
+    
+    // 上一页
+    html += `<button class="page-btn prev-btn" ${this.currentPageNum === 1 ? 'disabled' : ''}>
+      <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+    </button>`;
+    
+    // 页码按钮
+    for (let i = 1; i <= totalPages; i++) {
+      html += `<button class="page-btn num-btn ${i === this.currentPageNum ? 'active' : ''}" data-page="${i}">${i}</button>`;
+    }
+    
+    // 下一页
+    html += `<button class="page-btn next-btn" ${this.currentPageNum === totalPages ? 'disabled' : ''}>
+      <svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+    </button>`;
+    
+    pagination.innerHTML = html;
+    
+    // 添加到容器
+    const container = document.getElementById('libraryWords');
+    container.appendChild(pagination);
+    
+    // 绑定分页事件
+    pagination.addEventListener('click', (e) => {
+      const btn = e.target.closest('.page-btn');
+      if (!btn || btn.disabled) return;
+      
+      if (btn.classList.contains('prev-btn')) {
+        this.currentPageNum--;
+      } else if (btn.classList.contains('next-btn')) {
+        this.currentPageNum++;
+      } else if (btn.classList.contains('num-btn')) {
+        this.currentPageNum = parseInt(btn.dataset.page);
+      }
+      
+      this.renderLibrary();
+    });
+  }
+  
+  // 重置页码
+  resetPageNum() {
+    this.currentPageNum = 1;
+  }
+
+  // 设置事件绑定
+  bindSettingsEvents() {
+    const self = this;
+    
+    // 每日目标滑块
+    const goalSlider = document.getElementById('goalSlider');
+    const goalValue = document.getElementById('goalValue');
+    goalSlider.addEventListener('input', () => {
+      goalValue.textContent = goalSlider.value;
+    });
+    goalSlider.addEventListener('change', async () => {
+      self.settings.dailyGoal = parseInt(goalSlider.value);
+      await self.db.setSetting('dailyGoal', self.settings.dailyGoal);
+      self.showToast('每日目标已更新');
+      
+      // 如果当前在学习页面，重新准备学习会话并更新进度
+      if (self.currentPage === 'learn') {
+        await self.prepareLearnSession();
+        self.renderFlashcard();
+        self.updateProgress();
+      }
+    });
+
+    // 学习模式
+    document.querySelectorAll('.mode-option').forEach(option => {
+      option.addEventListener('click', handleModeClick);
+      option.addEventListener('touchstart', handleModeClick);
+    });
+    
+    async function handleModeClick(e) {
+      e.preventDefault();
+      const option = e.currentTarget;
+      document.querySelectorAll('.mode-option').forEach(o => o.classList.remove('active'));
+      option.classList.add('active');
+      self.settings.learnMode = option.dataset.mode;
+      await self.db.setSetting('learnMode', self.settings.learnMode);
+      self.showToast(self.settings.learnMode === 'random' ? '已切换为随机模式' : '已切换为顺序模式');
+    }
+
+    // 字体大小
+    document.querySelectorAll('.font-size-option').forEach(option => {
+      option.addEventListener('click', handleFontSizeClick);
+      option.addEventListener('touchstart', handleFontSizeClick);
+    });
+    
+    async function handleFontSizeClick(e) {
+      e.preventDefault();
+      const option = e.currentTarget;
+      document.querySelectorAll('.font-size-option').forEach(o => o.classList.remove('active'));
+      option.classList.add('active');
+      self.settings.fontSize = option.dataset.size;
+      await self.db.setSetting('fontSize', self.settings.fontSize);
+      self.applySettings();
+    }
+
+    // 卡片背景色
+    document.querySelectorAll('.color-option').forEach(option => {
+      option.addEventListener('click', handleColorClick);
+      option.addEventListener('touchstart', handleColorClick);
+    });
+    
+    async function handleColorClick(e) {
+      e.preventDefault();
+      const option = e.currentTarget;
+      document.querySelectorAll('.color-option').forEach(o => o.classList.remove('active'));
+      option.classList.add('active');
+      self.settings.cardBgColor = option.dataset.color;
+      await self.db.setSetting('cardBgColor', self.settings.cardBgColor);
+      self.applySettings();
+    }
+
+    // 音效开关
+    const soundToggle = document.getElementById('soundToggle');
+    soundToggle.addEventListener('click', handleSoundToggle);
+    soundToggle.addEventListener('touchstart', handleSoundToggle);
+    
+    async function handleSoundToggle(e) {
+      e.preventDefault();
+      const toggle = document.getElementById('soundToggle');
+      toggle.classList.toggle('active');
+      self.settings.soundEnabled = toggle.classList.contains('active');
+      await self.db.setSetting('soundEnabled', self.settings.soundEnabled);
+    }
+
+    const phoneticReadToggle = document.getElementById('phoneticReadToggle');
+    if (phoneticReadToggle) {
+      phoneticReadToggle.addEventListener('click', handlePhoneticReadToggle);
+      phoneticReadToggle.addEventListener('touchstart', handlePhoneticReadToggle);
+    }
+
+    async function handlePhoneticReadToggle(e) {
+      e.preventDefault();
+      const toggle = document.getElementById('phoneticReadToggle');
+      toggle.classList.toggle('active');
+      self.settings.phoneticAutoRead = toggle.classList.contains('active');
+      await self.db.setSetting('phoneticAutoRead', self.settings.phoneticAutoRead);
+    }
+
+    const cardDefinitionFirstToggle = document.getElementById('cardDefinitionFirstToggle');
+    if (cardDefinitionFirstToggle) {
+      cardDefinitionFirstToggle.addEventListener('click', handleCardDefinitionFirstToggle);
+      cardDefinitionFirstToggle.addEventListener('touchstart', handleCardDefinitionFirstToggle);
+    }
+
+    async function handleCardDefinitionFirstToggle(e) {
+      e.preventDefault();
+      const toggle = document.getElementById('cardDefinitionFirstToggle');
+      toggle.classList.toggle('active');
+      self.settings.cardDefinitionFirst = toggle.classList.contains('active');
+      await self.db.setSetting('cardDefinitionFirst', self.settings.cardDefinitionFirst);
+      if (self.currentPage === 'learn' && self.todayWords.length > 0) {
+        self.cancelScheduledPhoneticRead();
+        self.showCard(self.currentCardIndex);
+        self.schedulePhoneticReadAfterCardSwitch();
+      }
+    }
+
+    // 清除进度按钮
+    const clearProgressBtn = document.getElementById('clearProgressBtn');
+    clearProgressBtn.addEventListener('click', () => self.clearProgress());
+    clearProgressBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.clearProgress(); });
+    
+    // 清除数据按钮
+    const clearDataBtn = document.getElementById('clearDataBtn');
+    clearDataBtn.addEventListener('click', () => self.clearAllData());
+    clearDataBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.clearAllData(); });
+    
+    // 导出按钮
+    const exportBtn = document.getElementById('exportBtn');
+    exportBtn.addEventListener('click', () => self.exportWords());
+    exportBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.exportWords(); });
+  }
+
+  // 应用设置
+  applySettings() {
+    const flashcard = document.getElementById('flashcard');
+    if (flashcard) {
+      flashcard.style.background = this.settings.cardBgColor;
+    }
+
+    const fontSizes = { small: '14px', medium: '16px', large: '20px' };
+    document.documentElement.style.setProperty('--font-size-md', fontSizes[this.settings.fontSize] || '16px');
+  }
+
+  // 初始化卡片滑动
+  initCardSwipe() {
+    const card = document.getElementById('flashcard');
+    let startX = 0, startY = 0, currentX = 0;
+    let isDragging = false;
+    let isClick = true;
+    let touchStartTime = 0;
+
+    const self = this;
+
+    card.addEventListener('touchstart', (e) => {
+      // 检查是否点击了收藏按钮或发音按钮
+      const target = e.target;
+      if (
+        target.closest('.favorite-btn') ||
+        target.closest('.speak-btn') ||
+        target.closest('.language-badge')
+      ) {
+        isDragging = false;
+        return;
+      }
+      
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      currentX = 0;
+      isDragging = true;
+      isClick = true;
+      touchStartTime = Date.now();
+      card.style.transition = 'none';
+    });
+
+    card.addEventListener('touchmove', (e) => {
+      if (!isDragging) return;
+      currentX = e.touches[0].clientX - startX;
+      const currentY = e.touches[0].clientY - startY;
+      
+      // 只有当滑动超过阈值时才认为是滑动
+      if (Math.abs(currentX) > 10 || Math.abs(currentY) > 10) {
+        isClick = false;
+        // 只在水平滑动为主时处理移动效果
+        if (Math.abs(currentX) > Math.abs(currentY)) {
+          e.preventDefault();
+          card.style.transform = `translateX(${currentX}px) rotate(${currentX * 0.05}deg)`;
+        }
+      }
+    });
+
+    card.addEventListener('touchend', () => {
+      if (!isDragging) return;
+      isDragging = false;
+      card.style.transition = 'transform 0.3s ease';
+      
+      // 判断是否为点击（短时间内的触摸）
+      const touchDuration = Date.now() - touchStartTime;
+      
+      if (isClick && touchDuration < 500) {
+        // 触摸翻面后仍会触发合成 click，避免与 handleCardClick 重复翻面
+        self._suppressNextCardClickFlip = true;
+        self.flipCard();
+      } else if (currentX > 80) {
+        // 向右滑动 - 标记为已掌握
+        card.style.transform = 'translateX(150%) rotate(15deg)';
+        setTimeout(() => {
+          card.style.transition = 'none';
+          card.style.transform = '';
+          self.markMastered();
+        }, 300);
+      } else if (currentX < -80) {
+        // 向左滑动 - 跳过
+        card.style.transform = 'translateX(-150%) rotate(-15deg)';
+        setTimeout(() => {
+          card.style.transition = 'none';
+          card.style.transform = '';
+          self.skipCard();
+        }, 300);
+      } else {
+        // 回到原位
+        card.style.transform = '';
+      }
+      currentX = 0;
+    });
+  }
+
+  // 切换页面
+  switchPage(page) {
+    if (this.currentPage === page) return;
+
+    if (page !== 'learn') {
+      this.cancelScheduledPhoneticRead();
+    }
+    
+    this.currentPage = page;
+    
+    document.querySelectorAll('.nav-item').forEach(item => {
+      item.classList.toggle('active', item.dataset.page === page);
+    });
+    
+    document.querySelectorAll('.page').forEach(p => {
+      p.classList.toggle('active', p.id === `${page}Page`);
+    });
+
+    if (page === 'learn') {
+      this.prepareLearnSession();
+    } else if (page === 'library') {
+      this.renderCategoryOptions();
+      this.renderLibrary();
+    } else if (page === 'settings') {
+      this.renderSettings();
+    }
+  }
+
+  // 渲染页面
+  render() {
+    this.prepareLearnSession();
+    this.applySettings();
+  }
+
+  // 准备学习会话
+  async prepareLearnSession() {
+    this.cancelScheduledPhoneticRead();
+
+    const allWords = await this.db.getAllWords();
+    const newWords = allWords.filter(w => w.status === 'new');
+    const reviewWords = allWords.filter(w => w.status === 'review');
+    
+    // 优先学习新词，然后是待复习的
+    let todayWords = [...newWords, ...reviewWords].slice(0, this.settings.dailyGoal);
+    
+    // 如果今天的量不够，补充其他单词
+    if (todayWords.length < this.settings.dailyGoal && allWords.length > 0) {
+      const remaining = allWords.filter(w => !todayWords.find(t => t.id === w.id));
+      const needed = this.settings.dailyGoal - todayWords.length;
+      todayWords = [...todayWords, ...remaining.slice(0, needed)];
+    }
+    
+    // 随机模式打乱顺序
+    if (this.settings.learnMode === 'random') {
+      todayWords = todayWords.sort(() => Math.random() - 0.5);
+    }
+    
+    this.todayWords = todayWords;
+    this.currentCardIndex = 0;
+    this.todayStats.total = this.todayWords.length;
+    await this.db.setSetting('todayStats', this.todayStats);
+    
+    if (this.todayWords.length > 0) {
+      this.showCard(this.currentCardIndex);
+      document.querySelector('.card-stack').style.display = 'flex';
+      document.querySelector('.complete-container').style.display = 'none';
+      const emptyState = document.getElementById('learnEmptyState');
+      if (emptyState) emptyState.style.display = 'none';
+    } else {
+      this.showEmptyState();
+    }
+    
+    this.updateProgress();
+  }
+
+  // 显示卡片
+  showCard(index) {
+    if (index >= this.todayWords.length) {
+      this.showComplete();
+      return;
+    }
+    
+    const word = this.todayWords[index];
+    const card = document.getElementById('flashcard');
+    const cardInner = card.querySelector('.flashcard-inner');
+    
+    const isCantonese = this.isCantoneseWord(word);
+    const badgeLabel = this.getLanguageBadgeLabel(word);
+    const badgeHtml = badgeLabel
+      ? `<span class="language-badge">${this.escapeHtml(badgeLabel)}</span>`
+      : '';
+    
+    const badgeRowHtml = badgeHtml
+      ? `<div class="flashcard-badge-row">${badgeHtml}</div>`
+      : '';
+
+    cardInner.innerHTML = `
+      <div class="flashcard-front">
+        ${badgeRowHtml}
+        <div class="flashcard-corner-tr">
+          <button class="speak-btn" id="speakBtn">
+          <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.74 2.5-2.26 2.5-4.02zM14 3.23v2.06c2.89 1.19 5 3.65 5 6.71s-2.11 5.52-5 6.71v2.06c4.01-1.29 7-4.95 7-9.77s-2.99-8.48-7-9.77z"/></svg>
+        </button>
+        </div>
+        <button class="favorite-btn ${word.favorite ? 'active' : ''}" id="favoriteBtn">
+          <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+        </button>
+        <div class="word">${word.word}</div>
+        <div class="phonetic">${isCantonese ? (word.jyutping || word.phonetic || '') : (word.phonetic || word.jyutping || '')}</div>
+        ${isCantonese && word.cantonese ? `<div class="cantonese-word">${word.cantonese}</div>` : ''}
+        <div class="tap-hint">点击查看释义</div>
+      </div>
+      <div class="flashcard-back">
+        <div class="flashcard-corner-tr">
+          <button class="speak-btn" id="speakBtnBack">
+          <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.74 2.5-2.26 2.5-4.02zM14 3.23v2.06c2.89 1.19 5 3.65 5 6.71s-2.11 5.52-5 6.71v2.06c4.01-1.29 7-4.95 7-9.77s-2.99-8.48-7-9.77z"/></svg>
+        </button>
+        </div>
+        <button class="favorite-btn ${word.favorite ? 'active' : ''}" id="favoriteBtnBack">
+          <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+        </button>
+        <div class="meaning">${word.definition || word.meaning}</div>
+        <div class="example">${word.example ? `"${word.example}"` : ''}</div>
+        ${isCantonese && word.cantoneseExample ? `<div class="cantonese-example">"${word.cantoneseExample}"</div>` : ''}
+        <div class="tap-hint tap-hint-back">点击查看词汇</div>
+      </div>
+    `;
+    
+    const defFirst = !!this.settings.cardDefinitionFirst;
+    if (defFirst) {
+      card.classList.add('flipped');
+      this.isFlipped = true;
+    } else {
+      card.classList.remove('flipped');
+      this.isFlipped = false;
+    }
+
+    if (this.settings.soundEnabled && this.isFlipped) {
+      setTimeout(() => {
+        this.speakCurrentWord();
+      }, 2000);
+    }
+  }
+
+  // 翻转卡片
+  flipCard() {
+    const card = document.getElementById('flashcard');
+    if (!card) {
+      console.error('Flashcard element not found');
+      return;
+    }
+    card.classList.toggle('flipped');
+    this.isFlipped = !this.isFlipped;
+    
+    // 如果开启了自动朗读，并且翻到释义面，2秒后自动朗读例句/释义
+    if (this.isFlipped && this.settings.soundEnabled) {
+      setTimeout(() => {
+        this.speakCurrentWord();
+      }, 2000);
+    }
+
+    // 释义优先：翻到词汇面时再触发音标自动朗读（切换卡片时若停在释义面则不会误触发）
+    if (!this.isFlipped && this.settings.cardDefinitionFirst) {
+      this.schedulePhoneticReadAfterCardSwitch();
+    }
+  }
+
+  /** 与导入/导出 Excel、CSV 一致的列顺序（第一行为表头） */
+  importExportHeaders() {
+    return ['word', 'meaning', 'phonetic', 'example', 'category', 'language', 'jyutping', 'cantonese', 'cantoneseExample'];
+  }
+
+  escapeHtml(text) {
+    return String(text ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  resolveImportHeaderKey(cell) {
+    const raw = String(cell ?? '').trim();
+    if (!raw) return null;
+    const lowerAscii = /^[\x00-\x7f]+$/.test(raw) ? raw.toLowerCase() : raw;
+    const pairs = [
+      ['word', ['word', '词汇']],
+      ['meaning', ['meaning', '释义']],
+      ['phonetic', ['phonetic', '音标']],
+      ['example', ['example', '例句']],
+      ['category', ['category', '分类']],
+      ['language', ['language', '语言']],
+      ['jyutping', ['jyutping', '粤拼']],
+      ['cantonese', ['cantonese', '粤语写法', '粤语词条']],
+      ['cantoneseExample', ['cantoneseexample', 'cantonese_example', '粤语例句']]
+    ];
+    for (const [key, aliases] of pairs) {
+      for (const a of aliases) {
+        const na = /^[\x00-\x7f]+$/.test(a) ? a.toLowerCase() : a;
+        if (lowerAscii === na || raw === a) return key;
+      }
+    }
+    return null;
+  }
+
+  buildImportColumnMap(headerCells) {
+    const colMap = {};
+    headerCells.forEach((cell, idx) => {
+      const key = this.resolveImportHeaderKey(cell);
+      if (key) colMap[key] = idx;
+    });
+    return colMap.word !== undefined ? colMap : null;
+  }
+
+  /** 无 recognized 表头时使用的历史列下标 */
+  getLegacyImportColumnMap() {
+    return {
+      word: 0,
+      meaning: 1,
+      phonetic: 2,
+      example: 3,
+      category: 4,
+      language: 5,
+      jyutping: 6,
+      cantoneseExample: 7
+    };
+  }
+
+  parseCSVLine(line) {
+    const out = [];
+    let cur = '';
+    let i = 0;
+    let inQ = false;
+    while (i < line.length) {
+      const c = line[i];
+      if (inQ) {
+        if (c === '"') {
+          if (line[i + 1] === '"') {
+            cur += '"';
+            i += 2;
+            continue;
+          }
+          inQ = false;
+          i++;
+          continue;
+        }
+        cur += c;
+        i++;
+        continue;
+      }
+      if (c === '"') {
+        inQ = true;
+        i++;
+        continue;
+      }
+      if (c === ',') {
+        out.push(cur.trim());
+        cur = '';
+        i++;
+        continue;
+      }
+      cur += c;
+      i++;
+    }
+    out.push(cur.trim());
+    return out;
+  }
+
+  normalizeImportedWord(raw) {
+    const meaning = String(raw.meaning ?? raw.definition ?? '').trim();
+    const wordText = String(raw.word ?? '').trim();
+    let language = String(raw.language ?? '').trim();
+    if (!language) {
+      const jp = String(raw.jyutping ?? '').trim();
+      if (jp && /[\u4e00-\u9fff]/.test(wordText)) language = '粤语';
+      else if (/[\u4e00-\u9fff]/.test(wordText)) language = '中文';
+      else language = '英语';
+    }
+    return {
+      word: wordText,
+      meaning,
+      definition: meaning,
+      phonetic: String(raw.phonetic ?? '').trim(),
+      example: String(raw.example ?? '').trim(),
+      category: String(raw.category ?? '').trim() || '未分类',
+      language,
+      jyutping: String(raw.jyutping ?? '').trim(),
+      cantonese: String(raw.cantonese ?? '').trim(),
+      cantoneseExample: String(raw.cantoneseExample ?? '').trim(),
+      favorite: !!raw.favorite,
+      status: raw.status || 'new',
+      reviewCount: raw.reviewCount ?? 0,
+      lastReview: raw.lastReview ?? null,
+      nextReview: raw.nextReview ?? null
+    };
+  }
+
+  /**
+   * 朗读用语种：english（含 legacy mandarin 英词卡）、cantonese、mandarin（普通话汉字）
+   */
+  getSpeechKind(word) {
+    if (!word) return 'english';
+    const raw = String(word.language || '').trim();
+    const low = raw.toLowerCase();
+    if (low === 'mandarin') return 'english';
+    if (/粤语|广东话|粤語|廣東話/i.test(raw) || low === 'cantonese' || low === 'yue' || low === 'zh-yue') {
+      return 'cantonese';
+    }
+    if (/英语|英文/i.test(raw) || low === 'english' || low === 'en') return 'english';
+    if (/普通话|国语|中文|汉语/i.test(raw) || low === 'chinese' || low === 'zh-cn') return 'mandarin';
+    if ((word.cantonese || '').trim()) return 'cantonese';
+    const jp = (word.jyutping || '').trim();
+    const phon = (word.phonetic || '').trim();
+    const jyutpingLike =
+      jp.length > 0 ||
+      (phon.length > 0 &&
+        /[a-z]{1,6}\d/i.test(phon) &&
+        !/[ˈˌɜɪʊθðʃʒŋː]/.test(phon));
+    const w = word.word || '';
+    if (jyutpingLike && /[\u4e00-\u9fff]/.test(w)) return 'cantonese';
+    if (/[\u4e00-\u9fff]/.test(w)) return 'mandarin';
+    return 'english';
+  }
+
+  inferLanguageBadgeLabel(word) {
+    const k = this.getSpeechKind(word);
+    if (k === 'cantonese') return '粤语';
+    if (k === 'english') return '英语';
+    if (k === 'mandarin') return '中文';
+    return '';
+  }
+
+  /** 卡片角标：优先使用表中 language 列原文，兼容旧数据 */
+  getLanguageBadgeLabel(word) {
+    let raw = String(word.language || '').trim();
+    const low = raw.toLowerCase();
+    if (low === 'mandarin') raw = '英语';
+    else if (low === 'cantonese') raw = '粤语';
+    else if (low === 'chinese') raw = '中文';
+    if (raw) return raw;
+    return this.inferLanguageBadgeLabel(word);
+  }
+
+  /** 导出 language 列：与导入常用写法一致，便于往返编辑 */
+  formatLanguageForExport(word) {
+    const raw = String(word.language || '').trim();
+    const low = raw.toLowerCase();
+    if (low === 'mandarin') return '英语';
+    if (low === 'cantonese') return '粤语';
+    if (low === 'chinese') return '中文';
+    if (raw) return raw;
+    return this.inferLanguageBadgeLabel(word);
+  }
+
+  isCantoneseWord(word) {
+    return this.getSpeechKind(word) === 'cantonese';
+  }
+
+  /** 按语种设置语速、音高（英语略接近自然语流，减轻生硬感） */
+  applyUtteranceProsody(utterance, lang) {
+    const low = (lang || '').toLowerCase();
+    utterance.volume = 1;
+    if (low.startsWith('en')) {
+      utterance.rate = 0.94;
+      utterance.pitch = 1;
+    } else if (low.startsWith('zh-hk')) {
+      utterance.rate = 0.88;
+      utterance.pitch = 1;
+    } else {
+      utterance.rate = 0.85;
+      utterance.pitch = 1;
+    }
+  }
+
+  /**
+   * 在可用音色中选择较自然的美式英语（优先 en-US、高质量/神经网络等命名）
+   */
+  pickBestEnglishVoice(voices) {
+    if (!voices || voices.length === 0) return null;
+    const candidates = voices.filter((v) => (v.lang || '').toLowerCase().startsWith('en'));
+    if (candidates.length === 0) return null;
+
+    const rank = (v) => {
+      const n = (v.name || '').toLowerCase();
+      const l = (v.lang || '').toLowerCase();
+      let s = 0;
+      if (l === 'en-us') s += 100;
+      else if (l.startsWith('en-us')) s += 95;
+      else if (l === 'en-gb') s += 72;
+      else if (l.startsWith('en-gb')) s += 68;
+      else s += 45;
+
+      try {
+        if (v.localService === true) s += 12;
+      } catch (e) {
+        /* ignore */
+      }
+
+      if (n.includes('google') && (n.includes('us') || n.includes('english'))) s += 38;
+      else if (n.includes('google')) s += 22;
+      if (n.includes('natural')) s += 30;
+      if (n.includes('neural')) s += 30;
+      if (n.includes('premium')) s += 18;
+      if (n.includes('microsoft')) s += 14;
+      if (n.includes('enhanced')) s += 14;
+      if (n.includes('samantha') || n.includes('aaron') || n.includes('ava')) s += 10;
+      if (n.includes('compact')) s -= 28;
+      if (n.includes('embedded')) s -= 18;
+      return s;
+    };
+
+    let best = candidates[0];
+    let bestScore = rank(best);
+    for (let i = 1; i < candidates.length; i++) {
+      const sc = rank(candidates[i]);
+      if (sc > bestScore) {
+        best = candidates[i];
+        bestScore = sc;
+      }
+    }
+    return best;
+  }
+  
+  /** 尽早枚举语音；部分浏览器需 voiceschanged 后才填充列表 */
+  primeSpeechSynthesis() {
+    if (!('speechSynthesis' in window)) return;
+    try {
+      window.speechSynthesis.getVoices();
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  // 发音功能
+  speakWord(text, lang = 'zh-CN') {
+    if (!text) return;
+
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+
+    synth.cancel();
+
+    try {
+      if (synth.paused) synth.resume();
+    } catch (e) {
+      /* ignore */
+    }
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = lang;
+    this.applyUtteranceProsody(utterance, lang);
+
+    let spoken = false;
+    let tShort = null;
+    let tFallback = null;
+    const cleanup = () => {
+      synth.removeEventListener('voiceschanged', onVoices);
+      if (tShort != null) {
+        clearTimeout(tShort);
+        tShort = null;
+      }
+      if (tFallback != null) {
+        clearTimeout(tFallback);
+        tFallback = null;
+      }
+    };
+    const speakNow = (voices) => {
+      if (spoken) return;
+      spoken = true;
+      cleanup();
+      this.trySpeakWithVoice(utterance, lang, voices || []);
+    };
+    function onVoices() {
+      const v = synth.getVoices();
+      if (v.length > 0) speakNow(v);
+    }
+
+    let voices = synth.getVoices();
+    if (voices.length > 0) {
+      speakNow(voices);
+      return;
+    }
+
+    synth.addEventListener('voiceschanged', onVoices);
+    synth.getVoices();
+
+    tShort = setTimeout(() => {
+      const v = synth.getVoices();
+      if (v.length > 0) speakNow(v);
+    }, 120);
+
+    tFallback = setTimeout(() => {
+      speakNow(synth.getVoices());
+    }, 1800);
+  }
+  
+  trySpeakWithVoice(utterance, lang, voices) {
+    if (!voices || voices.length === 0) {
+      window.speechSynthesis.speak(utterance);
+      return;
+    }
+    const want = (lang || '').toLowerCase();
+    let voice = null;
+
+    // 粤语必须用 zh-HK / Cantonese 音色；勿用「首个 zh」以免落到普通话
+    if (want === 'zh-hk' || want.startsWith('zh-hk')) {
+      const nameHints = (v) => {
+        const n = (v.name || '').toLowerCase();
+        const l = (v.lang || '').toLowerCase();
+        return (
+          l === 'zh-hk' ||
+          l.startsWith('zh-hk') ||
+          l.endsWith('-hk') ||
+          n.includes('cantonese') ||
+          n.includes('hong kong') ||
+          n.includes('hongkong') ||
+          n.includes('香港') ||
+          n.includes('粤语') ||
+          n.includes('粵語')
+        );
+      };
+      voice = voices.find(v => (v.lang || '').toLowerCase() === 'zh-hk') ||
+        voices.find(v => (v.lang || '').toLowerCase().startsWith('zh-hk')) ||
+        voices.find(nameHints);
+      if (!voice) {
+        const txt = (utterance.text || '').trim();
+        const latinJyutpingLike =
+          txt.length > 0 &&
+          !/[\u4e00-\u9fff]/.test(txt) &&
+          /[a-z]{1,6}[1-6]/i.test(txt);
+        if (latinJyutpingLike) {
+          utterance.lang = 'en-US';
+          this.applyUtteranceProsody(utterance, 'en-US');
+          voice = this.pickBestEnglishVoice(voices);
+        } else {
+          voice = voices.find(v => (v.lang || '').toLowerCase().startsWith('zh'));
+        }
+      }
+    } else if (want.startsWith('en')) {
+      voice = this.pickBestEnglishVoice(voices);
+    } else if (want.startsWith('zh')) {
+      voice =
+        voices.find(v => (v.lang || '').toLowerCase() === want) ||
+        voices.find(v => (v.lang || '').toLowerCase().startsWith(want.split('-')[0] + '-' + (want.split('-')[1] || ''))) ||
+        voices.find(v => (v.lang || '').toLowerCase() === 'zh-cn') ||
+        voices.find(v => (v.lang || '').toLowerCase().startsWith('zh-cn')) ||
+        voices.find(v => (v.lang || '').toLowerCase().startsWith('zh'));
+    } else {
+      voice =
+        voices.find(v => (v.lang || '').toLowerCase() === want) ||
+        voices.find(v => (v.lang || '').toLowerCase().startsWith(want.split('-')[0]));
+    }
+
+    if (!voice) {
+      voice =
+        voices.find(v => (v.lang || '').toLowerCase().startsWith(want.split('-')[0])) ||
+        voices.find(v => (v.lang || '').toLowerCase().startsWith('en'));
+    }
+
+    if (voice) utterance.voice = voice;
+    window.speechSynthesis.speak(utterance);
+  }
+  
+  /** 与学习卡正面一致：按词条语言朗读词汇（依据语种 / 音标对应的发音逻辑） */
+  speakWordEntryFront(word) {
+    if (!word) return;
+    const kind = this.getSpeechKind(word);
+    let text;
+    let lang = 'en-US';
+    if (kind === 'cantonese') {
+      text = (word.cantonese || word.word || '').trim();
+      lang = 'zh-HK';
+    } else if (kind === 'mandarin') {
+      text = (word.word || '').trim();
+      lang = 'zh-CN';
+    } else {
+      text = this.getEnglishLemmaForSpeech(word);
+      lang = 'en-US';
+    }
+    if (!text) return;
+    this.speakWord(text, lang);
+  }
+
+  // 朗读单词
+  speakCurrentWord() {
+    if (this.currentCardIndex >= this.todayWords.length) return;
+    const word = this.todayWords[this.currentCardIndex];
+    const kind = this.getSpeechKind(word);
+    
+    if (this.isFlipped) {
+      // 卡片背面：优先播放例句，没有例句时播放释义
+      const text = (word.example || '').trim() || word.definition || word.meaning || '';
+      const lang = kind === 'cantonese' ? 'zh-HK' : 'zh-CN';
+      this.speakWord(text, lang);
+    } else {
+      this.speakWordEntryFront(word);
+    }
+  }
+  
+  // 切换收藏状态
+  async toggleFavorite(wordId) {
+    let word;
+    
+    if (wordId) {
+      // 根据id查找单词
+      const words = await this.db.getAllWords();
+      word = words.find(w => w.id === wordId);
+      if (!word) return;
+    } else {
+      // 使用当前学习的单词
+      if (this.currentCardIndex >= this.todayWords.length) return;
+      word = this.todayWords[this.currentCardIndex];
+    }
+    
+    word.favorite = !word.favorite;
+    await this.db.updateWord(word);
+    
+    // 如果是学习模式，同步更新 todayWords 数组中的对象
+    if (!wordId && this.todayWords[this.currentCardIndex]) {
+      this.todayWords[this.currentCardIndex].favorite = word.favorite;
+    }
+    
+    // 更新UI
+    document.querySelectorAll('.favorite-btn').forEach(btn => {
+      btn.classList.toggle('active', word.favorite);
+    });
+    
+    this.showToast(word.favorite ? '已添加收藏' : '已取消收藏');
+  }
+
+  // 标记为困难
+  async markDifficult() {
+    if (this.currentCardIndex >= this.todayWords.length) return;
+    
+    const word = this.todayWords[this.currentCardIndex];
+    word.status = 'review';
+    await this.db.updateWord(word);
+    this.todayStats.review++;
+    await this.db.setSetting('todayStats', this.todayStats);
+    
+    this.showToast('已标记为需复习');
+    this.nextCard();
+  }
+
+  // 跳过卡片
+  skipCard() {
+    // 将当前卡片移到队列末尾
+    const skipped = this.todayWords.splice(this.currentCardIndex, 1)[0];
+    this.todayWords.push(skipped);
+    this.showCard(this.currentCardIndex);
+    this.schedulePhoneticReadAfterCardSwitch();
+  }
+
+  // 标记为已掌握
+  async markMastered() {
+    if (this.currentCardIndex >= this.todayWords.length) return;
+    
+    const word = this.todayWords[this.currentCardIndex];
+    word.status = 'mastered';
+    await this.db.updateWord(word);
+    this.todayStats.mastered++;
+    await this.db.setSetting('todayStats', this.todayStats);
+    
+    this.showToast('太棒了！已掌握');
+    this.nextCard();
+  }
+
+  // 下一张卡片
+  nextCard() {
+    this.currentCardIndex++;
+    if (this.currentCardIndex >= this.todayWords.length) {
+      this.showComplete();
+    } else {
+      const card = document.getElementById('flashcard');
+      card.style.transform = 'translateX(100%) rotate(15deg)';
+      setTimeout(() => {
+        card.style.transition = 'none';
+        card.style.transform = 'translateX(-100%) rotate(-15deg)';
+        this.showCard(this.currentCardIndex);
+        setTimeout(() => {
+          card.style.transition = 'transform 0.3s ease';
+          card.style.transform = '';
+          this.schedulePhoneticReadAfterCardSwitch();
+        }, 20);
+      }, 150);
+    }
+    this.updateProgress();
+  }
+
+  cancelScheduledPhoneticRead() {
+    if (this._phoneticReadTimer != null) {
+      clearTimeout(this._phoneticReadTimer);
+      this._phoneticReadTimer = null;
+    }
+  }
+
+  /** 切换卡片约 0.5 秒后自动朗读音标两遍（需开启「音标朗读」） */
+  schedulePhoneticReadAfterCardSwitch() {
+    if (!this.settings.phoneticAutoRead) return;
+    if (this.currentPage !== 'learn') return;
+    if (this.settings.cardDefinitionFirst && this.isFlipped) return;
+
+    this.cancelScheduledPhoneticRead();
+
+    this._phoneticReadTimer = setTimeout(() => {
+      this._phoneticReadTimer = null;
+      if (!this.settings.phoneticAutoRead || this.currentPage !== 'learn') return;
+      if (this.currentCardIndex >= this.todayWords.length) return;
+      const word = this.todayWords[this.currentCardIndex];
+      this.speakPhoneticTwice(word);
+    }, 500);
+  }
+
+  /** 自动朗读音标时选用的系统 TTS 语言（须随词条语种切换，不能仅靠音标是否为拉丁字母判断） */
+  getLangForPhoneticAutoRead(word, phoneticText) {
+    const kind = this.getSpeechKind(word);
+    if (kind === 'cantonese') return 'zh-HK';
+    if (kind === 'mandarin') return 'zh-CN';
+    if (/[\u4e00-\u9fff]/.test(phoneticText || '')) return 'zh-CN';
+    return 'en-US';
+  }
+
+  /**
+   * 自动朗读用的文本：粤语词条优先「粤拼」列，避免仍读英语音标列；
+   * 其它语种优先 phonetic，其次 jyutping。
+   */
+  getPhoneticAutoReadRaw(word) {
+    if (!word) return '';
+    const jp = (word.jyutping || '').trim();
+    const ph = (word.phonetic || '').trim();
+    if (this.getSpeechKind(word) === 'cantonese') {
+      return jp || ph;
+    }
+    return ph || jp;
+  }
+
+  /**
+   * 是否为常见英语 IPA 书写形式。浏览器 TTS 无法按音标朗读，只能读「单词拼写」才相对标准。
+   */
+  looksLikeEnglishIPA(s) {
+    const t = String(s || '');
+    if (!t.trim()) return false;
+    if (/^\s*\/.+\/\s*$/.test(t.replace(/\s/g, ''))) return true;
+    if (/^\s*\//.test(t) || /\/\s*$/.test(t)) return true;
+    return /[ˈˌəɛɪʊɔæɑɒɝθðʃʒŋːˑ]/.test(t);
+  }
+
+  /**
+   * 英语手动朗读（与学习卡正面一致）：优先读词条正文；
+   * 若正文误写成 IPA，则尝试读「音标」列里非 IPA 的拼写提示。
+   */
+  getEnglishLemmaForSpeech(word) {
+    let t = (word.word || '').trim();
+    if (!t) return '';
+    if (!this.looksLikeEnglishIPA(t)) return t;
+    const ph = (word.phonetic || '').trim();
+    if (ph && !this.looksLikeEnglishIPA(ph)) {
+      const cleaned = ph.replace(/^\/+|\/+$/g, '').trim();
+      return cleaned || ph;
+    }
+    return t;
+  }
+
+  /** 粤拼拉丁串加分音节空格，便于 TTS 分拍（仅粤语罗马字形态时处理） */
+  normalizeCantoneseRomanizationForSpeech(text) {
+    let t = String(text || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+    if (!t || /[\u4e00-\u9fff]/.test(t)) return String(text || '').trim();
+    if (!t.includes(' ')) {
+      const parts = t.match(/[a-z]+[1-6]/g);
+      const compact = t.replace(/[^a-z0-9]/gi, '');
+      if (parts && parts.join('') === compact) {
+        t = parts.join(' ');
+      }
+    }
+    return t;
+  }
+
+  /** 朗读音标/粤拼字符串两遍；无内容则跳过 */
+  speakPhoneticTwice(word) {
+    if (!word || !this.settings.phoneticAutoRead) return;
+    const raw = this.getPhoneticAutoReadRaw(word);
+    if (!raw) return;
+
+    let text = raw.replace(/^\/+|\/+$/g, '').trim();
+    if (!text) text = raw;
+
+    const kind = this.getSpeechKind(word);
+    if (kind === 'english' && this.looksLikeEnglishIPA(raw)) {
+      const lemma = this.getEnglishLemmaForSpeech(word);
+      if (lemma) text = lemma;
+    }
+
+    if (kind === 'cantonese') {
+      text = this.normalizeCantoneseRomanizationForSpeech(text);
+    }
+
+    window.speechSynthesis.cancel();
+
+    const lang = this.getLangForPhoneticAutoRead(word, text);
+
+    let started = false;
+    const run = () => {
+      if (started) return;
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length === 0) return;
+      started = true;
+      window.speechSynthesis.onvoiceschanged = null;
+
+      const u1 = new SpeechSynthesisUtterance(text);
+      u1.lang = lang;
+      this.applyUtteranceProsody(u1, lang);
+      u1.onend = () => {
+        const u2 = new SpeechSynthesisUtterance(text);
+        u2.lang = lang;
+        this.applyUtteranceProsody(u2, lang);
+        this.trySpeakWithVoice(u2, lang, window.speechSynthesis.getVoices());
+      };
+      this.trySpeakWithVoice(u1, lang, voices);
+    };
+
+    let voices = window.speechSynthesis.getVoices();
+    if (voices.length === 0) {
+      window.speechSynthesis.onvoiceschanged = run;
+      setTimeout(run, 100);
+    } else {
+      run();
+    }
+  }
+
+  // 更新进度
+  updateProgress() {
+    const progress = this.todayWords.length > 0 
+      ? Math.round((this.currentCardIndex / this.todayWords.length) * 100) 
+      : 0;
+    
+    document.getElementById('progressFill').style.width = `${progress}%`;
+    document.getElementById('progressText').textContent = `${this.currentCardIndex}/${this.todayWords.length}`;
+    
+    document.getElementById('statMastered').textContent = this.todayStats.mastered;
+    document.getElementById('statReview').textContent = this.todayStats.review;
+    
+    // 更新可点击状态
+    const statMastered = document.getElementById('statMastered');
+    const statReview = document.getElementById('statReview');
+    if (statMastered) {
+      statMastered.style.cursor = this.todayStats.mastered >= 1 ? 'pointer' : 'default';
+      statMastered.style.opacity = this.todayStats.mastered >= 1 ? '1' : '0.6';
+    }
+    if (statReview) {
+      statReview.style.cursor = this.todayStats.review >= 1 ? 'pointer' : 'default';
+      statReview.style.opacity = this.todayStats.review >= 1 ? '1' : '0.6';
+    }
+  }
+  
+  // 处理统计数字点击
+  handleStatClick(filter) {
+    const count = filter === 'mastered' ? this.todayStats.mastered : this.todayStats.review;
+    if (count >= 1) {
+      this.filterStatus = filter;
+      this.switchPage('library');
+    }
+  }
+
+  // 显示完成页面
+  showComplete() {
+    document.querySelector('.card-stack').style.display = 'none';
+    document.querySelector('.complete-container').style.display = 'flex';
+    
+    document.getElementById('completeMastered').textContent = this.todayStats.mastered;
+    document.getElementById('completeReview').textContent = this.todayStats.review;
+  }
+
+  // 显示空状态
+  showEmptyState() {
+    document.querySelector('.card-stack').style.display = 'none';
+    const emptyState = document.getElementById('learnEmptyState');
+    if (emptyState) emptyState.style.display = 'flex';
+  }
+
+  // 重新开始学习
+  restartLearn() {
+    this.prepareLearnSession();
+  }
+
+  // ==================== 词库页面 ====================
+  async renderLibrary() {
+    // 更新筛选按钮状态
+    document.querySelectorAll('.filter-tab').forEach(tab => {
+      tab.classList.toggle('active', tab.dataset.filter === this.filterStatus);
+    });
+    
+    let words = await this.db.getAllWords();
+    
+    // 应用状态筛选（包括收藏筛选）
+    if (this.filterStatus !== 'all') {
+      if (this.filterStatus === 'favorite') {
+        words = words.filter(w => w.favorite);
+      } else {
+        words = words.filter(w => w.status === this.filterStatus);
+      }
+    }
+    
+    // 应用分类筛选
+    if (this.selectedCategories && this.selectedCategories.length > 0) {
+      words = words.filter(w => this.selectedCategories.includes(w.category || '未分类'));
+    }
+    
+    // 应用搜索
+    if (this.searchQuery) {
+      const q = this.searchQuery;
+      words = words.filter(w => {
+        const mean = (w.definition || w.meaning || '').toLowerCase();
+        return w.word.toLowerCase().includes(q) || mean.includes(q);
+      });
+    }
+    
+    const container = document.getElementById('libraryWords');
+    
+    if (words.length === 0) {
+      this._librarySpeakWordsById = new Map();
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+          </div>
+          <h3 class="empty-title">词库为空</h3>
+          <p class="empty-desc">点击上方按钮添加单词或导入词库开始学习</p>
+        </div>
+      `;
+      document.getElementById('pagination')?.remove();
+      return;
+    }
+
+    this._librarySpeakWordsById = new Map(words.map((w) => [w.id, w]));
+
+    // 按分类分组
+    const grouped = {};
+    words.forEach(word => {
+      const cat = word.category || '未分类';
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(word);
+    });
+    
+    const categories = Object.keys(grouped);
+
+    let html = '';
+    for (const category of categories) {
+      const categoryWords = grouped[category];
+      html += `
+        <div class="category-section">
+          <h3 class="category-title">${category} (${categoryWords.length})</h3>
+          <div class="word-list">
+            ${categoryWords.map(word => `
+                <div class="word-item" data-id="${word.id}">
+                  <div class="word-info">
+                    <h3>${word.word}${word.favorite ? ' ' : ''}</h3>
+                    <p>${word.definition || word.meaning}</p>
+                  </div>
+                  <div class="word-status">
+                    ${this.filterStatus === 'favorite' ? `
+                      <div class="word-actions">
+                        <button type="button" class="word-action-btn library-speak-btn" data-id="${word.id}" title="发音" aria-label="发音">
+                          <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.74 2.5-2.26 2.5-4.02zM14 3.23v2.06c2.89 1.19 5 3.65 5 6.71s-2.11 5.52-5 6.71v2.06c4.01-1.29 7-4.95 7-9.77s-2.99-8.48-7-9.77z"/></svg>
+                        </button>
+                        <button type="button" class="word-action-btn unfavorite-btn" data-id="${word.id}">
+                          <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+                        </button>
+                      </div>
+                    ` : `
+                      ${word.favorite ? `
+                        <span class="favorite-badge">★</span>
+                      ` : ''}
+                      <span class="status-badge ${word.status}">${
+                        word.status === 'mastered' ? '已掌握' : 
+                        word.status === 'review' ? '待复习' : '新词'
+                      }</span>
+                      <div class="word-actions">
+                        <button type="button" class="word-action-btn library-speak-btn" data-id="${word.id}" title="发音" aria-label="发音">
+                          <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.74 2.5-2.26 2.5-4.02zM14 3.23v2.06c2.89 1.19 5 3.65 5 6.71s-2.11 5.52-5 6.71v2.06c4.01-1.29 7-4.95 7-9.77s-2.99-8.48-7-9.77z"/></svg>
+                        </button>
+                        <button type="button" class="word-action-btn edit-btn" data-id="${word.id}">
+                          <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                        </button>
+                      <button type="button" class="word-action-btn delete-btn" data-id="${word.id}">
+                        <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                      </button>
+                    </div>
+                  `}
+                  </div>
+                </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+    
+    container.innerHTML = html;
+
+    // 绑定编辑和删除事件
+    container.querySelectorAll('.library-speak-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = parseInt(btn.dataset.id, 10);
+        const word = this._librarySpeakWordsById.get(id);
+        if (word) this.speakWordEntryFront(word);
+      });
+    });
+
+    container.querySelectorAll('.edit-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = parseInt(btn.dataset.id);
+        this.editWord(id);
+      });
+    });
+
+    container.querySelectorAll('.delete-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = parseInt(btn.dataset.id);
+        await this.deleteWord(id);
+        this.renderLibrary();
+      });
+    });
+    
+    // 取消收藏按钮事件
+    container.querySelectorAll('.unfavorite-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = parseInt(btn.dataset.id);
+        await this.toggleFavorite(id);
+        this.renderLibrary();
+      });
+    });
+  }
+
+  // 编辑单词
+  async editWord(id) {
+    const words = await this.db.getAllWords();
+    const word = words.find(w => w.id === id);
+    if (!word) return;
+
+    document.getElementById('wordId').value = word.id;
+    document.getElementById('wordInput').value = word.word;
+    document.getElementById('meaningInput').value = word.definition || word.meaning || '';
+    document.getElementById('phoneticInput').value = word.phonetic || '';
+    document.getElementById('exampleInput').value = word.example || '';
+    document.getElementById('categoryInput').value = word.category || '';
+
+    // 语言回显
+    const lang = word.language || 'mandarin';
+    document.querySelectorAll('.language-option').forEach(o => {
+      o.classList.toggle('active', o.dataset.lang === lang);
+    });
+    this.applyLanguageFormVisibility(lang);
+
+    // 粤语字段回显
+    const cantoneseInput = document.getElementById('cantoneseInput');
+    const jyutpingInput = document.getElementById('jyutpingInput');
+    const cantoneseExampleInput = document.getElementById('cantoneseExampleInput');
+    if (cantoneseInput) cantoneseInput.value = word.cantonese || '';
+    if (jyutpingInput) jyutpingInput.value = word.jyutping || '';
+    if (cantoneseExampleInput) cantoneseExampleInput.value = word.cantoneseExample || '';
+
+    document.getElementById('addWordModal').classList.add('active');
+    document.getElementById('modalTitle').textContent = '编辑单词';
+  }
+
+  // 删除单词
+  async deleteWord(id) {
+    if (confirm('确定要删除这个单词吗？')) {
+      await this.db.deleteWord(id);
+      this.showToast('单词已删除');
+    }
+  }
+
+  // ==================== 设置页面 ====================
+  renderSettings() {
+    document.getElementById('goalSlider').value = this.settings.dailyGoal;
+    document.getElementById('goalValue').textContent = this.settings.dailyGoal;
+    
+    // 学习模式
+    document.querySelectorAll('.mode-option').forEach(opt => {
+      opt.classList.toggle('active', opt.dataset.mode === this.settings.learnMode);
+    });
+    
+    document.querySelectorAll('.font-size-option').forEach(opt => {
+      opt.classList.toggle('active', opt.dataset.size === this.settings.fontSize);
+    });
+    
+    document.querySelectorAll('.color-option').forEach(opt => {
+      opt.classList.toggle('active', opt.dataset.color === this.settings.cardBgColor);
+    });
+    
+    document.getElementById('soundToggle').classList.toggle('active', this.settings.soundEnabled);
+    const phoneticReadToggle = document.getElementById('phoneticReadToggle');
+    if (phoneticReadToggle) {
+      phoneticReadToggle.classList.toggle('active', this.settings.phoneticAutoRead);
+    }
+    const cardDefinitionFirstToggle = document.getElementById('cardDefinitionFirstToggle');
+    if (cardDefinitionFirstToggle) {
+      cardDefinitionFirstToggle.classList.toggle('active', this.settings.cardDefinitionFirst);
+    }
+  }
+
+  // 清除学习进度
+  async clearProgress() {
+    if (confirm('确定要清除学习进度吗？单词数据将保留。')) {
+      const words = await this.db.getAllWords();
+      for (const word of words) {
+        word.status = 'new';
+        word.reviewCount = 0;
+        word.lastReview = null;
+        word.nextReview = null;
+        await this.db.updateWord(word);
+      }
+      // 清除今日学习记录
+      await this.db.setSetting('lastStudyDate', null);
+      await this.db.setSetting('todayCount', 0);
+      // 重置今日学习统计（已掌握、待复习、总数）
+      this.todayStats = { mastered: 0, review: 0, total: 0 };
+      await this.db.setSetting('todayStats', this.todayStats);
+      // 更新UI显示
+      if (document.getElementById('statMastered')) {
+        document.getElementById('statMastered').textContent = '0';
+      }
+      if (document.getElementById('statReview')) {
+        document.getElementById('statReview').textContent = '0';
+      }
+      if (document.getElementById('statTotal')) {
+        document.getElementById('statTotal').textContent = '0';
+      }
+      this.showToast('学习进度已清除');
+      if (this.currentPage === 'learn') {
+        this.prepareLearnSession();
+      }
+    }
+  }
+
+  // 清除所有数据
+  async clearAllData() {
+    if (confirm('确定要清除所有数据吗？此操作不可恢复！')) {
+      const words = await this.db.getAllWords();
+      for (const word of words) {
+        await this.db.deleteWord(word.id);
+      }
+      const categories = await this.db.getAllCategories();
+      for (const cat of categories) {
+        await this.db.deleteCategory(cat.id);
+      }
+      this.showToast('所有数据已清除');
+      this.renderLibrary();
+    }
+  }
+
+  // 导出词库为Excel
+  async exportWords() {
+    const words = await this.db.getAllWords();
+    if (words.length === 0) {
+      this.showToast('词库为空，无需导出');
+      return;
+    }
+
+    const headers = this.importExportHeaders();
+    const data = words.map((word) => [
+      word.word || '',
+      word.definition || word.meaning || '',
+      word.phonetic || '',
+      word.example || '',
+      word.category || '未分类',
+      this.formatLanguageForExport(word),
+      word.jyutping || '',
+      word.cantonese || '',
+      word.cantoneseExample || ''
+    ]);
+
+    // 创建工作簿和工作表
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...data]);
+    
+    // 设置列宽
+    worksheet['!cols'] = [
+      { wch: 20 },
+      { wch: 30 },
+      { wch: 18 },
+      { wch: 40 },
+      { wch: 14 },
+      { wch: 12 },
+      { wch: 18 },
+      { wch: 16 },
+      { wch: 36 }
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, '词库');
+
+    // 导出文件
+    const fileName = `词库_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}.xlsx`;
+    XLSX.writeFile(workbook, fileName);
+
+    this.showToast(`成功导出 ${words.length} 个单词`);
+  }
+
+  // ==================== 模态框 ====================
+  showAddWordModal() {
+    document.getElementById('wordForm').reset();
+    document.getElementById('wordId').value = '';
+    document.getElementById('modalTitle').textContent = '添加单词';
+
+    // 默认英语（mandarin 表示英文词条 + 中文释义）
+    document.querySelectorAll('.language-option').forEach(o => {
+      o.classList.toggle('active', o.dataset.lang === 'mandarin');
+    });
+    this.applyLanguageFormVisibility('mandarin');
+
+    document.getElementById('addWordModal').classList.add('active');
+  }
+
+  showImportModal() {
+    document.getElementById('importModal').classList.add('active');
+    document.getElementById('importPreview').innerHTML = '';
+    this.importedWords = [];
+  }
+
+  closeModals() {
+    document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('active'));
+  }
+
+  // 保存单词
+  async saveWord() {
+    try {
+      const id = document.getElementById('wordId').value;
+      // 默认使用普通话，不再需要语言选择
+      const lang = 'mandarin';
+      
+      const wordInput = document.getElementById('wordInput');
+      const meaningInput = document.getElementById('meaningInput');
+      
+      if (!wordInput || !meaningInput) {
+        this.showToast('表单加载失败，请重试');
+        return;
+      }
+      
+      const word = {
+        word: wordInput.value.trim(),
+        definition: meaningInput.value.trim(),
+        phonetic: document.getElementById('phoneticInput')?.value.trim() || '',
+        example: document.getElementById('exampleInput')?.value.trim() || '',
+        category: document.getElementById('categoryInput')?.value.trim() || '未分类',
+        language: lang
+      };
+
+      if (!word.word || !word.definition) {
+        this.showToast('请填写词汇和释义');
+        return;
+      }
+
+      if (id) {
+        word.id = parseInt(id);
+        await this.db.updateWord(word);
+        this.showToast('词汇已更新');
+      } else {
+        await this.db.addWord(word);
+        this.showToast('词汇添加成功');
+      }
+
+      this.closeModals();
+      if (this.currentPage === 'library') {
+        this.renderLibrary();
+        this.renderCategoryOptions();
+      }
+      if (this.currentPage === 'learn') {
+        this.prepareLearnSession();
+      }
+    } catch (error) {
+      console.error('保存单词失败:', error);
+      this.showToast('保存失败，请重试');
+    }
+  }
+
+  // 处理文件选择
+  handleFileSelect(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const fileName = file.name.toLowerCase();
+    
+    if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+      // 处理Excel文件
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        try {
+          const data = new Uint8Array(event.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+          
+          const words = this.parseExcel(jsonData);
+          if (!Array.isArray(words)) {
+            this.showToast('文件格式错误');
+            return;
+          }
+
+          this.importedWords = words;
+          this.showImportPreview(words);
+        } catch (error) {
+          this.showToast('Excel文件解析失败');
+          console.error(error);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      // 处理JSON和CSV文件
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        try {
+          const content = event.target.result;
+          let words = [];
+
+          if (fileName.endsWith('.json')) {
+            const parsed = JSON.parse(content);
+            const arr = Array.isArray(parsed) ? parsed : (parsed.words || []);
+            if (!Array.isArray(arr)) {
+              this.showToast('JSON 格式错误：应为词汇数组');
+              return;
+            }
+            words = arr.map((item) => this.normalizeImportedWord(item));
+          } else if (fileName.endsWith('.csv')) {
+            words = this.parseCSV(content);
+          } else {
+            this.showToast('请选择 JSON、CSV、XLSX 或 XLS 文件');
+            return;
+          }
+
+          if (!Array.isArray(words)) {
+            this.showToast('文件格式错误');
+            return;
+          }
+
+          this.importedWords = words;
+          this.showImportPreview(words);
+        } catch (error) {
+          this.showToast('文件解析失败');
+          console.error(error);
+        }
+      };
+      reader.readAsText(file);
+    }
+  }
+
+  // 解析Excel数据（首行为表头，列名见 importExportHeaders）
+  parseExcel(data) {
+    if (!data || data.length < 2) return [];
+    const headerCells = data[0].map((c) => String(c ?? '').trim());
+    let colMap = this.buildImportColumnMap(headerCells);
+    if (!colMap) colMap = this.getLegacyImportColumnMap();
+
+    const words = [];
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      if (!row) continue;
+
+      const get = (key) => {
+        const idx = colMap[key];
+        if (idx === undefined || idx === null) return '';
+        return String(row[idx] ?? '').trim();
+      };
+
+      const wordText = get('word');
+      if (!wordText) continue;
+
+      words.push(
+        this.normalizeImportedWord({
+          word: wordText,
+          meaning: get('meaning'),
+          phonetic: get('phonetic'),
+          example: get('example'),
+          category: get('category'),
+          language: get('language'),
+          jyutping: get('jyutping'),
+          cantonese: get('cantonese'),
+          cantoneseExample: get('cantoneseExample')
+        })
+      );
+    }
+    return words;
+  }
+
+  // 解析 CSV（首行为表头，与 Excel 一致）
+  parseCSV(content) {
+    const lines = content.trim().split(/\r?\n/).filter((l) => l.length);
+    if (lines.length < 2) return [];
+
+    const headerParts = this.parseCSVLine(lines[0]);
+    let colMap = this.buildImportColumnMap(headerParts);
+    if (!colMap) colMap = this.getLegacyImportColumnMap();
+
+    const words = [];
+    for (let i = 1; i < lines.length; i++) {
+      const parts = this.parseCSVLine(lines[i]);
+      const get = (key) => {
+        const idx = colMap[key];
+        if (idx === undefined || idx === null) return '';
+        return String(parts[idx] ?? '').trim();
+      };
+
+      const wordText = get('word');
+      if (!wordText) continue;
+
+      words.push(
+        this.normalizeImportedWord({
+          word: wordText,
+          meaning: get('meaning'),
+          phonetic: get('phonetic'),
+          example: get('example'),
+          category: get('category'),
+          language: get('language'),
+          jyutping: get('jyutping'),
+          cantonese: get('cantonese'),
+          cantoneseExample: get('cantoneseExample')
+        })
+      );
+    }
+
+    return words;
+  }
+
+  // 显示导入预览
+  showImportPreview(words) {
+    const preview = document.getElementById('importPreview');
+    preview.innerHTML = `
+      <p style="margin-bottom: 12px; color: var(--text-secondary);">
+        共 ${words.length} 条数据，确认导入？
+      </p>
+    `;
+  }
+
+  // 确认导入
+  async confirmImport() {
+    if (!this.importedWords || this.importedWords.length === 0) {
+      this.showToast('请先选择文件');
+      return;
+    }
+
+    // 获取导入模式
+    const importMode = document.querySelector('input[name="importMode"]:checked')?.value || 'append';
+    
+    if (importMode === 'overwrite') {
+      // 覆盖模式：先清空词库
+      await this.db.clearAllWords();
+    }
+
+    const count = await this.db.batchAddWords(this.importedWords);
+    this.showToast(`成功导入 ${count} 个单词`);
+    this.closeModals();
+    
+    if (this.currentPage === 'library') {
+      this.renderLibrary();
+      this.renderCategoryOptions();
+    }
+    if (this.currentPage === 'learn') {
+      this.prepareLearnSession();
+    }
+  }
+
+  // Toast 提示
+  showToast(message) {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2500);
+  }
+}
+
+// ==================== 启动应用 ====================
+document.addEventListener('DOMContentLoaded', () => {
+  window.app = new VocabApp();
+  window.app.init();
+});
