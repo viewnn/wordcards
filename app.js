@@ -2106,7 +2106,7 @@ class VocabApp {
 
   // 清除学习进度
   async clearProgress() {
-    if (confirm('确定要清除学习进度吗？单词数据将保留。')) {
+    if (confirm('确定要清除学习进度吗？')) {
       const words = await this.db.getAllWords();
       for (const word of words) {
         word.status = 'new';
