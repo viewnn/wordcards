@@ -382,33 +382,6 @@ class VocabApp {
     }
   }
 
-  // 添加示例词汇
-  async addSampleWords() {
-    const sampleWords = [
-      { word: 'serendipity', meaning: '意外发现美好事物的运气', phonetic: '/ˌserənˈdɪpɪti/', example: 'Finding that book was pure serendipity.', category: 'CET-6' },
-      { word: 'ephemeral', meaning: '短暂的，转瞬即逝的', phonetic: '/ɪˈfemərəl/', example: 'Fame is ephemeral.', category: 'CET-6' },
-      { word: 'ubiquitous', meaning: '无处不在的，普遍存在的', phonetic: '/juːˈbɪkwɪtəs/', example: 'Smartphones have become ubiquitous.', category: 'CET-6' },
-      { word: 'eloquent', meaning: '雄辩的，口才好的', phonetic: '/ˈeləkwənt/', example: 'She gave an eloquent speech.', category: 'CET-6' },
-      { word: 'resilient', meaning: '有弹性的，能恢复的', phonetic: '/rɪˈzɪliənt/', example: 'Children are often more resilient than adults.', category: 'CET-6' },
-      { word: 'pragmatic', meaning: '务实的，实用主义的', phonetic: '/præɡˈmætɪk/', example: 'We need a pragmatic approach.', category: 'CET-6' },
-      { word: 'ambiguous', meaning: '模糊的，含糊不清的', phonetic: '/æmˈbɪɡjuəs/', example: 'His statement was ambiguous.', category: 'CET-6' },
-      { word: 'meticulous', meaning: '一丝不苟的，极度仔细的', phonetic: '/məˈtɪkjʊləs/', example: 'She is meticulous about her work.', category: 'CET-6' },
-      { word: 'procrastinate', meaning: '拖延，耽搁', phonetic: '/prəˈkræstɪneɪt/', example: "Don't procrastinate!", category: 'CET-6' },
-      { word: 'catalyst', meaning: '催化剂，诱因', phonetic: '/ˈkætəlɪst/', example: 'Technology was a catalyst for change.', category: 'CET-6' },
-      { word: 'paradigm', meaning: '范式，模式', phonetic: '/ˈpærədaɪm/', example: 'This discovery changed the paradigm.', category: 'GRE' },
-      { word: 'ebullient', meaning: '热情奔放的', phonetic: '/ɪˈbʊliənt/', example: 'She was in an ebullient mood.', category: 'GRE' },
-      { word: 'laconic', meaning: '简洁的，话少的', phonetic: '/ləˈkɒnɪk/', example: 'His laconic reply surprised everyone.', category: 'GRE' },
-      { word: 'sycophant', meaning: '谄媚者，马屁精', phonetic: '/ˈsɪkəfænt/', example: 'He is a sycophant.', category: 'GRE' },
-      { word: 'obsequious', meaning: '谄媚的，奴性的', phonetic: '/əbˈsiːkwiəs/', example: 'The waiter was obsequious.', category: 'GRE' },
-      { word: 'perspicacious', meaning: '敏锐的，有洞察力的', phonetic: '/ˌpɜːspɪˈkeɪʃəs/', example: 'A perspicacious analysis.', category: 'GRE' },
-      { word: 'pulchritude', meaning: '美丽，美貌', phonetic: '/ˈpʌlkrɪtjuːd/', example: 'She possesses remarkable pulchritude.', category: 'GRE' },
-      { word: 'ineffable', meaning: '难以形容的', phonetic: '/ɪnˈefəbl/', example: 'Ineffable joy.', category: 'GRE' },
-      { word: 'quintessential', meaning: '精华的，典型的', phonetic: '/ˌkwɪntɪˈsenʃəl/', example: 'He is the quintessential gentleman.', category: 'GRE' },
-      { word: 'sanguine', meaning: '乐观的，血红的', phonetic: '/ˈsæŋɡwɪn/', example: 'She remained sanguine about the future.', category: 'GRE' }
-    ].map((w) => ({ ...w, definition: w.meaning, language: w.language || '英语' }));
-    
-    await this.db.batchAddWords(sampleWords);
-  }
 
   // 绑定事件
   bindEvents() {
