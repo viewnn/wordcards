@@ -605,7 +605,7 @@ html, body {
 }
 
 .action-btn.skip {
-  background: var(--bg-primary);
+  background: #e3f2fd;
 }
 
 .action-btn.skip svg {
