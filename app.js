@@ -430,18 +430,6 @@ class VocabApp {
       }
     }
 
-    // 添加单词按钮
-    const addWordBtn = document.getElementById('addWordBtn');
-    addWordBtn.addEventListener('click', () => self.showAddWordModal());
-    addWordBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.showAddWordModal(); });
-
-    // 学习页空状态快捷添加
-    const emptyAddBtn = document.getElementById('emptyAddBtn');
-    if (emptyAddBtn) {
-      emptyAddBtn.addEventListener('click', () => self.showAddWordModal());
-      emptyAddBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.showAddWordModal(); });
-    }
-    
     // 导入按钮
     const importBtn = document.getElementById('importBtn');
     importBtn.addEventListener('click', () => self.showImportModal());
@@ -916,16 +904,6 @@ class VocabApp {
     const clearProgressBtn = document.getElementById('clearProgressBtn');
     clearProgressBtn.addEventListener('click', () => self.clearProgress());
     clearProgressBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.clearProgress(); });
-    
-    // 清除数据按钮
-    const clearDataBtn = document.getElementById('clearDataBtn');
-    clearDataBtn.addEventListener('click', () => self.clearAllData());
-    clearDataBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.clearAllData(); });
-    
-    // 导出按钮
-    const exportBtn = document.getElementById('exportBtn');
-    exportBtn.addEventListener('click', () => self.exportWords());
-    exportBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.exportWords(); });
   }
 
   // 应用设置
@@ -1947,7 +1925,7 @@ class VocabApp {
             <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
           </div>
           <h3 class="empty-title">词库为空</h3>
-          <p class="empty-desc">点击上方按钮添加单词或导入词库开始学习</p>
+          <p class="empty-desc">点击上方按钮导入词库开始学习</p>
         </div>
       `;
       document.getElementById('pagination')?.remove();
@@ -2001,12 +1979,9 @@ class VocabApp {
                         <button type="button" class="word-action-btn library-speak-btn" data-id="${word.id}" title="发音" aria-label="发音">
                           <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.74 2.5-2.26 2.5-4.02zM14 3.23v2.06c2.89 1.19 5 3.65 5 6.71s-2.11 5.52-5 6.71v2.06c4.01-1.29 7-4.95 7-9.77s-2.99-8.48-7-9.77z"/></svg>
                         </button>
-                        <button type="button" class="word-action-btn edit-btn" data-id="${word.id}">
-                          <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                        <button type="button" class="word-action-btn view-btn" data-id="${word.id}">
+                          <svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
                         </button>
-                      <button type="button" class="word-action-btn delete-btn" data-id="${word.id}">
-                        <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-                      </button>
                     </div>
                   `}
                   </div>
@@ -2029,23 +2004,14 @@ class VocabApp {
       });
     });
 
-    container.querySelectorAll('.edit-btn').forEach(btn => {
+    container.querySelectorAll('.view-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const id = parseInt(btn.dataset.id);
-        this.editWord(id);
+        this.viewWord(id);
       });
     });
 
-    container.querySelectorAll('.delete-btn').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const id = parseInt(btn.dataset.id);
-        await this.deleteWord(id);
-        this.renderLibrary();
-      });
-    });
-    
     // 取消收藏按钮事件
     container.querySelectorAll('.unfavorite-btn').forEach(btn => {
       btn.addEventListener('click', async (e) => {
@@ -2087,6 +2053,45 @@ class VocabApp {
 
     document.getElementById('addWordModal').classList.add('active');
     document.getElementById('modalTitle').textContent = '编辑单词';
+  }
+
+  // 查看单词
+  async viewWord(id) {
+    const words = await this.db.getAllWords();
+    const word = words.find(w => w.id === id);
+    if (!word) return;
+
+    document.getElementById('wordId').value = word.id;
+    document.getElementById('wordInput').value = word.word;
+    document.getElementById('meaningInput').value = word.definition || word.meaning || '';
+    document.getElementById('phoneticInput').value = word.phonetic || '';
+    document.getElementById('exampleInput').value = word.example || '';
+    document.getElementById('categoryInput').value = word.category || '';
+
+    // 语言回显
+    const lang = word.language || 'mandarin';
+    document.querySelectorAll('.language-option').forEach(o => {
+      o.classList.toggle('active', o.dataset.lang === lang);
+    });
+    this.applyLanguageFormVisibility(lang);
+
+    // 粤语字段回显
+    const cantoneseInput = document.getElementById('cantoneseInput');
+    const jyutpingInput = document.getElementById('jyutpingInput');
+    const cantoneseExampleInput = document.getElementById('cantoneseExampleInput');
+    if (cantoneseInput) cantoneseInput.value = word.cantonese || '';
+    if (jyutpingInput) jyutpingInput.value = word.jyutping || '';
+    if (cantoneseExampleInput) cantoneseExampleInput.value = word.cantoneseExample || '';
+
+    document.getElementById('addWordModal').classList.add('active');
+    document.getElementById('modalTitle').textContent = '查看单词';
+    
+    // 禁用所有输入框，只读模式
+    const inputs = document.querySelectorAll('#wordForm input, #wordForm textarea');
+    inputs.forEach(input => input.disabled = true);
+    
+    // 隐藏保存按钮
+    document.getElementById('saveWordBtn').style.display = 'none';
   }
 
   // 删除单词
@@ -2160,66 +2165,7 @@ class VocabApp {
     }
   }
 
-  // 清除所有数据
-  async clearAllData() {
-    if (confirm('确定要清除所有数据吗？此操作不可恢复！')) {
-      const words = await this.db.getAllWords();
-      for (const word of words) {
-        await this.db.deleteWord(word.id);
-      }
-      const categories = await this.db.getAllCategories();
-      for (const cat of categories) {
-        await this.db.deleteCategory(cat.id);
-      }
-      this.showToast('所有数据已清除');
-      this.renderLibrary();
-    }
-  }
-
   // 导出词库为Excel
-  async exportWords() {
-    const words = await this.db.getAllWords();
-    if (words.length === 0) {
-      this.showToast('词库为空，无需导出');
-      return;
-    }
-
-    const headers = this.importExportHeaders();
-    const data = words.map((word) => [
-      word.word || '',
-      word.definition || word.meaning || '',
-      word.phonetic || '',
-      word.example || '',
-      word.category || '未分类',
-      this.formatLanguageForExport(word)
-    ]);
-
-    // 创建工作簿和工作表
-    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...data]);
-    
-    // 设置列宽
-    worksheet['!cols'] = [
-      { wch: 20 },
-      { wch: 30 },
-      { wch: 18 },
-      { wch: 40 },
-      { wch: 14 },
-      { wch: 12 },
-      { wch: 18 },
-      { wch: 16 },
-      { wch: 36 }
-    ];
-
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, '词库');
-
-    // 导出文件
-    const fileName = `词库_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}.xlsx`;
-    XLSX.writeFile(workbook, fileName);
-
-    this.showToast(`成功导出 ${words.length} 个单词`);
-  }
-
   // ==================== 模态框 ====================
   showAddWordModal() {
     document.getElementById('wordForm').reset();
@@ -2232,6 +2178,13 @@ class VocabApp {
     });
     this.applyLanguageFormVisibility('mandarin');
 
+    // 启用所有输入框
+    const inputs = document.querySelectorAll('#wordForm input, #wordForm textarea');
+    inputs.forEach(input => input.disabled = false);
+    
+    // 显示保存按钮
+    document.getElementById('saveWordBtn').style.display = '';
+
     document.getElementById('addWordModal').classList.add('active');
   }
 
@@ -2243,6 +2196,13 @@ class VocabApp {
 
   closeModals() {
     document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('active'));
+    
+    // 重置表单状态
+    const inputs = document.querySelectorAll('#wordForm input, #wordForm textarea');
+    inputs.forEach(input => input.disabled = false);
+    
+    // 显示保存按钮
+    document.getElementById('saveWordBtn').style.display = '';
   }
 
   // 保存单词

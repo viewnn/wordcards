@@ -25,9 +25,6 @@
     <header class="header">
       <h1>📚 单词卡</h1>
       <div class="header-actions">
-        <button class="header-btn" id="addWordBtn" title="添加单词">
-          <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-        </button>
         <button class="header-btn" id="importBtn" title="导入词库">
           <svg viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
         </button>
@@ -90,7 +87,7 @@
               <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
             </div>
             <h3 class="empty-title">还没有可学习的单词</h3>
-            <p class="empty-desc">点击右上角+单词或导入词库</p>
+            <p class="empty-desc">点击右上角导入词库</p>
           </div>
 
           <!-- 完成页面 -->
@@ -254,40 +251,11 @@
             <h3 class="settings-section-title">数据管理</h3>
             <div class="setting-item">
               <div class="setting-info">
-                <h4>清除学习记录</h4>
+                <h4>重置学习记录</h4>
                 <p>重置学习记录，保留单词数据</p>
               </div>
               <button class="btn-secondary attention" id="clearProgressBtn" style="padding: 8px 16px;">清除</button>
             </div>
-            <div class="setting-item">
-              <div class="setting-info">
-                <h4>清除所有数据</h4>
-                <p>删除所有单词和设置</p>
-              </div>
-              <button class="btn-secondary attention" id="clearDataBtn" style="padding: 8px 16px;">清除</button>
-            </div>
-            <div class="setting-item">
-              <div class="setting-info">
-                <h4>导出词库</h4>
-                <p>将词库导出为Excel文件</p>
-              </div>
-              <button class="btn-secondary" id="exportBtn" style="padding: 8px 16px;">导出</button>
-            </div>
-          </div>
-
-          <!-- 关于软件 -->
-          <div class="settings-section">
-            <h3 class="settings-section-title">关于软件</h3>
-            <div class="setting-item about-card">
-              <div class="setting-info">
-                <p>单词卡是一款卡片式单词记录软件，通过正反卡片，显示单词/音标、释义/例句。</p>
-                <!-- <br>
-                <h5>联系我们</h5>
-                <p>作者ccw，欢迎您的意见或建议，邮箱：xxxxx6@qq.com</p>
-                <br> -->
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </main>
@@ -370,7 +338,7 @@
       <div class="modal-body">
         <div class="import-zone" id="importZone">
           <svg viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
-          <p>上传Excel文件，请 <span>点击选择</span></p>
+          <p>上传Excel文件，请<span>点击选择</span></p>
         </div>
         <input type="file" id="importFile" accept=".json,.csv,.xlsx,.xls" style="display: none;">
         
