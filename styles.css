@@ -1368,7 +1368,7 @@ html, body {
 .color-options {
   display: flex;
   gap: 12px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .color-option {
