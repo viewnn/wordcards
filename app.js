@@ -288,11 +288,42 @@ class VocabApp {
       const arrayBuffer = await response.arrayBuffer();
       const data = new Uint8Array(arrayBuffer);
       const workbook = XLSX.read(data, { type: 'array' });
-      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
       
-      const words = this.parseExcel(jsonData);
-      if (!Array.isArray(words) || words.length === 0) {
+      // 获取当前选择的词典类型
+      const dictType = document.querySelector('input[name="dictType"]:checked')?.value || 'all';
+      
+      let allWords = [];
+      
+      // 根据词典类型选择要导入的 sheet
+      if (dictType === 'all') {
+        // 全部：获取所有 sheet 的内容
+        for (const sheetName of workbook.SheetNames) {
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+          const words = this.parseExcel(jsonData);
+          if (Array.isArray(words) && words.length > 0) {
+            allWords = allWords.concat(words);
+          }
+        }
+      } else if (dictType === 'phrase') {
+        // 短语：获取 phrase sheet
+        const sheetName = workbook.SheetNames.find(name => name.toLowerCase().includes('phrase')) || workbook.SheetNames[1];
+        if (sheetName) {
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+          allWords = this.parseExcel(jsonData);
+        }
+      } else if (dictType === 'word') {
+        // 字：获取 word sheet
+        const sheetName = workbook.SheetNames.find(name => name.toLowerCase().includes('word')) || workbook.SheetNames[0];
+        if (sheetName) {
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+          allWords = this.parseExcel(jsonData);
+        }
+      }
+      
+      if (!Array.isArray(allWords) || allWords.length === 0) {
         console.log('dict.xlsx 文件内容为空或格式错误');
         return;
       }
@@ -302,7 +333,7 @@ class VocabApp {
       const existingWordSet = new Set(existingWords.map(w => w.word.toLowerCase()));
       
       // 过滤掉已存在的单词
-      const newWords = words.filter(w => !existingWordSet.has(w.word.toLowerCase()));
+      const newWords = allWords.filter(w => !existingWordSet.has(w.word.toLowerCase()));
       
       if (newWords.length === 0) {
         console.log('dict.xlsx 中没有新单词');
@@ -877,6 +908,27 @@ class VocabApp {
     const clearProgressBtn = document.getElementById('clearProgressBtn');
     clearProgressBtn.addEventListener('click', () => self.clearProgress());
     clearProgressBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.clearProgress(); });
+    
+    // 词典类型选择事件
+    document.querySelectorAll('input[name="dictType"]').forEach(radio => {
+      radio.addEventListener('change', async () => {
+        // 重新加载词典
+        await self.db.clearAllWords();
+        await self.autoLoadDict();
+        
+        // 更新词库页面
+        if (self.currentPage === 'library') {
+          self.renderLibrary();
+        }
+        
+        // 更新学习页面
+        if (self.currentPage === 'learn') {
+          self.prepareLearnSession();
+        }
+        
+        self.showToast('词典已更新');
+      });
+    });
   }
 
   // 应用设置

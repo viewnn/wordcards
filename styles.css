@@ -1385,6 +1385,37 @@ html, body {
   transform: scale(1.1);
 }
 
+/* 词典管理选项 */
+.dict-options {
+  display: flex;
+  gap: 16px;
+}
+
+.dict-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+
+.dict-option:hover {
+  background: var(--bg-primary);
+}
+
+.dict-option input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary-color);
+}
+
+.dict-option span {
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}
+
 /* 语言选项 */
 .language-options {
   display: flex;
