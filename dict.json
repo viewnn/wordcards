@@ -14,29 +14,5 @@
     "example": "business acumen",
     "category": "GRE",
     "language": "英语"
-  },
-  {
-    "word": "alacrity",
-    "meaning": "欣然，迅速",
-    "phonetic": "/əˈlækrɪti/",
-    "example": "She accepted the invitation with alacrity.",
-    "category": "GRE",
-    "language": "英语"
-  },
-  {
-    "word": "ameliorate",
-    "meaning": "改善，改进",
-    "phonetic": "/əˈmiːliəreɪt/",
-    "example": "measures to ameliorate living conditions",
-    "category": "GRE",
-    "language": "英语"
-  },
-  {
-    "word": "anachronism",
-    "meaning": "时代错误，过时的事物",
-    "phonetic": "/əˈnækrənɪzəm/",
-    "example": "The monarchy is seen as an anachronism.",
-    "category": "GRE",
-    "language": "英语"
   }
 ]
