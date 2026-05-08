@@ -88,54 +88,11 @@ class VocabDB {
     });
   }
 
-  async deleteWord(id) {
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['words'], 'readwrite');
-      const store = transaction.objectStore('words');
-      const request = store.delete(id);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
-  }
-
   async getAllWords() {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(['words'], 'readonly');
       const store = transaction.objectStore('words');
       const request = store.getAll();
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  async getWordsByCategory(category) {
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['words'], 'readonly');
-      const store = transaction.objectStore('words');
-      const index = store.index('category');
-      const request = index.getAll(category);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  async getWordsByStatus(status) {
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['words'], 'readonly');
-      const store = transaction.objectStore('words');
-      const index = store.index('status');
-      const request = index.getAll(status);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-  }
-  
-  async getFavoriteWords() {
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['words'], 'readonly');
-      const store = transaction.objectStore('words');
-      const index = store.index('favorite');
-      const request = index.getAll(true);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -165,37 +122,6 @@ class VocabDB {
       const store = transaction.objectStore('words');
       const request = store.clear();
       
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  // 分类操作
-  async getAllCategories() {
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['categories'], 'readonly');
-      const store = transaction.objectStore('categories');
-      const request = store.getAll();
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  async addCategory(category) {
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['categories'], 'readwrite');
-      const store = transaction.objectStore('categories');
-      const request = store.add(category);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  async deleteCategory(id) {
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['categories'], 'readwrite');
-      const store = transaction.objectStore('categories');
-      const request = store.delete(id);
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
     });
@@ -243,7 +169,9 @@ class VocabApp {
       /** 音标渐显延迟（秒），0表示立即显示 */
       phoneticDelay: 0,
       /** 单词重复出现频率（天），0表示每日目标内不重复 */
-      repeatFrequency: 0
+      repeatFrequency: 0,
+      /** 词典导入范围：all / phrase / word，与设置页下拉同步 */
+      dictImportType: 'phrase'
     };
     this.todayStats = {
       mastered: 0,
@@ -267,12 +195,15 @@ class VocabApp {
       await this.db.init();
       await this.loadSettings();
       await this.loadTodayStats();
+      const dictTypeSelectInit = document.getElementById('dictTypeSelect');
+      if (dictTypeSelectInit) {
+        dictTypeSelectInit.value = this.settings.dictImportType || 'phrase';
+      }
       this.initServiceWorker();
       this.bindEvents();
       this.primeSpeechSynthesis();
       this.render();
       
-      const words = await this.db.getAllWords();
       // 尝试自动加载 dict.xlsx 文件（每次启动都检查）
       await this.autoLoadDict();
     } catch (error) {
@@ -282,12 +213,22 @@ class VocabApp {
     }
   }
   
+  /** 词典导入或清空后同步词库分类勾选与列表 */
+  async refreshLibraryFiltersAfterDictChange() {
+    await this.syncLibraryCategoryFilterToDictType();
+    await this.renderCategoryOptions();
+    if (this.currentPage === 'library') {
+      await this.renderLibrary();
+    }
+  }
+
   // 自动加载 dict.xlsx 文件
   async autoLoadDict() {
     try {
       const response = await fetch('dict.xlsx');
       if (!response.ok) {
         console.log('dict.xlsx 文件不存在，跳过自动加载');
+        await this.refreshLibraryFiltersAfterDictChange();
         return;
       }
       
@@ -300,10 +241,9 @@ class VocabApp {
       const dictType = dictTypeSelect?.value || 'all';
       
       let allWords = [];
-      
+
       // 根据词典类型选择要导入的 sheet
       if (dictType === 'all') {
-        // 全部：获取所有 sheet 的内容
         for (const sheetName of workbook.SheetNames) {
           const worksheet = workbook.Sheets[sheetName];
           const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
@@ -313,7 +253,6 @@ class VocabApp {
           }
         }
       } else if (dictType === 'phrase') {
-        // 短语：获取 phrase sheet
         const sheetName = workbook.SheetNames.find(name => name.toLowerCase().includes('phrase')) || workbook.SheetNames[1];
         if (sheetName) {
           const worksheet = workbook.Sheets[sheetName];
@@ -321,7 +260,6 @@ class VocabApp {
           allWords = this.parseExcel(jsonData);
         }
       } else if (dictType === 'word') {
-        // 字：获取 word sheet
         const sheetName = workbook.SheetNames.find(name => name.toLowerCase().includes('word')) || workbook.SheetNames[0];
         if (sheetName) {
           const worksheet = workbook.Sheets[sheetName];
@@ -332,6 +270,7 @@ class VocabApp {
       
       if (!Array.isArray(allWords) || allWords.length === 0) {
         console.log('dict.xlsx 文件内容为空或格式错误');
+        await this.refreshLibraryFiltersAfterDictChange();
         return;
       }
       
@@ -344,11 +283,14 @@ class VocabApp {
       
       if (newWords.length === 0) {
         console.log('dict.xlsx 中没有新单词');
+        await this.refreshLibraryFiltersAfterDictChange();
         return;
       }
       
       await this.db.batchAddWords(newWords);
       this.showToast(`已自动导入 ${newWords.length} 个新单词`);
+
+      await this.refreshLibraryFiltersAfterDictChange();
       
       // 如果当前在学习页面，刷新学习会话
       if (this.currentPage === 'learn') {
@@ -370,6 +312,31 @@ class VocabApp {
     document.documentElement.style.setProperty('--scrollbar-width', `${scrollbarWidth}px`);
   }
   
+  /** 数据库修复后写入少量示例词，保证可立即学习 */
+  async addSampleWords() {
+    const samples = [
+      {
+        word: 'hello',
+        meaning: '你好；喂',
+        definition: '你好；喂',
+        phonetic: '/həˈloʊ/',
+        example: 'Hello, world.',
+        category: '示例',
+        language: '英语'
+      },
+      {
+        word: 'apple',
+        meaning: '苹果',
+        definition: '苹果',
+        phonetic: '/ˈæpl/',
+        example: 'An apple a day.',
+        category: '示例',
+        language: '英语'
+      }
+    ];
+    await this.db.batchAddWords(samples);
+  }
+
   async recoverFromError() {
     try {
       await this.db.deleteDatabase();
@@ -377,8 +344,8 @@ class VocabApp {
       await this.loadSettings();
       await this.loadTodayStats();
       this.bindEvents();
-      this.render();
       await this.addSampleWords();
+      this.render();
       this.showToast('数据已重置，应用恢复正常');
     } catch (recoverError) {
       console.error('Recovery failed:', recoverError);
@@ -406,6 +373,7 @@ class VocabApp {
     this.settings.learnMode = await this.db.getSetting('learnMode', 'sequential');
     this.settings.phoneticDelay = await this.db.getSetting('phoneticDelay', 0);
     this.settings.repeatFrequency = await this.db.getSetting('repeatFrequency', 0);
+    this.settings.dictImportType = await this.db.getSetting('dictImportType', 'phrase');
   }
 
   // 加载今日统计
@@ -603,28 +571,6 @@ class VocabApp {
     // 搜索和筛选
     this.bindLibraryEvents();
     
-    // 语言选项切换
-    this.bindLanguageEvents();
-  }
-  
-  // 语言选项事件绑定
-  bindLanguageEvents() {
-    document.querySelectorAll('.language-option').forEach(option => {
-      option.addEventListener('click', (e) => {
-        e.preventDefault();
-        document.querySelectorAll('.language-option').forEach(o => o.classList.remove('active'));
-        option.classList.add('active');
-        
-        const lang = option.dataset.lang;
-        this.applyLanguageFormVisibility(lang);
-      });
-    });
-  }
-
-  applyLanguageFormVisibility(lang) {
-    document.querySelectorAll('.cantonese-fields').forEach(field => {
-      field.style.display = lang === 'cantonese' ? 'block' : 'none';
-    });
   }
   
   // 词库页面事件绑定
@@ -706,104 +652,130 @@ class VocabApp {
       label.textContent = this.selectedCategories[0];
     } else {
       label.textContent = `全部`;
-      // label.textContent = `已选 ${this.selectedCategories.length} 个分类`;
     }
     
     this.resetPageNum();
     this.renderLibrary();
   }
   
-  // 渲染分类选项
+  // 渲染分类选项（仅词条自身的分类列，词典短语/字不设单独勾选项）
   async renderCategoryOptions() {
     const words = await this.db.getAllWords();
-    const categories = [...new Set(words.map(w => w.category || '未分类'))];
+    const categories = [...new Set(words.map((w) => w.category || '未分类'))];
     const container = document.getElementById('categoryOptions');
-    
-    // 更新"全部"选项的标签，显示分类总数
+
     const allLabel = document.getElementById('category-all-label');
     if (allLabel) {
       allLabel.textContent = `全部 (${categories.length})`;
     }
-    
-    container.innerHTML = categories.map(cat => `
+
+    container.innerHTML = categories
+      .map(
+        (cat) => `
       <label class="dropdown-item">
-        <input type="checkbox" data-category="${cat}">
-        <span>${cat}</span>
+        <input type="checkbox" data-category="${this.escapeHtml(cat)}">
+        <span>${this.escapeHtml(cat)}</span>
       </label>
-    `).join('');
-    
-    // 如果已有选中的分类，保留用户选择；否则默认全选
+    `
+      )
+      .join('');
+
     if (this.selectedCategories && this.selectedCategories.length > 0) {
-      document.querySelectorAll('#categoryOptions input[type="checkbox"]').forEach(cb => {
+      document.querySelectorAll('#categoryOptions input[type="checkbox"]').forEach((cb) => {
         cb.checked = this.selectedCategories.includes(cb.dataset.category);
       });
       const allChecked = document.querySelectorAll('#categoryOptions input[type="checkbox"]:checked').length;
       const allTotal = document.querySelectorAll('#categoryOptions input[type="checkbox"]').length;
       document.getElementById('category-all').checked = allChecked === allTotal && allTotal > 0;
     } else {
-      // 默认全选
-      document.querySelectorAll('#categoryOptions input[type="checkbox"]').forEach(cb => {
+      document.querySelectorAll('#categoryOptions input[type="checkbox"]').forEach((cb) => {
         cb.checked = true;
       });
       document.getElementById('category-all').checked = categories.length > 0;
-      this.selectedCategories = categories;
+      this.selectedCategories = [...categories];
     }
-  }
-  
-  // 渲染分页
-  renderPagination(totalPages) {
-    // 移除旧的分页
-    document.getElementById('pagination')?.remove();
-    
-    if (totalPages <= 1) return;
-    
-    const pagination = document.createElement('div');
-    pagination.id = 'pagination';
-    pagination.className = 'pagination';
-    
-    let html = '';
-    
-    // 上一页
-    html += `<button class="page-btn prev-btn" ${this.currentPageNum === 1 ? 'disabled' : ''}>
-      <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
-    </button>`;
-    
-    // 页码按钮
-    for (let i = 1; i <= totalPages; i++) {
-      html += `<button class="page-btn num-btn ${i === this.currentPageNum ? 'active' : ''}" data-page="${i}">${i}</button>`;
-    }
-    
-    // 下一页
-    html += `<button class="page-btn next-btn" ${this.currentPageNum === totalPages ? 'disabled' : ''}>
-      <svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
-    </button>`;
-    
-    pagination.innerHTML = html;
-    
-    // 添加到容器
-    const container = document.getElementById('libraryWords');
-    container.appendChild(pagination);
-    
-    // 绑定分页事件
-    pagination.addEventListener('click', (e) => {
-      const btn = e.target.closest('.page-btn');
-      if (!btn || btn.disabled) return;
-      
-      if (btn.classList.contains('prev-btn')) {
-        this.currentPageNum--;
-      } else if (btn.classList.contains('next-btn')) {
-        this.currentPageNum++;
-      } else if (btn.classList.contains('num-btn')) {
-        this.currentPageNum = parseInt(btn.dataset.page);
-      }
-      
-      this.renderLibrary();
-    });
   }
   
   // 重置页码
   resetPageNum() {
     this.currentPageNum = 1;
+  }
+
+  /** Fisher–Yates：用于在全库范围内随机当日学习队列 */
+  shuffleArray(arr) {
+    const a = arr;
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  /**
+   * 随机模式下尽量让相邻词条分类不同：每步在剩余词中优先随机挑选与上一张分类不同的词。
+   */
+  pickRandomSpreadByCategory(sourcePool, maxCount) {
+    const pool = [...sourcePool];
+    this.shuffleArray(pool);
+    const out = [];
+    const n = Math.min(maxCount, pool.length);
+    const catOf = (w) => (w.category || '未分类');
+
+    for (let k = 0; k < n; k++) {
+      const lastCat = out.length ? catOf(out[out.length - 1]) : null;
+      let candidates = [];
+      for (let i = 0; i < pool.length; i++) {
+        if (catOf(pool[i]) !== lastCat) candidates.push(i);
+      }
+      if (candidates.length === 0) {
+        candidates = pool.map((_, i) => i);
+      }
+      const pickIdx = candidates[Math.floor(Math.random() * candidates.length)];
+      out.push(pool.splice(pickIdx, 1)[0]);
+    }
+    return out;
+  }
+
+  /** 学习页已有进度或已完成当日队列时，锁定每日目标滑块 */
+  isDailyGoalSliderLocked() {
+    return (
+      Array.isArray(this.todayWords) &&
+      this.todayWords.length > 0 &&
+      (this.currentCardIndex > 0 || this.currentCardIndex >= this.todayWords.length)
+    );
+  }
+
+  refreshGoalSliderLockedState() {
+    const goalSlider = document.getElementById('goalSlider');
+    const goalValue = document.getElementById('goalValue');
+    if (!goalSlider || !goalValue) return;
+    const locked = this.isDailyGoalSliderLocked();
+    goalSlider.disabled = locked;
+    goalSlider.style.opacity = locked ? '0.5' : '1';
+    goalSlider.style.cursor = locked ? 'not-allowed' : 'pointer';
+    goalSlider.style.pointerEvents = locked ? 'none' : '';
+    goalSlider.value = String(this.settings.dailyGoal);
+    goalValue.textContent = String(this.settings.dailyGoal);
+  }
+
+  /** 词典导入后：分类下拉勾选全部真实分类（等同于「全部」），列表展示当前库全部词条 */
+  async syncLibraryCategoryFilterToDictType() {
+    const words = await this.db.getAllWords();
+    const userCats = [...new Set(words.map((w) => w.category || '未分类'))];
+    this.selectedCategories = [...userCats];
+  }
+
+  /** language 列标明粤语时，音标朗读优先粤拼 */
+  isImportedCantoneseLanguage(word) {
+    const raw = String(word?.language || '').trim();
+    if (!raw) return false;
+    const low = raw.toLowerCase();
+    return (
+      /粤语|广东话|粤語|廣東話/i.test(raw) ||
+      low === 'cantonese' ||
+      low === 'yue' ||
+      low === 'zh-yue'
+    );
   }
 
   // 设置事件绑定
@@ -814,24 +786,16 @@ class VocabApp {
     const goalSlider = document.getElementById('goalSlider');
     const goalValue = document.getElementById('goalValue');
     
-    // 更新每日目标滑块的禁用状态
-    const updateGoalSliderState = () => {
-      // 如果有学习进度（currentCardIndex > 0），禁用滑块
-      const hasProgress = self.currentCardIndex > 0;
-      goalSlider.disabled = hasProgress;
-      goalSlider.style.opacity = hasProgress ? '0.5' : '1';
-      goalSlider.style.cursor = hasProgress ? 'not-allowed' : 'pointer';
-    };
+    const updateGoalSliderState = () => self.refreshGoalSliderLockedState();
     
     goalSlider.addEventListener('input', () => {
+      if (self.isDailyGoalSliderLocked()) return;
       goalValue.textContent = goalSlider.value;
     });
     goalSlider.addEventListener('change', async () => {
-      // 如果有学习进度，不允许修改
-      if (self.currentCardIndex > 0) {
+      if (self.isDailyGoalSliderLocked()) {
         self.showToast('学习进行中，无法修改每日目标');
-        goalSlider.value = self.settings.dailyGoal;
-        goalValue.textContent = self.settings.dailyGoal;
+        self.refreshGoalSliderLockedState();
         return;
       }
       
@@ -850,7 +814,7 @@ class VocabApp {
       // 如果当前在学习页面，重新准备学习会话并更新进度
       if (self.currentPage === 'learn') {
         await self.prepareLearnSession();
-        self.renderFlashcard();
+        self.showCard(self.currentCardIndex);
         self.updateProgress();
       }
     });
@@ -879,23 +843,9 @@ class VocabApp {
       option.classList.add('active');
       self.settings.learnMode = option.dataset.mode;
       await self.db.setSetting('learnMode', self.settings.learnMode);
+      // 立即按当前模式重建当日队列（含随机打散），不依赖进度是否为 0
+      await self.prepareLearnSession();
       self.showToast(self.settings.learnMode === 'random' ? '已切换为随机模式' : '已切换为顺序模式');
-    }
-
-    // 字体大小
-    document.querySelectorAll('.font-size-option').forEach(option => {
-      option.addEventListener('click', handleFontSizeClick);
-      option.addEventListener('touchstart', handleFontSizeClick);
-    });
-    
-    async function handleFontSizeClick(e) {
-      e.preventDefault();
-      const option = e.currentTarget;
-      document.querySelectorAll('.font-size-option').forEach(o => o.classList.remove('active'));
-      option.classList.add('active');
-      self.settings.fontSize = option.dataset.size;
-      await self.db.setSetting('fontSize', self.settings.fontSize);
-      self.applySettings();
     }
 
     // 卡片背景色
@@ -991,23 +941,26 @@ class VocabApp {
     const dictTypeSelect = document.getElementById('dictTypeSelect');
     if (dictTypeSelect) {
       dictTypeSelect.addEventListener('change', async () => {
-        // 重新加载词典
+        self.settings.dictImportType = dictTypeSelect.value;
+        await self.db.setSetting('dictImportType', self.settings.dictImportType);
         await self.db.clearAllWords();
+        // 进入词库时应用「全部」筛选；导入完成后立即切换筛选状态
+        self.filterStatus = 'all';
         await self.autoLoadDict();
-        
-        // 更新词库页面
+
         if (self.currentPage === 'library') {
-          self.renderLibrary();
+          await self.renderLibrary();
         }
-        
-        // 更新学习页面
+
         if (self.currentPage === 'learn') {
           self.prepareLearnSession();
         }
-        
+
         self.showToast('词典已更新');
       });
     }
+
+    updateGoalSliderState();
   }
 
   // 应用设置
@@ -1081,20 +1034,20 @@ class VocabApp {
         self._suppressNextCardClickFlip = true;
         self.flipCard();
       } else if (currentX > 80) {
-        // 向右滑动 - 标记为已掌握
+        // 向右滑动（从左往右）- 跳过、下一个单词
         card.style.transform = 'translateX(150%) rotate(15deg)';
         setTimeout(() => {
           card.style.transition = 'none';
           card.style.transform = '';
-          self.markMastered();
+          self.skipCard();
         }, 300);
       } else if (currentX < -80) {
-        // 向左滑动 - 跳过
+        // 向左滑动（从右往左）- 掌握
         card.style.transform = 'translateX(-150%) rotate(-15deg)';
         setTimeout(() => {
           card.style.transition = 'none';
           card.style.transform = '';
-          self.skipCard();
+          self.markMastered();
         }, 300);
       } else {
         // 回到原位
@@ -1186,22 +1139,18 @@ class VocabApp {
       });
     }
     
-    const newWords = availableWords.filter(w => w.status === 'new');
-    const reviewWords = availableWords.filter(w => w.status === 'review');
-    
-    // 优先学习新词，然后是待复习的
-    let todayWords = [...newWords, ...reviewWords].slice(0, this.settings.dailyGoal);
-    
-    // 如果今天的量不够，补充其他单词
-    if (todayWords.length < this.settings.dailyGoal && availableWords.length > 0) {
-      const remaining = availableWords.filter(w => !todayWords.find(t => t.id === w.id));
-      const needed = this.settings.dailyGoal - todayWords.length;
-      todayWords = [...todayWords, ...remaining.slice(0, needed)];
-    }
-    
-    // 随机模式打乱顺序
+    let todayWords;
     if (this.settings.learnMode === 'random') {
-      todayWords = todayWords.sort(() => Math.random() - 0.5);
+      todayWords = this.pickRandomSpreadByCategory(availableWords, this.settings.dailyGoal);
+    } else {
+      const newWords = availableWords.filter((w) => w.status === 'new');
+      const reviewWords = availableWords.filter((w) => w.status === 'review');
+      todayWords = [...newWords, ...reviewWords].slice(0, this.settings.dailyGoal);
+      if (todayWords.length < this.settings.dailyGoal && availableWords.length > 0) {
+        const remaining = availableWords.filter((w) => !todayWords.find((t) => t.id === w.id));
+        const needed = this.settings.dailyGoal - todayWords.length;
+        todayWords = [...todayWords, ...remaining.slice(0, needed)];
+      }
     }
     
     this.todayWords = todayWords;
@@ -1220,6 +1169,7 @@ class VocabApp {
     }
     
     this.updateProgress();
+    this.refreshGoalSliderLockedState();
   }
 
   // 显示卡片
@@ -1234,6 +1184,7 @@ class VocabApp {
     const cardInner = card.querySelector('.flashcard-inner');
     
     const isCantonese = this.isCantoneseWord(word);
+    const cantonesePhoneticFirst = isCantonese || this.isImportedCantoneseLanguage(word);
     const badgeLabel = this.getLanguageBadgeLabel(word);
     
     // 添加分类标签（显示在语言标签后面）
@@ -1262,7 +1213,7 @@ class VocabApp {
           <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
         </button>
         <div class="word">${word.word}</div>
-        <div class="phonetic" id="phoneticText">${isCantonese ? (word.jyutping || word.phonetic || '') : (word.phonetic || word.jyutping || '')}</div>
+        <div class="phonetic" id="phoneticText">${cantonesePhoneticFirst ? (word.jyutping || word.phonetic || '') : (word.phonetic || word.jyutping || '')}</div>
         ${isCantonese && word.cantonese ? `<div class="cantonese-word">${word.cantonese}</div>` : ''}
         <div class="tap-hint">点击查看释义</div>
       </div>
@@ -1346,11 +1297,6 @@ class VocabApp {
     if (!this.isFlipped && this.settings.cardDefinitionFirst) {
       this.schedulePhoneticReadAfterCardSwitch();
     }
-  }
-
-  /** 与导入/导出 Excel、CSV 一致的列顺序（第一行为表头） */
-  importExportHeaders() {
-    return ['word', 'meaning', 'phonetic', 'example', 'category', 'language'];
   }
 
   escapeHtml(text) {
@@ -1516,17 +1462,6 @@ class VocabApp {
     if (low === 'mandarin') raw = '英语';
     else if (low === 'cantonese') raw = '粤语';
     else if (low === 'chinese') raw = '中文';
-    if (raw) return raw;
-    return this.inferLanguageBadgeLabel(word);
-  }
-
-  /** 导出 language 列：与导入常用写法一致，便于往返编辑 */
-  formatLanguageForExport(word) {
-    const raw = String(word.language || '').trim();
-    const low = raw.toLowerCase();
-    if (low === 'mandarin') return '英语';
-    if (low === 'cantonese') return '粤语';
-    if (low === 'chinese') return '中文';
     if (raw) return raw;
     return this.inferLanguageBadgeLabel(word);
   }
@@ -1793,16 +1728,27 @@ class VocabApp {
     
     word.favorite = !word.favorite;
     await this.db.updateWord(word);
-    
-    // 如果是学习模式，同步更新 todayWords 数组中的对象
-    if (!wordId && this.todayWords[this.currentCardIndex]) {
-      this.todayWords[this.currentCardIndex].favorite = word.favorite;
-    }
-    
-    // 更新UI
-    document.querySelectorAll('.favorite-btn').forEach(btn => {
-      btn.classList.toggle('active', word.favorite);
+
+    this.todayWords.forEach((w) => {
+      if (w.id === word.id) w.favorite = word.favorite;
     });
+    if (this._learnSessionSnapshot?.todayWords) {
+      this._learnSessionSnapshot.todayWords.forEach((w) => {
+        if (w.id === word.id) w.favorite = word.favorite;
+      });
+    }
+
+    const shouldRefreshFavoriteUi =
+      !wordId ||
+      (this.currentPage === 'learn' &&
+        this.currentCardIndex < this.todayWords.length &&
+        this.todayWords[this.currentCardIndex]?.id === word.id);
+
+    if (shouldRefreshFavoriteUi) {
+      document.querySelectorAll('.favorite-btn').forEach((btn) => {
+        btn.classList.toggle('active', word.favorite);
+      });
+    }
     
     this.showToast(word.favorite ? '已添加收藏' : '已取消收藏');
   }
@@ -1818,7 +1764,7 @@ class VocabApp {
     this.todayStats.review++;
     await this.db.setSetting('todayStats', this.todayStats);
     
-    this.showToast('已标记为需复习');
+    //this.showToast('已标记为需复习');// 请勿删除该注释
     this.nextCard();
   }
 
@@ -1843,7 +1789,7 @@ class VocabApp {
     this.todayStats.mastered++;
     await this.db.setSetting('todayStats', this.todayStats);
     
-    this.showToast('太棒了！已掌握');
+    // this.showToast('太棒了！已掌握'); // 请勿删除该注释
     this.nextCard();
   }
 
@@ -1867,6 +1813,7 @@ class VocabApp {
       }, 150);
     }
     this.updateProgress();
+    this.refreshGoalSliderLockedState();
   }
 
   cancelScheduledPhoneticRead() {
@@ -1896,7 +1843,7 @@ class VocabApp {
   /** 自动朗读音标时选用的系统 TTS 语言（须随词条语种切换，不能仅靠音标是否为拉丁字母判断） */
   getLangForPhoneticAutoRead(word, phoneticText) {
     const kind = this.getSpeechKind(word);
-    if (kind === 'cantonese') return 'zh-HK';
+    if (kind === 'cantonese' || this.isImportedCantoneseLanguage(word)) return 'zh-HK';
     if (kind === 'mandarin') return 'zh-CN';
     if (/[\u4e00-\u9fff]/.test(phoneticText || '')) return 'zh-CN';
     return 'en-US';
@@ -1910,7 +1857,9 @@ class VocabApp {
     if (!word) return '';
     const jp = (word.jyutping || '').trim();
     const ph = (word.phonetic || '').trim();
-    if (this.getSpeechKind(word) === 'cantonese') {
+    const cantoneseLang =
+      this.getSpeechKind(word) === 'cantonese' || this.isImportedCantoneseLanguage(word);
+    if (cantoneseLang) {
       return jp || ph;
     }
     return ph || jp;
@@ -1970,12 +1919,14 @@ class VocabApp {
     if (!text) text = raw;
 
     const kind = this.getSpeechKind(word);
-    if (kind === 'english' && this.looksLikeEnglishIPA(raw)) {
+    const cantonesePhonetic =
+      kind === 'cantonese' || this.isImportedCantoneseLanguage(word);
+    if (!cantonesePhonetic && kind === 'english' && this.looksLikeEnglishIPA(raw)) {
       const lemma = this.getEnglishLemmaForSpeech(word);
       if (lemma) text = lemma;
     }
 
-    if (kind === 'cantonese') {
+    if (cantonesePhonetic) {
       text = this.normalizeCantoneseRomanizationForSpeech(text);
     }
 
@@ -2087,7 +2038,7 @@ class VocabApp {
     
     // 应用分类筛选
     if (this.selectedCategories && this.selectedCategories.length > 0) {
-      words = words.filter(w => this.selectedCategories.includes(w.category || '未分类'));
+      words = words.filter((w) => this.selectedCategories.includes(w.category || '未分类'));
     }
     
     // 应用搜索
@@ -2248,7 +2199,7 @@ class VocabApp {
           }
           
           this.renderLibrary();
-          this.showToast(newStatus === 'mastered' ? '已标记为掌握' : '已标记为待复习');
+          // this.showToast(newStatus === 'mastered' ? '已标记为掌握' : '已标记为待复习'); // 请勿删除该注释
         }
       });
     });
@@ -2264,38 +2215,6 @@ class VocabApp {
     });
   }
 
-  // 编辑单词
-  async editWord(id) {
-    const words = await this.db.getAllWords();
-    const word = words.find(w => w.id === id);
-    if (!word) return;
-
-    document.getElementById('wordId').value = word.id;
-    document.getElementById('wordInput').value = word.word;
-    document.getElementById('meaningInput').value = word.definition || word.meaning || '';
-    document.getElementById('phoneticInput').value = word.phonetic || '';
-    document.getElementById('exampleInput').value = word.example || '';
-    document.getElementById('categoryInput').value = word.category || '';
-
-    // 语言回显
-    const lang = word.language || 'mandarin';
-    document.querySelectorAll('.language-option').forEach(o => {
-      o.classList.toggle('active', o.dataset.lang === lang);
-    });
-    this.applyLanguageFormVisibility(lang);
-
-    // 粤语字段回显
-    const cantoneseInput = document.getElementById('cantoneseInput');
-    const jyutpingInput = document.getElementById('jyutpingInput');
-    const cantoneseExampleInput = document.getElementById('cantoneseExampleInput');
-    if (cantoneseInput) cantoneseInput.value = word.cantonese || '';
-    if (jyutpingInput) jyutpingInput.value = word.jyutping || '';
-    if (cantoneseExampleInput) cantoneseExampleInput.value = word.cantoneseExample || '';
-
-    document.getElementById('addWordModal').classList.add('active');
-    document.getElementById('modalTitle').textContent = '编辑单词';
-  }
-
   // 查看单词
   async viewWord(id) {
     const words = await this.db.getAllWords();
@@ -2309,21 +2228,6 @@ class VocabApp {
     document.getElementById('exampleInput').value = word.example || '';
     document.getElementById('categoryInput').value = word.category || '';
 
-    // 语言回显
-    const lang = word.language || 'mandarin';
-    document.querySelectorAll('.language-option').forEach(o => {
-      o.classList.toggle('active', o.dataset.lang === lang);
-    });
-    this.applyLanguageFormVisibility(lang);
-
-    // 粤语字段回显
-    const cantoneseInput = document.getElementById('cantoneseInput');
-    const jyutpingInput = document.getElementById('jyutpingInput');
-    const cantoneseExampleInput = document.getElementById('cantoneseExampleInput');
-    if (cantoneseInput) cantoneseInput.value = word.cantonese || '';
-    if (jyutpingInput) jyutpingInput.value = word.jyutping || '';
-    if (cantoneseExampleInput) cantoneseExampleInput.value = word.cantoneseExample || '';
-
     document.getElementById('addWordModal').classList.add('active');
     document.getElementById('modalTitle').textContent = '查看单词';
     
@@ -2335,13 +2239,6 @@ class VocabApp {
     document.getElementById('saveWordBtn').style.display = 'none';
   }
 
-  // 删除单词
-  async deleteWord(id) {
-    if (confirm('确定要删除这个单词吗？')) {
-      await this.db.deleteWord(id);
-      this.showToast('单词已删除');
-    }
-  }
 
   // ==================== 设置页面 ====================
   renderSettings() {
@@ -2351,10 +2248,6 @@ class VocabApp {
     // 学习模式
     document.querySelectorAll('.mode-option').forEach(opt => {
       opt.classList.toggle('active', opt.dataset.mode === this.settings.learnMode);
-    });
-    
-    document.querySelectorAll('.font-size-option').forEach(opt => {
-      opt.classList.toggle('active', opt.dataset.size === this.settings.fontSize);
     });
     
     document.querySelectorAll('.color-option').forEach(opt => {
@@ -2370,6 +2263,17 @@ class VocabApp {
     if (cardDefinitionFirstToggle) {
       cardDefinitionFirstToggle.classList.toggle('active', this.settings.cardDefinitionFirst);
     }
+
+    const dictTypeEl = document.getElementById('dictTypeSelect');
+    if (dictTypeEl) dictTypeEl.value = this.settings.dictImportType || 'phrase';
+
+    const phoneticDelaySelect = document.getElementById('phoneticDelaySelect');
+    if (phoneticDelaySelect) phoneticDelaySelect.value = String(this.settings.phoneticDelay);
+
+    const repeatFrequencySelect = document.getElementById('repeatFrequencySelect');
+    if (repeatFrequencySelect) repeatFrequencySelect.value = String(this.settings.repeatFrequency);
+
+    this.refreshGoalSliderLockedState();
   }
 
   // 清除学习进度
@@ -2398,14 +2302,8 @@ class VocabApp {
       // 更新今日单词列表为空
       this.todayWords = [];
       
-      // 立即更新每日目标滑块状态（启用滑块）
-      const goalSlider = document.getElementById('goalSlider');
-      if (goalSlider) {
-        goalSlider.disabled = false;
-        goalSlider.style.opacity = '1';
-        goalSlider.style.cursor = 'pointer';
-      }
-      
+      this.refreshGoalSliderLockedState();
+
       this.showToast('学习进度已清除');
       
       if (this.currentPage === 'learn') {
@@ -2415,29 +2313,7 @@ class VocabApp {
     }
   }
 
-  // 导出词库为Excel
   // ==================== 模态框 ====================
-  showAddWordModal() {
-    document.getElementById('wordForm').reset();
-    document.getElementById('wordId').value = '';
-    document.getElementById('modalTitle').textContent = '添加单词';
-
-    // 默认英语（mandarin 表示英文词条 + 中文释义）
-    document.querySelectorAll('.language-option').forEach(o => {
-      o.classList.toggle('active', o.dataset.lang === 'mandarin');
-    });
-    this.applyLanguageFormVisibility('mandarin');
-
-    // 启用所有输入框
-    const inputs = document.querySelectorAll('#wordForm input, #wordForm textarea');
-    inputs.forEach(input => input.disabled = false);
-    
-    // 显示保存按钮
-    document.getElementById('saveWordBtn').style.display = '';
-
-    document.getElementById('addWordModal').classList.add('active');
-  }
-
   showImportModal() {
     document.getElementById('importModal').classList.add('active');
     document.getElementById('importPreview').innerHTML = '';
@@ -2577,7 +2453,7 @@ class VocabApp {
     }
   }
 
-  // 解析Excel数据（首行为表头，列名见 importExportHeaders）
+  // 解析Excel数据（首行为表头，列名规则与 parseCSV / resolveImportHeaderKey 一致）
   parseExcel(data) {
     if (!data || data.length < 2) return [];
     const headerCells = data[0].map((c) => String(c ?? '').trim());

@@ -1,6 +1,8 @@
 /* ==================== 全局样式 ==================== */
 :root {
   --primary: #4A90D9;
+  --primary-color: #4A90D9;
+  --border-color: #dfe6e9;
   --primary-dark: #3A7BC8;
   --secondary: #6C5CE7;
   --success: #00B894;
@@ -148,7 +150,7 @@ html, body {
   font-weight: 500;
 }
 
-/* ==================== 页面内容�?==================== */
+/* ==================== 页面内容�?==================== */
 .page-content {
   flex: 1;
   overflow-y: auto;
@@ -338,7 +340,7 @@ html, body {
   max-width: 280px;
 }
 
-/* 语言角标：顶部水平居中，紧贴面上内边�?*/
+/* 语言角标：顶部水平居中，紧贴面上内边�?*/
 .flashcard-badge-row {
   position: absolute;
   top: 0;
@@ -559,7 +561,7 @@ html, body {
   -webkit-transform: rotateY(180deg);
 }
 
-/* 翻面后彻底隐藏正面语言角标（背面不设角标；避免 Mobile Safari 等透视合成叠层穿透或镜像�?*/
+/* 翻面后彻底隐藏正面语言角标（背面不设角标；避免 Mobile Safari 等透视合成叠层穿透或镜像�?*/
 .flashcard.flipped .flashcard-front .flashcard-badge-row {
   display: none !important;
 }
@@ -640,29 +642,6 @@ html, body {
   text-align: center;
 }
 
-.complete-icon {
-  width: 120px;
-  height: 120px;
-  background: linear-gradient(135deg, var(--success) 0%, #00D9A5 100%);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 24px;
-  animation: bounce 0.6s ease;
-}
-
-@keyframes bounce {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.1); }
-}
-
-.complete-icon svg {
-  width: 60px;
-  height: 60px;
-  fill: white;
-}
-
 .complete-title {
   font-size: var(--font-size-xl);
   font-weight: 700;
@@ -741,7 +720,7 @@ html, body {
   margin-top: 12px;
 }
 
-/* 分类下拉多�?*/
+/* 分类下拉多�?*/
 .category-dropdown {
   position: relative;
   width: 100%;
@@ -900,30 +879,6 @@ html, body {
   background: white;
 }
 
-.library-title {
-  font-size: var(--font-size-lg);
-  font-weight: 600;
-}
-
-.btn-add {
-  padding: 10px 20px;
-  background: var(--primary);
-  color: white;
-  border: none;
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.btn-add svg {
-  width: 16px;
-  height: 16px;
-  fill: white;
-}
-
 .category-section {
   margin-bottom: 24px;
   background: white;
@@ -1013,7 +968,7 @@ html, body {
   color: var(--primary);
 }
 
-/* 状态转换标�?*/
+/* 状态转换标�?*/
 .status-switch {
   padding: 4px 10px;
   border-radius: 12px;
@@ -1083,53 +1038,7 @@ html, body {
   color: #FF9800;
 }
 
-/* 分页 */
-.pagination {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 8px;
-  padding: 24px 16px;
-  padding-bottom: calc(24px + env(safe-area-inset-bottom) + 70px);
-}
-
-.page-btn {
-  width: 40px;
-  height: 40px;
-  border: none;
-  background: var(--bg-primary);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--font-size-md);
-  color: var(--text-secondary);
-  transition: all 0.2s;
-}
-
-.page-btn:hover:not(:disabled) {
-  background: var(--primary);
-  color: white;
-}
-
-.page-btn.active {
-  background: var(--primary);
-  color: white;
-}
-
-.page-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.page-btn svg {
-  width: 20px;
-  height: 20px;
-  fill: currentColor;
-}
-
-/* ==================== 空状�?==================== */
+/* ==================== 空状�?==================== */
 .empty-state {
   flex: 1;
   display: flex;
@@ -1352,6 +1261,16 @@ html, body {
   border-bottom: none;
 }
 
+.setting-item > .dict-select,
+.setting-item select.dict-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 70px;
+  font-size: 13px;
+  padding: 10px 28px 10px 14px;
+  box-sizing: border-box;
+}
+
 .setting-info h4 {
   font-size: var(--font-size-md);
   font-weight: 500;
@@ -1364,7 +1283,7 @@ html, body {
   color: var(--text-secondary);
 }
 
-/* Toggle 开�?*/
+/* Toggle 开�?*/
 .toggle {
   width: 52px;
   height: 32px;
@@ -1396,7 +1315,7 @@ html, body {
   left: 22px;
 }
 
-/* 颜色选择�?*/
+/* 颜色选择�?*/
 .color-options {
   display: flex;
   gap: 12px;
@@ -1417,13 +1336,13 @@ html, body {
   transform: scale(1.1);
 }
 
-/* 词典管理下拉�?*/
+/* 词典管理下拉�?*/
 .dict-select {
-  padding: 8px 24px 8px 12px;
+  padding: 10px 28px 10px 14px;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-md);
   color: var(--text-primary);
   cursor: pointer;
   outline: none;
@@ -1441,28 +1360,6 @@ html, body {
 .dict-select:focus {
   border-color: var(--primary-color);
   box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.2);
-}
-
-/* 语言选项 */
-.language-options {
-  display: flex;
-  gap: 8px;
-}
-
-.language-option {
-  padding: 10px 24px;
-  background: var(--bg-primary);
-  border: none;
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.language-option.active {
-  background: var(--primary);
-  color: white;
 }
 
 /* 学习模式选项 */
@@ -1510,6 +1407,15 @@ html, body {
   background: var(--primary);
   border-radius: 50%;
   cursor: pointer;
+}
+
+.slider:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.slider:disabled::-webkit-slider-thumb {
+  cursor: not-allowed;
 }
 
 .slider-value {
@@ -1584,18 +1490,6 @@ html, body {
   overflow-y: auto;
 }
 
-.import-preview-item {
-  display: flex;
-  justify-content: space-between;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--bg-card);
-  font-size: var(--font-size-sm);
-}
-
-.import-preview-item:last-child {
-  border-bottom: none;
-}
-
 /* ==================== Toast 提示 ==================== */
 .toast {
   position: fixed;
@@ -1618,7 +1512,7 @@ html, body {
   opacity: 1;
 }
 
-/* ==================== 响应�?==================== */
+/* ==================== 响应�?==================== */
 @media (max-width: 380px) {
   .flashcard {
     height: 380px;
