@@ -839,6 +839,14 @@ class VocabApp {
       await self.db.setSetting('dailyGoal', self.settings.dailyGoal);
       self.showToast('每日目标已更新');
       
+      // 立即更新进度条UI
+      if (document.getElementById('progressFill')) {
+        document.getElementById('progressFill').style.width = '0%';
+      }
+      if (document.getElementById('progressText')) {
+        document.getElementById('progressText').textContent = `0/${self.settings.dailyGoal}`;
+      }
+      
       // 如果当前在学习页面，重新准备学习会话并更新进度
       if (self.currentPage === 'learn') {
         await self.prepareLearnSession();
@@ -2006,12 +2014,12 @@ class VocabApp {
 
   // 更新进度
   updateProgress() {
-    const progress = this.todayWords.length > 0 
-      ? Math.round((this.currentCardIndex / this.todayWords.length) * 100) 
+    const progress = this.settings.dailyGoal > 0 
+      ? Math.round((this.currentCardIndex / this.settings.dailyGoal) * 100) 
       : 0;
     
     document.getElementById('progressFill').style.width = `${progress}%`;
-    document.getElementById('progressText').textContent = `${this.currentCardIndex}/${this.todayWords.length}`;
+    document.getElementById('progressText').textContent = `${this.currentCardIndex}/${this.settings.dailyGoal}`;
     
     document.getElementById('statMastered').textContent = this.todayStats.mastered;
     document.getElementById('statReview').textContent = this.todayStats.review;
@@ -2384,11 +2392,19 @@ class VocabApp {
         document.getElementById('progressFill').style.width = '0%';
       }
       if (document.getElementById('progressText')) {
-        document.getElementById('progressText').textContent = '0/0';
+        document.getElementById('progressText').textContent = `0/${this.settings.dailyGoal}`;
       }
       
       // 更新今日单词列表为空
       this.todayWords = [];
+      
+      // 立即更新每日目标滑块状态（启用滑块）
+      const goalSlider = document.getElementById('goalSlider');
+      if (goalSlider) {
+        goalSlider.disabled = false;
+        goalSlider.style.opacity = '1';
+        goalSlider.style.cursor = 'pointer';
+      }
       
       this.showToast('学习进度已清除');
       
