@@ -236,6 +236,19 @@
               </div>
               <div class="toggle" id="cardDefinitionFirstToggle"></div>
             </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <h4>音标渐显</h4>
+                <p>对应时长结束后，音标才会逐渐显示</p>
+              </div>
+              <select id="phoneticDelaySelect" class="dict-select">
+                <option value="0">0秒</option>
+                <option value="1">1秒</option>
+                <option value="2">2秒</option>
+                <option value="3">3秒</option>
+                <option value="5">5秒</option>
+              </select>
+            </div>
           </div>
 
           <!-- 词典管理 -->
@@ -244,22 +257,37 @@
             <div class="setting-item">
               <div class="setting-info">
                 <h4>词典导入</h4>
-                <p>选择要导入的词典范围</p>
+                <p>选择要导入的词典，默认展示为短语</p>
               </div>
-              <div class="dict-options">
-                <label class="dict-option">
-                  <input type="radio" name="dictType" value="all" checked>
-                  <span>全部</span>
-                </label>
-                <label class="dict-option">
-                  <input type="radio" name="dictType" value="phrase">
-                  <span>短语</span>
-                </label>
-                <label class="dict-option">
-                  <input type="radio" name="dictType" value="word">
-                  <span>字</span>
-                </label>
+              <select id="dictTypeSelect" class="dict-select">
+                <option value="all">全部</option>
+                <option value="phrase" selected>短语</option>
+                <option value="word">字</option>
+              </select>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <h4>重复频率</h4>
+                <p>设置单词重复出现频率，该时间内不会重复出现</p>
               </div>
+              <select id="repeatFrequencySelect" class="dict-select">
+                <option value="0" selected>0天</option>
+                <option value="1">1天</option>
+                <option value="2">2天</option>
+                <option value="3">3天</option>
+                <option value="4">4天</option>
+                <option value="5">5天</option>
+                <option value="6">6天</option>
+                <option value="7">7天</option>
+                <option value="8">8天</option>
+                <option value="9">9天</option>
+                <option value="10">10天</option>
+                <option value="11">11天</option>
+                <option value="12">12天</option>
+                <option value="13">13天</option>
+                <option value="14">14天</option>
+                <option value="15">15天</option>
+              </select>
             </div>
           </div>
 
@@ -306,13 +334,6 @@
       <div class="modal-body">
         <form id="wordForm">
           <input type="hidden" id="wordId">
-          <!-- <div class="form-group">
-            <label class="form-label">语言类型</label>
-            <div class="language-options">
-              <button class="language-option active" data-lang="mandarin">英语</button>
-              <button class="language-option" data-lang="cantonese">粤语</button>
-            </div>
-          </div> -->
           <div class="form-group">
             <label class="form-label">词汇 *</label>
             <input type="text" class="form-input" id="wordInput" placeholder="请输入词汇" required>

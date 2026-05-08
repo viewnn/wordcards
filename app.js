@@ -239,7 +239,11 @@ class VocabApp {
       phoneticAutoRead: false,
       /** 默认先展示释义面；点击后翻到词汇面 */
       cardDefinitionFirst: false,
-      learnMode: 'sequential'
+      learnMode: 'sequential',
+      /** 音标渐显延迟（秒），0表示立即显示 */
+      phoneticDelay: 0,
+      /** 单词重复出现频率（天），0表示每日目标内不重复 */
+      repeatFrequency: 0
     };
     this.todayStats = {
       mastered: 0,
@@ -253,6 +257,8 @@ class VocabApp {
     this._phoneticReadTimer = null;
     /** 词库列表当前展示的词条 id → 对象，避免点击喇叭时 await IndexedDB 导致用户手势失效而无法发声 */
     this._librarySpeakWordsById = new Map();
+    /** 离开学习页时保存的会话快照，用于返回学习页时恢复进度条与队列（不可仅用 switchPage 局部变量） */
+    this._learnSessionSnapshot = null;
   }
 
   async init() {
@@ -290,7 +296,8 @@ class VocabApp {
       const workbook = XLSX.read(data, { type: 'array' });
       
       // 获取当前选择的词典类型
-      const dictType = document.querySelector('input[name="dictType"]:checked')?.value || 'all';
+      const dictTypeSelect = document.getElementById('dictTypeSelect');
+      const dictType = dictTypeSelect?.value || 'all';
       
       let allWords = [];
       
@@ -397,6 +404,8 @@ class VocabApp {
     this.settings.phoneticAutoRead = await this.db.getSetting('phoneticAutoRead', false);
     this.settings.cardDefinitionFirst = await this.db.getSetting('cardDefinitionFirst', false);
     this.settings.learnMode = await this.db.getSetting('learnMode', 'sequential');
+    this.settings.phoneticDelay = await this.db.getSetting('phoneticDelay', 0);
+    this.settings.repeatFrequency = await this.db.getSetting('repeatFrequency', 0);
   }
 
   // 加载今日统计
@@ -723,12 +732,22 @@ class VocabApp {
       </label>
     `).join('');
     
-    // 默认全选
-    document.querySelectorAll('#categoryOptions input[type="checkbox"]').forEach(cb => {
-      cb.checked = true;
-    });
-    document.getElementById('category-all').checked = categories.length > 0;
-    this.selectedCategories = categories;
+    // 如果已有选中的分类，保留用户选择；否则默认全选
+    if (this.selectedCategories && this.selectedCategories.length > 0) {
+      document.querySelectorAll('#categoryOptions input[type="checkbox"]').forEach(cb => {
+        cb.checked = this.selectedCategories.includes(cb.dataset.category);
+      });
+      const allChecked = document.querySelectorAll('#categoryOptions input[type="checkbox"]:checked').length;
+      const allTotal = document.querySelectorAll('#categoryOptions input[type="checkbox"]').length;
+      document.getElementById('category-all').checked = allChecked === allTotal && allTotal > 0;
+    } else {
+      // 默认全选
+      document.querySelectorAll('#categoryOptions input[type="checkbox"]').forEach(cb => {
+        cb.checked = true;
+      });
+      document.getElementById('category-all').checked = categories.length > 0;
+      this.selectedCategories = categories;
+    }
   }
   
   // 渲染分页
@@ -794,10 +813,28 @@ class VocabApp {
     // 每日目标滑块
     const goalSlider = document.getElementById('goalSlider');
     const goalValue = document.getElementById('goalValue');
+    
+    // 更新每日目标滑块的禁用状态
+    const updateGoalSliderState = () => {
+      // 如果有学习进度（currentCardIndex > 0），禁用滑块
+      const hasProgress = self.currentCardIndex > 0;
+      goalSlider.disabled = hasProgress;
+      goalSlider.style.opacity = hasProgress ? '0.5' : '1';
+      goalSlider.style.cursor = hasProgress ? 'not-allowed' : 'pointer';
+    };
+    
     goalSlider.addEventListener('input', () => {
       goalValue.textContent = goalSlider.value;
     });
     goalSlider.addEventListener('change', async () => {
+      // 如果有学习进度，不允许修改
+      if (self.currentCardIndex > 0) {
+        self.showToast('学习进行中，无法修改每日目标');
+        goalSlider.value = self.settings.dailyGoal;
+        goalValue.textContent = self.settings.dailyGoal;
+        return;
+      }
+      
       self.settings.dailyGoal = parseInt(goalSlider.value);
       await self.db.setSetting('dailyGoal', self.settings.dailyGoal);
       self.showToast('每日目标已更新');
@@ -808,6 +845,17 @@ class VocabApp {
         self.renderFlashcard();
         self.updateProgress();
       }
+    });
+    
+    // 监听页面切换，更新滑块状态
+    document.querySelectorAll('.nav-item').forEach(item => {
+      item.addEventListener('click', () => {
+        setTimeout(() => {
+          if (self.currentPage === 'settings') {
+            updateGoalSliderState();
+          }
+        }, 100);
+      });
     });
 
     // 学习模式
@@ -904,14 +952,37 @@ class VocabApp {
       }
     }
 
+    // 音标渐显设置
+    const phoneticDelaySelect = document.getElementById('phoneticDelaySelect');
+    if (phoneticDelaySelect) {
+      phoneticDelaySelect.value = self.settings.phoneticDelay.toString();
+      phoneticDelaySelect.addEventListener('change', async (e) => {
+        self.settings.phoneticDelay = parseInt(e.target.value, 10);
+        await self.db.setSetting('phoneticDelay', self.settings.phoneticDelay);
+        self.showToast(`音标渐显延迟已设置为 ${self.settings.phoneticDelay} 秒`);
+      });
+    }
+
+    // 重复频率设置
+    const repeatFrequencySelect = document.getElementById('repeatFrequencySelect');
+    if (repeatFrequencySelect) {
+      repeatFrequencySelect.value = self.settings.repeatFrequency.toString();
+      repeatFrequencySelect.addEventListener('change', async (e) => {
+        self.settings.repeatFrequency = parseInt(e.target.value, 10);
+        await self.db.setSetting('repeatFrequency', self.settings.repeatFrequency);
+        self.showToast(`重复频率已设置为 ${self.settings.repeatFrequency} 天`);
+      });
+    }
+
     // 清除进度按钮
     const clearProgressBtn = document.getElementById('clearProgressBtn');
     clearProgressBtn.addEventListener('click', () => self.clearProgress());
     clearProgressBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.clearProgress(); });
     
     // 词典类型选择事件
-    document.querySelectorAll('input[name="dictType"]').forEach(radio => {
-      radio.addEventListener('change', async () => {
+    const dictTypeSelect = document.getElementById('dictTypeSelect');
+    if (dictTypeSelect) {
+      dictTypeSelect.addEventListener('change', async () => {
         // 重新加载词典
         await self.db.clearAllWords();
         await self.autoLoadDict();
@@ -928,7 +999,7 @@ class VocabApp {
         
         self.showToast('词典已更新');
       });
-    });
+    }
   }
 
   // 应用设置
@@ -1029,6 +1100,15 @@ class VocabApp {
   switchPage(page) {
     if (this.currentPage === page) return;
 
+    // 离开学习页时把会话存到实例上，否则返回学习页时局部变量已丢失，会误走 prepareLearnSession 导致进度清零
+    if (this.currentPage === 'learn' && this.todayWords && this.todayWords.length > 0) {
+      this._learnSessionSnapshot = {
+        currentCardIndex: this.currentCardIndex,
+        todayWords: JSON.parse(JSON.stringify(this.todayWords)),
+        todayStats: { ...this.todayStats }
+      };
+    }
+
     if (page !== 'learn') {
       this.cancelScheduledPhoneticRead();
     }
@@ -1044,7 +1124,23 @@ class VocabApp {
     });
 
     if (page === 'learn') {
-      this.prepareLearnSession();
+      const snap = this._learnSessionSnapshot;
+      if (snap && snap.todayWords && snap.todayWords.length > 0) {
+        this.todayWords = snap.todayWords;
+        this.currentCardIndex = snap.currentCardIndex;
+        this.todayStats = { ...snap.todayStats };
+        const emptyState = document.getElementById('learnEmptyState');
+        if (emptyState) emptyState.style.display = 'none';
+        this.showCard(this.currentCardIndex);
+        if (this.currentCardIndex < this.todayWords.length) {
+          document.querySelector('.card-stack').style.display = 'flex';
+          document.querySelector('.complete-container').style.display = 'none';
+        }
+        this.updateProgress();
+        this.schedulePhoneticReadAfterCardSwitch();
+      } else {
+        this.prepareLearnSession();
+      }
     } else if (page === 'library') {
       this.renderCategoryOptions();
       this.renderLibrary();
@@ -1062,17 +1158,35 @@ class VocabApp {
   // 准备学习会话
   async prepareLearnSession() {
     this.cancelScheduledPhoneticRead();
+    this._learnSessionSnapshot = null;
 
     const allWords = await this.db.getAllWords();
-    const newWords = allWords.filter(w => w.status === 'new');
-    const reviewWords = allWords.filter(w => w.status === 'review');
+    
+    // 根据重复频率筛选单词
+    const frequency = this.settings.repeatFrequency;
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000; // 一天的毫秒数
+    
+    let availableWords = allWords;
+    
+    if (frequency > 0) {
+      // 筛选出在重复频率时间之外的单词
+      availableWords = allWords.filter(word => {
+        const lastStudied = word.lastStudied || 0;
+        const timePassed = now - lastStudied;
+        return timePassed >= frequency * dayMs;
+      });
+    }
+    
+    const newWords = availableWords.filter(w => w.status === 'new');
+    const reviewWords = availableWords.filter(w => w.status === 'review');
     
     // 优先学习新词，然后是待复习的
     let todayWords = [...newWords, ...reviewWords].slice(0, this.settings.dailyGoal);
     
     // 如果今天的量不够，补充其他单词
-    if (todayWords.length < this.settings.dailyGoal && allWords.length > 0) {
-      const remaining = allWords.filter(w => !todayWords.find(t => t.id === w.id));
+    if (todayWords.length < this.settings.dailyGoal && availableWords.length > 0) {
+      const remaining = availableWords.filter(w => !todayWords.find(t => t.id === w.id));
       const needed = this.settings.dailyGoal - todayWords.length;
       todayWords = [...todayWords, ...remaining.slice(0, needed)];
     }
@@ -1113,12 +1227,19 @@ class VocabApp {
     
     const isCantonese = this.isCantoneseWord(word);
     const badgeLabel = this.getLanguageBadgeLabel(word);
+    
+    // 添加分类标签（显示在语言标签后面）
+    const category = word.category || '';
+    const categoryHtml = category
+      ? `<span class="language-badge category-badge">${this.escapeHtml(category)}</span>`
+      : '';
+    
     const badgeHtml = badgeLabel
       ? `<span class="language-badge">${this.escapeHtml(badgeLabel)}</span>`
       : '';
     
-    const badgeRowHtml = badgeHtml
-      ? `<div class="flashcard-badge-row">${badgeHtml}</div>`
+    const badgeRowHtml = (badgeHtml || categoryHtml)
+      ? `<div class="flashcard-badge-row">${badgeHtml}${badgeHtml && categoryHtml ? '&nbsp;&nbsp;' : ''}${categoryHtml}</div>`
       : '';
 
     cardInner.innerHTML = `
@@ -1133,7 +1254,7 @@ class VocabApp {
           <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
         </button>
         <div class="word">${word.word}</div>
-        <div class="phonetic">${isCantonese ? (word.jyutping || word.phonetic || '') : (word.phonetic || word.jyutping || '')}</div>
+        <div class="phonetic" id="phoneticText">${isCantonese ? (word.jyutping || word.phonetic || '') : (word.phonetic || word.jyutping || '')}</div>
         ${isCantonese && word.cantonese ? `<div class="cantonese-word">${word.cantonese}</div>` : ''}
         <div class="tap-hint">点击查看释义</div>
       </div>
@@ -1160,6 +1281,33 @@ class VocabApp {
     } else {
       card.classList.remove('flipped');
       this.isFlipped = false;
+    }
+
+    // 音标渐显逻辑
+    const phoneticText = document.getElementById('phoneticText');
+    if (phoneticText) {
+      // 取消之前的定时器
+      if (this._phoneticDelayTimer) {
+        clearTimeout(this._phoneticDelayTimer);
+        this._phoneticDelayTimer = null;
+      }
+      
+      const delay = this.settings.phoneticDelay * 1000;
+      if (delay > 0) {
+        // 隐藏音标
+        phoneticText.style.opacity = '0';
+        phoneticText.style.visibility = 'hidden';
+        // 延迟显示
+        this._phoneticDelayTimer = setTimeout(() => {
+          phoneticText.style.opacity = '1';
+          phoneticText.style.visibility = 'visible';
+          this._phoneticDelayTimer = null;
+        }, delay);
+      } else {
+        // 立即显示
+        phoneticText.style.opacity = '1';
+        phoneticText.style.visibility = 'visible';
+      }
     }
 
     if (this.settings.soundEnabled && this.isFlipped) {
@@ -1657,6 +1805,7 @@ class VocabApp {
     
     const word = this.todayWords[this.currentCardIndex];
     word.status = 'review';
+    word.lastStudied = Date.now(); // 记录学习时间
     await this.db.updateWord(word);
     this.todayStats.review++;
     await this.db.setSetting('todayStats', this.todayStats);
@@ -1669,6 +1818,7 @@ class VocabApp {
   skipCard() {
     // 将当前卡片移到队列末尾
     const skipped = this.todayWords.splice(this.currentCardIndex, 1)[0];
+    skipped.lastStudied = Date.now(); // 记录学习时间
     this.todayWords.push(skipped);
     this.showCard(this.currentCardIndex);
     this.schedulePhoneticReadAfterCardSwitch();
@@ -1680,6 +1830,7 @@ class VocabApp {
     
     const word = this.todayWords[this.currentCardIndex];
     word.status = 'mastered';
+    word.lastStudied = Date.now(); // 记录学习时间
     await this.db.updateWord(word);
     this.todayStats.mastered++;
     await this.db.setSetting('todayStats', this.todayStats);
@@ -1996,6 +2147,12 @@ class VocabApp {
                       ${word.favorite ? `
                         <span class="favorite-badge">★</span>
                       ` : ''}
+                      ${word.status === 'mastered' ? `
+                        <span class="status-switch to-review" data-id="${word.id}" data-status="review">➔陌生</span>
+                      ` : ''}
+                      ${word.status === 'review' ? `
+                        <span class="status-switch to-mastered" data-id="${word.id}" data-status="mastered">➔掌握</span>
+                      ` : ''}
                       <span class="status-badge ${word.status}">${
                         word.status === 'mastered' ? '已掌握' : 
                         word.status === 'review' ? '待复习' : '新词'
@@ -2034,6 +2191,57 @@ class VocabApp {
         e.stopPropagation();
         const id = parseInt(btn.dataset.id);
         this.viewWord(id);
+      });
+    });
+
+    // 状态转换标签事件
+    container.querySelectorAll('.status-switch').forEach(span => {
+      span.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = parseInt(span.dataset.id);
+        const newStatus = span.dataset.status;
+        
+        const words = await this.db.getAllWords();
+        const word = words.find(w => w.id === id);
+        if (word) {
+          const oldStatus = word.status;
+          word.status = newStatus;
+          await this.db.updateWord(word);
+          
+          // 更新学习页面的状态数据
+          if (this.todayWords && this.todayWords.length > 0) {
+            const todayWordIndex = this.todayWords.findIndex(w => w.id === id);
+            if (todayWordIndex !== -1) {
+              this.todayWords[todayWordIndex].status = newStatus;
+              
+              // 更新统计数据
+              if (oldStatus === 'review' && newStatus === 'mastered') {
+                this.todayStats.mastered++;
+                this.todayStats.review--;
+              } else if (oldStatus === 'mastered' && newStatus === 'review') {
+                this.todayStats.mastered--;
+                this.todayStats.review++;
+              }
+              
+              // 更新学习会话快照（以便切换回学习页面时能看到更新后的数据）
+              if (this._learnSessionSnapshot) {
+                const snapWordIndex = this._learnSessionSnapshot.todayWords.findIndex(w => w.id === id);
+                if (snapWordIndex !== -1) {
+                  this._learnSessionSnapshot.todayWords[snapWordIndex].status = newStatus;
+                  this._learnSessionSnapshot.todayStats = { ...this.todayStats };
+                }
+              }
+              
+              // 如果当前在学习页面，更新UI
+              if (this.currentPage === 'learn') {
+                this.updateProgress();
+              }
+            }
+          }
+          
+          this.renderLibrary();
+          this.showToast(newStatus === 'mastered' ? '已标记为掌握' : '已标记为待复习');
+        }
       });
     });
 
@@ -2159,33 +2367,34 @@ class VocabApp {
   // 清除学习进度
   async clearProgress() {
     if (confirm('确定要清除学习进度吗？')) {
-      const words = await this.db.getAllWords();
-      for (const word of words) {
-        word.status = 'new';
-        word.reviewCount = 0;
-        word.lastReview = null;
-        word.nextReview = null;
-        await this.db.updateWord(word);
-      }
-      // 清除今日学习记录
+      // 清除今日学习记录和进度，但保留统计数字
       await this.db.setSetting('lastStudyDate', null);
       await this.db.setSetting('todayCount', 0);
-      // 重置今日学习统计（已掌握、待复习、总数）
-      this.todayStats = { mastered: 0, review: 0, total: 0 };
+      
+      // 重置学习进度（进度条归零）
+      this.currentCardIndex = 0;
+      this._learnSessionSnapshot = null;
+      
+      // 保留今日统计数据（已掌握、待复习数量），仅重置总数
+      this.todayStats.total = 0;
       await this.db.setSetting('todayStats', this.todayStats);
-      // 更新UI显示
-      if (document.getElementById('statMastered')) {
-        document.getElementById('statMastered').textContent = '0';
+      
+      // 更新进度条UI
+      if (document.getElementById('progressFill')) {
+        document.getElementById('progressFill').style.width = '0%';
       }
-      if (document.getElementById('statReview')) {
-        document.getElementById('statReview').textContent = '0';
+      if (document.getElementById('progressText')) {
+        document.getElementById('progressText').textContent = '0/0';
       }
-      if (document.getElementById('statTotal')) {
-        document.getElementById('statTotal').textContent = '0';
-      }
+      
+      // 更新今日单词列表为空
+      this.todayWords = [];
+      
       this.showToast('学习进度已清除');
+      
       if (this.currentPage === 'learn') {
-        this.prepareLearnSession();
+        // 显示空状态
+        this.showEmptyState();
       }
     }
   }
