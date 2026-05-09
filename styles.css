@@ -1176,6 +1176,7 @@ html, body {
   color: var(--text-primary);
   border: none;
   border-radius: 8px;
+  text-align: center;
 }
 
 .attention {
@@ -1336,7 +1337,7 @@ html, body {
   transform: scale(1.1);
 }
 
-/* 词典管理下拉�?*/
+/* 词典管理下拉*/
 .dict-select {
   padding: 10px 28px 10px 14px;
   background: var(--bg-primary);
