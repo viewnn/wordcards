@@ -178,6 +178,10 @@ class VocabApp {
       review: 0,
       total: 0
     };
+    this.totalStats = {
+      mastered: 0,
+      review: 0
+    };
     this.searchQuery = '';
     this.filterStatus = 'all';
     /** 触摸翻面后浏览器会合成 click，需忽略下一次点击避免立刻翻回正面 */
@@ -376,12 +380,22 @@ class VocabApp {
     this.settings.dictImportType = await this.db.getSetting('dictImportType', 'phrase');
   }
 
-  // 加载今日统计
+  // 加载今日统计和累计统计
   async loadTodayStats() {
+    // 加载累计统计数据
+    this.totalStats = await this.db.getSetting('totalStats', { mastered: 0, review: 0 });
+    
     const today = new Date().toDateString();
     const savedDate = await this.db.getSetting('statsDate', '');
     
     if (savedDate !== today) {
+      // 新的一天，先将昨日的统计累加到累计统计中
+      const yesterdayStats = await this.db.getSetting('todayStats', { mastered: 0, review: 0, total: 0 });
+      this.totalStats.mastered += yesterdayStats.mastered;
+      this.totalStats.review += yesterdayStats.review;
+      await this.db.setSetting('totalStats', this.totalStats);
+      
+      // 重置今日统计
       this.todayStats = { mastered: 0, review: 0, total: 0 };
       await this.db.setSetting('statsDate', today);
       await this.db.setSetting('todayStats', this.todayStats);
@@ -443,6 +457,19 @@ class VocabApp {
     if (statReview) {
       statReview.addEventListener('click', () => self.handleStatClick('review'));
       statReview.addEventListener('touchstart', (e) => { e.preventDefault(); self.handleStatClick('review'); });
+    }
+    
+    // 累计统计点击事件
+    const totalMastered = document.getElementById('totalMastered');
+    if (totalMastered) {
+      totalMastered.addEventListener('click', () => self.handleTotalStatClick('mastered'));
+      totalMastered.addEventListener('touchstart', (e) => { e.preventDefault(); self.handleTotalStatClick('mastered'); });
+    }
+    
+    const totalReview = document.getElementById('totalReview');
+    if (totalReview) {
+      totalReview.addEventListener('click', () => self.handleTotalStatClick('review'));
+      totalReview.addEventListener('touchstart', (e) => { e.preventDefault(); self.handleTotalStatClick('review'); });
     }
 
     // 保存单词表单
@@ -801,6 +828,8 @@ class VocabApp {
       
       self.settings.dailyGoal = parseInt(goalSlider.value);
       await self.db.setSetting('dailyGoal', self.settings.dailyGoal);
+      // 清除之前保存的学习进度，确保新目标从全新的状态开始
+      await self.db.setSetting('learnProgress', null);
       self.showToast('每日目标已更新');
       
       // 立即更新进度条UI
@@ -1086,19 +1115,30 @@ class VocabApp {
 
     if (page === 'learn') {
       const snap = this._learnSessionSnapshot;
-      if (snap && snap.todayWords && snap.todayWords.length > 0) {
+      // 只有当快照中的队列长度与当前每日目标匹配时才恢复快照
+      const shouldRestoreSnapshot = snap && snap.todayWords && snap.todayWords.length > 0 && 
+                                   snap.todayWords.length === this.settings.dailyGoal;
+      
+      if (shouldRestoreSnapshot) {
         this.todayWords = snap.todayWords;
         this.currentCardIndex = snap.currentCardIndex;
         this.todayStats = { ...snap.todayStats };
         const emptyState = document.getElementById('learnEmptyState');
         if (emptyState) emptyState.style.display = 'none';
-        this.showCard(this.currentCardIndex);
-        if (this.currentCardIndex < this.todayWords.length) {
+        
+        // 检查是否已经完成所有单词学习
+        if (this.currentCardIndex >= this.todayWords.length) {
+          // 显示完成页面
+          this.showComplete();
+        } else {
+          // 继续显示当前卡片
+          this.showCard(this.currentCardIndex);
           document.querySelector('.card-stack').style.display = 'flex';
           document.querySelector('.complete-container').style.display = 'none';
+          this.schedulePhoneticReadAfterCardSwitch();
         }
+        
         this.updateProgress();
-        this.schedulePhoneticReadAfterCardSwitch();
       } else {
         this.prepareLearnSession();
       }
@@ -1116,10 +1156,78 @@ class VocabApp {
     this.applySettings();
   }
 
+  // 保存学习进度到 IndexedDB
+  async saveLearnProgress() {
+    if (!this.todayWords || this.todayWords.length === 0) return;
+    
+    const progress = {
+      currentCardIndex: this.currentCardIndex,
+      todayWords: JSON.parse(JSON.stringify(this.todayWords)),
+      savedAt: new Date().toISOString()
+    };
+    await this.db.setSetting('learnProgress', progress);
+  }
+
+  // 加载学习进度
+  async loadLearnProgress() {
+    const progress = await this.db.getSetting('learnProgress', null);
+    if (!progress) return null;
+    
+    // 检查是否是今天保存的进度
+    const savedDate = new Date(progress.savedAt).toDateString();
+    const today = new Date().toDateString();
+    
+    if (savedDate === today) {
+      return progress;
+    }
+    return null;
+  }
+
   // 准备学习会话
   async prepareLearnSession() {
     this.cancelScheduledPhoneticRead();
     this._learnSessionSnapshot = null;
+
+    // 尝试加载之前保存的学习进度
+    const savedProgress = await this.loadLearnProgress();
+    
+    // 只有在保存的队列长度与当前每日目标匹配时才恢复进度
+    const shouldRestoreProgress = savedProgress && 
+                                  savedProgress.todayWords && 
+                                  savedProgress.todayWords.length === this.settings.dailyGoal &&
+                                  this.currentCardIndex === 0;
+    
+    if (shouldRestoreProgress) {
+      // 恢复之前的学习进度
+      this.todayWords = savedProgress.todayWords;
+      this.currentCardIndex = savedProgress.currentCardIndex;
+      
+      // 更新统计数据
+      this.todayStats.total = this.todayWords.length;
+      await this.db.setSetting('todayStats', this.todayStats);
+      
+      if (this.todayWords.length > 0) {
+        const emptyState = document.getElementById('learnEmptyState');
+        if (emptyState) emptyState.style.display = 'none';
+        
+        // 检查是否已经完成所有单词学习
+        if (this.currentCardIndex >= this.todayWords.length) {
+          // 显示完成页面
+          this.showComplete();
+        } else {
+          // 继续显示当前卡片
+          this.showCard(this.currentCardIndex);
+          document.querySelector('.card-stack').style.display = 'flex';
+          document.querySelector('.complete-container').style.display = 'none';
+        }
+      } else {
+        this.showEmptyState();
+      }
+      
+      this.updateProgress();
+      this.refreshGoalSliderLockedState();
+      return;
+    }
 
     const allWords = await this.db.getAllWords();
     
@@ -1175,7 +1283,6 @@ class VocabApp {
   // 显示卡片
   showCard(index) {
     if (index >= this.todayWords.length) {
-      this.showComplete();
       return;
     }
     
@@ -1764,6 +1871,9 @@ class VocabApp {
     this.todayStats.review++;
     await this.db.setSetting('todayStats', this.todayStats);
     
+    // 保存学习进度
+    await this.saveLearnProgress();
+    
     //this.showToast('已标记为需复习');// 请勿删除该注释
     this.nextCard();
   }
@@ -1788,6 +1898,9 @@ class VocabApp {
     await this.db.updateWord(word);
     this.todayStats.mastered++;
     await this.db.setSetting('todayStats', this.todayStats);
+    
+    // 保存学习进度
+    await this.saveLearnProgress();
     
     // this.showToast('太棒了！已掌握'); // 请勿删除该注释
     this.nextCard();
@@ -1975,6 +2088,10 @@ class VocabApp {
     document.getElementById('statMastered').textContent = this.todayStats.mastered;
     document.getElementById('statReview').textContent = this.todayStats.review;
     
+    // 更新累计统计显示
+    document.getElementById('totalMastered').textContent = this.totalStats.mastered + this.todayStats.mastered;
+    document.getElementById('totalReview').textContent = this.totalStats.review + this.todayStats.review;
+    
     // 更新可点击状态
     const statMastered = document.getElementById('statMastered');
     const statReview = document.getElementById('statReview');
@@ -1991,6 +2108,17 @@ class VocabApp {
   // 处理统计数字点击
   handleStatClick(filter) {
     const count = filter === 'mastered' ? this.todayStats.mastered : this.todayStats.review;
+    if (count >= 1) {
+      this.filterStatus = filter;
+      this.switchPage('library');
+    }
+  }
+
+  // 累计统计点击处理
+  handleTotalStatClick(filter) {
+    const count = filter === 'mastered' 
+      ? this.totalStats.mastered + this.todayStats.mastered 
+      : this.totalStats.review + this.todayStats.review;
     if (count >= 1) {
       this.filterStatus = filter;
       this.switchPage('library');
@@ -2015,6 +2143,11 @@ class VocabApp {
 
   // 重新开始学习
   restartLearn() {
+    // 重置当前卡片索引为0
+    this.currentCardIndex = 0;
+    // 清除保存的学习进度，确保重新生成队列
+    this.db.setSetting('learnProgress', null);
+    // 重新生成学习队列
     this.prepareLearnSession();
   }
 
@@ -2278,18 +2411,21 @@ class VocabApp {
 
   // 清除学习进度
   async clearProgress() {
-    if (confirm('确定要清除学习进度吗？')) {
-      // 清除今日学习记录和进度，但保留统计数字
+    if (confirm('确定要清除所有“已掌握”和“待复习”的记录吗？')) {
+      // 清除所有学习相关设置
       await this.db.setSetting('lastStudyDate', null);
       await this.db.setSetting('todayCount', 0);
+      await this.db.setSetting('learnProgress', null);
+      
+      // 清除今日统计和累计统计
+      this.todayStats = { mastered: 0, review: 0, total: 0 };
+      this.totalStats = { mastered: 0, review: 0 };
+      await this.db.setSetting('todayStats', this.todayStats);
+      await this.db.setSetting('totalStats', this.totalStats);
       
       // 重置学习进度（进度条归零）
       this.currentCardIndex = 0;
       this._learnSessionSnapshot = null;
-      
-      // 保留今日统计数据（已掌握、待复习数量），仅重置总数
-      this.todayStats.total = 0;
-      await this.db.setSetting('todayStats', this.todayStats);
       
       // 更新进度条UI
       if (document.getElementById('progressFill')) {
@@ -2299,16 +2435,44 @@ class VocabApp {
         document.getElementById('progressText').textContent = `0/${this.settings.dailyGoal}`;
       }
       
+      // 更新统计显示UI
+      if (document.getElementById('statMastered')) {
+        document.getElementById('statMastered').textContent = '0';
+      }
+      if (document.getElementById('statReview')) {
+        document.getElementById('statReview').textContent = '0';
+      }
+      if (document.getElementById('totalMastered')) {
+        document.getElementById('totalMastered').textContent = '0';
+      }
+      if (document.getElementById('totalReview')) {
+        document.getElementById('totalReview').textContent = '0';
+      }
+      
       // 更新今日单词列表为空
       this.todayWords = [];
       
+      // 重置所有单词的状态为 new
+      const allWords = await this.db.getAllWords();
+      for (const word of allWords) {
+        if (word.status !== 'new') {
+          word.status = 'new';
+          await this.db.updateWord(word);
+        }
+      }
+      
       this.refreshGoalSliderLockedState();
 
-      this.showToast('学习进度已清除');
+      this.showToast('所有学习记录已清除');
       
       if (this.currentPage === 'learn') {
         // 显示空状态
         this.showEmptyState();
+      }
+      
+      // 如果当前在词库页面，刷新列表
+      if (this.currentPage === 'library') {
+        await this.renderLibrary();
       }
     }
   }

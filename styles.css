@@ -228,6 +228,8 @@ html, body {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
   text-align: center;
+  /* border:1px solid #94c4f8; */
+  cursor: pointer;
 }
 
 .notice {
@@ -241,9 +243,14 @@ html, body {
 }
 
 .stat-value {
-  font-size: var(--font-size-xl);
+  /* 统计数值字体大小 */
+  font-size: 22px;
   font-weight: 700;
   color: var(--primary);
+}
+
+.stat-value-sum {
+  color: #FF9800;
 }
 
 .stat-label {

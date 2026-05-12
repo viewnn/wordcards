@@ -49,11 +49,19 @@
           <div class="stats-row">
             <div class="stat-card">
               <div class="stat-value" id="statMastered">0</div>
-              <div class="stat-label">已掌握</div>
+              <div class="stat-label">今日已掌握</div>
             </div>
             <div class="stat-card">
               <div class="stat-value" id="statReview">0</div>
-              <div class="stat-label">待复习</div>
+              <div class="stat-label">今日待复习</div>
+            </div>
+            <div class="stat-card clickable-stat">
+              <div class="stat-value stat-value-sum" id="totalMastered" data-filter="mastered">0</div>
+              <div class="stat-label">累计已掌握</div>
+            </div>
+            <div class="stat-card clickable-stat">
+              <div class="stat-value stat-value-sum" id="totalReview" data-filter="review">0</div>
+              <div class="stat-label">累计待复习</div>
             </div>
           </div>
 
@@ -91,7 +99,7 @@
 
           <!-- 完成页面 -->
           <div class="complete-container" style="display: none;">
-            <h2 class="complete-title">太棒了！</h2>
+            <h2 class="complete-title">太棒了</h2>
             <p class="complete-subtitle">今日学习目标已完成</p>
             <div class="complete-stats">
               <div class="complete-stat">
