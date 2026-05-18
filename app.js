@@ -171,7 +171,7 @@ class VocabApp {
       /** 单词重复出现频率（天），0表示每日目标内不重复 */
       repeatFrequency: 0,
       /** 词典导入范围：all / phrase / word，与设置页下拉同步 */
-      dictImportType: 'phrase'
+      dictImportType: 'all'
     };
     this.todayStats = {
       mastered: 0,
@@ -198,18 +198,23 @@ class VocabApp {
       this.measureScrollbarWidth();
       await this.db.init();
       await this.loadSettings();
+      const savedDictType = await this.db.getSetting('dictImportType', null);
+      if (savedDictType === null) {
+        this.settings.dictImportType = 'all';
+        await this.db.setSetting('dictImportType', 'all');
+      }
       await this.loadTodayStats();
       const dictTypeSelectInit = document.getElementById('dictTypeSelect');
       if (dictTypeSelectInit) {
-        dictTypeSelectInit.value = this.settings.dictImportType || 'phrase';
+        dictTypeSelectInit.value = this.settings.dictImportType || 'all';
       }
       this.initServiceWorker();
       this.bindEvents();
       this.primeSpeechSynthesis();
-      this.render();
-      
-      // 尝试自动加载 dict.xlsx 文件（每次启动都检查）
+
+      // 先导入词典，再渲染学习页，确保卡片队列为「全部」（短语+字）
       await this.autoLoadDict();
+      this.render();
     } catch (error) {
       console.error('App initialization failed:', error);
       this.showToast('应用初始化失败，正在尝试修复...');
@@ -240,9 +245,9 @@ class VocabApp {
       const data = new Uint8Array(arrayBuffer);
       const workbook = XLSX.read(data, { type: 'array' });
       
-      // 获取当前选择的词典类型
       const dictTypeSelect = document.getElementById('dictTypeSelect');
-      const dictType = dictTypeSelect?.value || 'all';
+      const dictType = this.settings.dictImportType || dictTypeSelect?.value || 'all';
+      if (dictTypeSelect) dictTypeSelect.value = dictType;
       
       let allWords = [];
 
@@ -288,17 +293,19 @@ class VocabApp {
       if (newWords.length === 0) {
         console.log('dict.xlsx 中没有新单词');
         await this.refreshLibraryFiltersAfterDictChange();
+        if (this.currentPage === 'learn') {
+          await this.prepareLearnSession();
+        }
         return;
       }
-      
+
       await this.db.batchAddWords(newWords);
       this.showToast(`已自动导入 ${newWords.length} 个新单词`);
 
       await this.refreshLibraryFiltersAfterDictChange();
-      
-      // 如果当前在学习页面，刷新学习会话
+
       if (this.currentPage === 'learn') {
-        this.prepareLearnSession();
+        await this.prepareLearnSession();
       }
     } catch (error) {
       console.error('自动加载 dict.xlsx 失败:', error);
@@ -377,7 +384,7 @@ class VocabApp {
     this.settings.learnMode = await this.db.getSetting('learnMode', 'sequential');
     this.settings.phoneticDelay = await this.db.getSetting('phoneticDelay', 0);
     this.settings.repeatFrequency = await this.db.getSetting('repeatFrequency', 0);
-    this.settings.dictImportType = await this.db.getSetting('dictImportType', 'phrase');
+    this.settings.dictImportType = await this.db.getSetting('dictImportType', 'all');
   }
 
   // 加载今日统计和累计统计
@@ -2402,7 +2409,7 @@ class VocabApp {
     }
 
     const dictTypeEl = document.getElementById('dictTypeSelect');
-    if (dictTypeEl) dictTypeEl.value = this.settings.dictImportType || 'phrase';
+    if (dictTypeEl) dictTypeEl.value = this.settings.dictImportType || 'all';
 
     const phoneticDelaySelect = document.getElementById('phoneticDelaySelect');
     if (phoneticDelaySelect) phoneticDelaySelect.value = String(this.settings.phoneticDelay);
