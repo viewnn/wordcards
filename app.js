@@ -975,15 +975,19 @@ class VocabApp {
         await self.db.clearAllWords();
         // 进入词库时应用「全部」筛选；导入完成后立即切换筛选状态
         self.filterStatus = 'all';
+        // 词典切换后词库已重建，清除学习会话缓存，避免返回学习页时恢复旧队列
+        await self.db.setSetting('learnProgress', null);
+        self._learnSessionSnapshot = null;
+        self.currentCardIndex = 0;
+        self.todayStats = { mastered: 0, review: 0, total: 0 };
+        await self.db.setSetting('todayStats', self.todayStats);
         await self.autoLoadDict();
 
         if (self.currentPage === 'library') {
           await self.renderLibrary();
         }
 
-        if (self.currentPage === 'learn') {
-          self.prepareLearnSession();
-        }
+        await self.prepareLearnSession();
 
         self.showToast('词典已更新');
       });
