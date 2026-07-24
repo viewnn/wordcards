@@ -1,0 +1,2015 @@
+{
+  "commonShort": [
+    {
+      "word": "一系",
+      "phonetic": "jat1 hai6",
+      "meaning": "表示“要不然，不如”",
+      "category": "常用语",
+      "example": "一系你去，一系我去（要么你去，要么我去）；你去啦，一系我去喇（你去吧，要不我去）"
+    },
+    {
+      "word": "至得",
+      "phonetic": "zi3 dak1",
+      "meaning": "表示“...才行”",
+      "category": "常用语",
+      "example": "呢件事，要揾佢至得（这件事，要找他才行）"
+    },
+    {
+      "word": "系就系",
+      "phonetic": "hai6 zau6 hai6",
+      "meaning": "承接上文，然后引出不一样的情况，相当于“倒”",
+      "category": "常用语",
+      "example": "件衫系就系几靓（这件衣服倒是挺好看）；佢系就系想去（他倒是想去）"
+    },
+    {
+      "word": "都系...好啲",
+      "phonetic": "dou1 hai6...hou2 di1",
+      "meaning": "表示“还是...好”",
+      "category": "常用语",
+      "example": "都系你去好啲（还是你去好点）"
+    },
+    {
+      "word": "唔理...都",
+      "phonetic": "m4 lei5...dou1",
+      "meaning": "表示“不管...都”",
+      "category": "常用语",
+      "example": "唔理系边个都唔畀入（不管是谁都不给进）"
+    },
+    {
+      "word": "又系噃",
+      "phonetic": "jau6 hai6 bo3",
+      "meaning": "表示领悟比自已更好的想法，相当于“倒也是”",
+      "category": "常用语",
+      "example": "你点解星期三唔去嘞 —— 又系噃（倒也是）"
+    },
+    {
+      "word": "系噉+动词",
+      "phonetic": "hai6 gam2...",
+      "meaning": "强调动作的重复或持续，表示“一个劲的”",
+      "category": "常用语",
+      "example": "我哋系噉行，三个字就到了（我们一个劲的就下去，15 分钟就到了）"
+    },
+    {
+      "word": "郁唔得其正",
+      "phonetic": "juk1 m4 dak1 kei4 zing3",
+      "meaning": "表示“怎么努力也动弹不得”",
+      "category": "常用语",
+      "example": "佢畀门夹住，郁唔得其正（他被们夹住了，动弹不得）"
+    },
+    {
+      "word": "例牌",
+      "phonetic": "lai6 paai4",
+      "meaning": "表示“一向，向往常一样”",
+      "category": "常用语",
+      "example": "食完饭，例牌睇睇电视（食完饭，同往常一样，看看电视）"
+    },
+    {
+      "word": "输蚀",
+      "phonetic": "syu1 sik6",
+      "meaning": "表示“比不上，吃亏”",
+      "category": "常用语",
+      "example": "你以为我唱歌会输蚀畀你咩？（你以为我唱歌比不上你吗？）"
+    },
+    {
+      "word": "极之",
+      "phonetic": "gik6 zi1",
+      "meaning": "表示“程度高，很，非常”",
+      "category": "常用语",
+      "example": "个日，大家玩得极之开心（那天，大家玩得非常开心）"
+    },
+    {
+      "word": "假假地",
+      "phonetic": "gaa2 gaa2 dei2",
+      "meaning": "表示“至少”",
+      "category": "常用语",
+      "example": "而家，一层楼假假地都卖几百万㗎（现在，一层楼至少得卖几百万啦）"
+    },
+    {
+      "word": "令到",
+      "phonetic": "ling6 dou3",
+      "meaning": "表示“使得”",
+      "category": "常用语",
+      "example": "佢冇来到，令到我哋开会都开唔成（他没来都，使得我们开会都开不成）"
+    },
+    {
+      "word": "使乜",
+      "phonetic": "sai2 mat1",
+      "meaning": "表示“犯不着”",
+      "category": "常用语",
+      "example": "使乜特登行一趟啫（犯不着特意来一趟）"
+    },
+    {
+      "word": "去得过",
+      "phonetic": "heoi3 dak1 gwo3",
+      "meaning": "表示“值得去”",
+      "category": "常用语",
+      "example": "行程都几好，去得过（行程都很好啊，值得去）"
+    },
+    {
+      "word": "又+形容词+又盛",
+      "phonetic": "...jau6 sing6",
+      "meaning": "表示“延续或加强前一个词的意思”",
+      "category": "常用语",
+      "example": "呢啲提子，又酸又盛，唔好食嘅（这些提子好酸，不好吃）；你又咳又盛，仲食炸嘢？（你咳嗽得厉害，还吃炸的东西）"
+    },
+    {
+      "word": "怪唔之得",
+      "phonetic": "gwaai3 m4 zi1 dak1",
+      "meaning": "表示“怪不得，难怪”",
+      "category": "常用语",
+      "example": "怪唔之得呢排唔见你了（难怪这些日子见不到你了）"
+    },
+    {
+      "word": "打个 Round",
+      "phonetic": "daa2 go3 Round",
+      "meaning": "表示“打个转，走一走，溜达溜达”",
+      "category": "常用语",
+      "example": "返广州打个唥（回广州转一转）"
+    },
+    {
+      "word": "噉唔系",
+      "phonetic": "gam2 m4 hai6",
+      "meaning": "表示“可不是吗”",
+      "category": "常用语",
+      "example": "噉唔系，而家就要同佢揾学校（可不是吗，现在就要跟他一起找学校）"
+    },
+    {
+      "word": "有得走盏",
+      "phonetic": "jau5 dak1 zau2 zaan2",
+      "meaning": "表示“有迂回的余地”",
+      "category": "常用语",
+      "example": "如果政府派位派唔到嘅话，都有得就盏（如果政府派不到位的话，也有迂回的余地）"
+    },
+    {
+      "word": "认真",
+      "phonetic": "jing2 zan1",
+      "meaning": "表示“的确”",
+      "category": "常用语",
+      "example": "香港岛嘅山，认真冇得弹（香港的山，的确无可挑剔）"
+    },
+    {
+      "word": "话之你/佢",
+      "phonetic": "waa6 zi1 nei5/keoi5",
+      "meaning": "表示“唔理”，“不管”的意思",
+      "category": "常用语",
+      "example": "话之你要几多钱，佢都唔会放弃㗎喇（不管你要多少钱，他都不会放弃的了）；你仲唔去，佢都等你好耐㗎喇 —— 话之佢啊（管他呢）"
+    },
+    {
+      "word": "心郁郁",
+      "phonetic": "sam1 juk1 juk1",
+      "meaning": "表示“心动”",
+      "category": "常用语",
+      "example": "讲到我都心郁郁添（讲得我都心动了）"
+    },
+    {
+      "word": "卸膊",
+      "phonetic": "se3 bok3",
+      "meaning": "表示“推卸责任”",
+      "category": "常用语",
+      "example": "你冇卸膊㖞（你不要推卸责任哦）"
+    },
+    {
+      "word": "捉字虱",
+      "phonetic": "zuk1 zi6 sat1",
+      "meaning": "表示“扣字眼”",
+      "category": "常用语",
+      "example": "你捉我字虱之嘛（你扣我字眼而已）"
+    },
+    {
+      "word": "过到骨",
+      "phonetic": "gwo3 dou2 gwat1",
+      "meaning": "表示“侥幸过关了”",
+      "category": "常用语",
+      "example": "估唔到，噉都畀你过到骨（想不到，这都能让你侥幸过关了）"
+    },
+    {
+      "word": "切生猪肉",
+      "phonetic": "cit3 saang1 zyu1 juk6",
+      "meaning": "表示“栽赃嫁祸”，",
+      "category": "常用语",
+      "example": "你系唔系想切我生猪肉（你是不是想栽赃嫁祸给我）"
+    },
+    {
+      "word": "撩棱",
+      "phonetic": "liu1 lang1",
+      "meaning": "表示“刁钻、冷门、不常见”",
+      "category": "常用语",
+      "example": "咁撩棱嘅要求都谂得出，你真系犀利啊（这么刁钻的要求都想得出，你真厉害）"
+    },
+    {
+      "word": "查实",
+      "phonetic": "caa4 sat6",
+      "meaning": "表示“其实，实际上”",
+      "category": "常用语",
+      "example": "查实呢间公司都几好（其实这间公司也还好）"
+    },
+    {
+      "word": "睇匀晒",
+      "phonetic": "tai2 wan4 saai3",
+      "meaning": "表示“浏览一遍”",
+      "category": "常用语",
+      "example": "睇匀晒呢六个方面（浏览一遍这六个方面）"
+    },
+    {
+      "word": "生性",
+      "phonetic": "saang1 sing3",
+      "meaning": "表示“小孩董事，年轻人争气，希望对自已有利”",
+      "category": "常用语",
+      "example": "表示小孩懂事：阿敏好生性（阿敏很懂事）；记住，要生生性性（记住，得该懂事了）；表示年轻人争气，有出息：后生嗰阵唔生性（年轻的时候不争气，没出息）；表示希望某种行为对自已有利：望啲马仔今晚生性啲啦（希望今晚的赌马我能赢）"
+    },
+    {
+      "word": "受落",
+      "phonetic": "sau6 lok6",
+      "meaning": "表示“接受，欢迎”",
+      "category": "常用语",
+      "example": "学英文可以增长知识，深得国内人受落（学英语能增长知识，深得国内人欢迎）"
+    },
+    {
+      "word": "直情",
+      "phonetic": "zik6 cing4",
+      "meaning": "表示“干脆”",
+      "category": "常用语",
+      "example": "而家有啲后生嘅夫妇，直情唔想生仔（现在好多年轻的夫妇，干脆不想生孩子）"
+    },
+    {
+      "word": "逼到冚晒",
+      "phonetic": "bik1 dou3 ham6 saai3",
+      "meaning": "表示“挤得水泄不通”",
+      "category": "常用语",
+      "example": "条路逼到冚晒（这条路挤得水泄不通）"
+    },
+    {
+      "word": "的而且确",
+      "phonetic": "dik1 ji4 ce2 kok3",
+      "meaning": "表示“的的确确”",
+      "category": "常用语",
+      "example": "呢件事，的而且确系佢做嘅（这件事，的的确确是他做嘅）"
+    },
+    {
+      "word": "架势",
+      "phonetic": "gaa3 sai3",
+      "meaning": "贬义词，表示“了不起”",
+      "category": "常用语",
+      "example": "有咩咁好架势啊（有什么好了不起的啊）"
+    },
+    {
+      "word": "咁啱得咁跷",
+      "phonetic": "gam3 ngaam1 dak1 gam3 kiu2",
+      "meaning": "表示“恰巧，刚刚好”",
+      "category": "常用语",
+      "example": "喺度撞到，咁啱得咁跷（在这里撞倒，好巧啊）"
+    },
+    {
+      "word": "话晒",
+      "phonetic": "waa6 saai3",
+      "meaning": "表示“毕竟，不管怎样”",
+      "category": "常用语",
+      "example": "话晒今日都系我生日（毕竟今天是我生日）"
+    },
+    {
+      "word": "箩底橙",
+      "phonetic": "lo4 dai2 caang2",
+      "meaning": "表示“剩货，最差的，挑剩的东西”",
+      "category": "常用语",
+      "example": "要做箩底橙先至开心?（要做最差的才会开心吗?）"
+    },
+    {
+      "word": "一句（说话）讲晒",
+      "phonetic": "jat1 geoi3 gong2 saai3",
+      "meaning": "表示“总的来说”",
+      "category": "常用语",
+      "example": "总之，一句（说话）讲晒，佢系一个伪君子（总之，总的来说，他是一位伪君子）"
+    },
+    {
+      "word": "献世",
+      "phonetic": "hin3 sai3",
+      "meaning": "表示“丢人现眼的露面”",
+      "category": "常用语",
+      "example": "你今日做咩畀人睇献世啊?（你今天干了什么，给人家看笑话啊）"
+    },
+    {
+      "word": "捱唔住",
+      "phonetic": "ngaai4 m4 zyu6",
+      "meaning": "表示“挺不住了”",
+      "category": "常用语",
+      "example": "呢排，我真系捱唔住啊?（最近，我真是挺不住了）"
+    },
+    {
+      "word": "下栏钱",
+      "phonetic": "haa6 laan4 cin2",
+      "meaning": "表示“卖废品或回收所赚到的钱”",
+      "category": "常用语",
+      "example": "呢啲系下栏钱嚟㗎（这些是回收所赚的钱来着）"
+    },
+    {
+      "word": "踢爆",
+      "phonetic": "tek3 baau3",
+      "meaning": "表示“揭穿，揭发”",
+      "category": "常用语",
+      "example": "你冇踢爆我喇（你不要揭穿我了）"
+    },
+    {
+      "word": "伙计",
+      "phonetic": "fo2 gei3",
+      "meaning": "表示“合作伙伴”",
+      "category": "常用语",
+      "example": "佢系我伙计嚟㗎（他是我伙伴来着）"
+    },
+    {
+      "word": "冬瓜豆腐",
+      "phonetic": "dung1 gwaa1 dau6 fu6",
+      "meaning": "表示“三长两短，意外的事”",
+      "category": "常用语",
+      "example": "如果佢有乜冬瓜豆腐，我就惟你是问（如果他有什么三长两短，我拿你问罪）"
+    },
+    {
+      "word": "含含声",
+      "phonetic": "ham4 ham2 seng1",
+      "meaning": "表示“人声鼎沸，嘈杂”",
+      "category": "常用语",
+      "example": "啲人含含声，听唔到佢讲嘢（那些人太嘈了，听不到他说话）"
+    },
+    {
+      "word": "后尾",
+      "phonetic": "hau1 mei1",
+      "meaning": "表示“后来，最后，末尾”",
+      "category": "常用语",
+      "example": "只狗咪我养嘅啰，后尾无端端失咗踪添啊（这只狗是我养的，后来无端端失踪了）"
+    },
+    {
+      "word": "好易话为",
+      "phonetic": "hou2 ji6 waa6 wai4",
+      "meaning": "表示一个人“好商量，好办”",
+      "category": "常用语",
+      "example": "阿 Red 呢份人，好易话为（阿 Red 这个人，很容易商量）"
+    },
+    {
+      "word": "恶顶",
+      "phonetic": "ok3 ding2",
+      "meaning": "表示这个人“难相处，难以忍受，受不了”",
+      "category": "常用语",
+      "example": "佢份人，真系恶顶（他这个人，真是很难相处）"
+    },
+    {
+      "word": "揦住",
+      "phonetic": "laa2 zyu6",
+      "meaning": "表示这个人“心情难过”",
+      "category": "常用语",
+      "example": "有啲揦住（心情有点难过）"
+    },
+    {
+      "word": "哽住哽住",
+      "phonetic": "ngang2 zyu6 ngang2 zyu6",
+      "meaning": "表示“心里堵得慌，难以下咽”",
+      "category": "常用语",
+      "example": "我一谂起章记，个心就会哽住哽住（我一想起章记，心里就堵的慌/难受）"
+    },
+    {
+      "word": "唱衰",
+      "phonetic": "coeng3 seoi1",
+      "meaning": "表示“诋毁，说别人坏话”",
+      "category": "常用语",
+      "example": "你冇唱衰我！（你不要诋毁我！）"
+    },
+    {
+      "word": "睇热",
+      "phonetic": "tai2 jit6",
+      "meaning": "表示“小心热”，通常在别人喝热饮时，提醒对方",
+      "category": "常用语",
+      "example": ""
+    },
+    {
+      "word": "挠",
+      "phonetic": "naau6、jaau1",
+      "meaning": "表示“挠痒痒”，“左、右撇子”",
+      "category": "常用语",
+      "example": "表示挠（naau6）痒痒：你帮我挠下（你帮我挠下痒痒）；表示挠（jaau1）：佢系左挠（仔）（他是个左撇子）"
+    },
+    {
+      "word": "煨",
+      "phonetic": "wui1",
+      "meaning": "表示“烧”，与“该~”搭配时表示“倒霉”",
+      "category": "常用语",
+      "example": "表示烤：煨番薯（烧红薯）；煨鸡（烧鸡）；表示倒霉：哎呀，该煨啰（哎呀，倒霉了/衰了）"
+    },
+    {
+      "word": "卖口乖",
+      "phonetic": "maai6 hau2 gwaai1",
+      "meaning": "表示“说好听的话”，“耍嘴皮子”",
+      "category": "常用语",
+      "example": "表示说好听的话：净系识得卖口乖，做啲实在嘅嘢啦（光会说好听的，做点实际的吧）；表示耍嘴皮子：冇人听你卖口乖啊，数下把嘴啦（没有听你耍嘴皮子，闭上你的嘴吧）"
+    },
+    {
+      "word": "即系",
+      "phonetic": "zik1 hai6",
+      "meaning": "表示“就是”，如果加“亦~”，表示“也就是”",
+      "category": "常用语",
+      "example": "表示也就是：阿超嘅老窦亦即系阿文嘅舅父（阿超的父亲也就是阿文的舅舅）；表示就是说：咁你即系话，我细路系颠嘅？（那你就是说我弟弟是个傻子？）；表示就是：粤即系广州（粤就是广州）"
+    },
+    {
+      "word": "醒定啲",
+      "phonetic": "sing2 ding6 di1",
+      "meaning": "表示“当心一点，醒目一点”",
+      "category": "常用语",
+      "example": "大家醒定啲（大家醒目点）"
+    },
+    {
+      "word": "大头佛",
+      "phonetic": "daai6 tau4 fat6",
+      "meaning": "表示“麻烦，问题，困扰”，只能放在句末",
+      "category": "常用语",
+      "example": "唔喺你身边就搞出大头佛嘞！（不在你身边就搞出个大麻烦啦！）"
+    },
+    {
+      "word": "一箸夹中",
+      "phonetic": "jat1 zyu6 gaap3 zung1",
+      "meaning": "表示“一下子就猜中”",
+      "category": "常用语",
+      "example": "哼，畀我一箸夹中喇，系咪？（喏，让我一下就猜到了，对不对？）"
+    },
+    {
+      "word": "长气",
+      "phonetic": "coeng4 hei3",
+      "meaning": "表示“说话啰嗦”",
+      "category": "常用语",
+      "example": "你唔好嫌阿妈长气啊，佢都系为你好嘎咋（你不要嫌妈妈啰嗦，她都是为你好的）"
+    },
+    {
+      "word": "得把口",
+      "phonetic": "dak1 baa2 hau2",
+      "meaning": "表示“只会说，光说不做”",
+      "category": "常用语",
+      "example": "你成日话要做大生意，都系得把口（你整天说要做大生意，都是光说不做）"
+    },
+    {
+      "word": "只抽",
+      "phonetic": "zek3 cau1",
+      "meaning": "表示“单挑”",
+      "category": "常用语",
+      "example": "几时过嚟只抽？（什么时候过来单挑？）"
+    },
+    {
+      "word": "食大茶饭",
+      "phonetic": "sik6 daai6 caa4 faan6",
+      "meaning": "表示“做偏门生意，做大案，犯大案”",
+      "category": "常用语",
+      "example": "十年之后，一齐食大茶饭？（十年之后，一起做偏门生意）"
+    },
+    {
+      "word": "啱嘴型",
+      "phonetic": "ngaam1 zeoi2 jing4",
+      "meaning": "表示“聊得来”",
+      "category": "常用语",
+      "example": "我哋咁啱嘴型，就话畀你知啦（我们这么聊得来，我就告诉你吧）"
+    },
+    {
+      "word": "大细超",
+      "phonetic": "daai6 sai3 ciu1",
+      "meaning": "表示“不公平，偏心”",
+      "category": "常用语",
+      "example": "妈咪，你又大细超啦（妈咪，你又偏心啦）"
+    },
+    {
+      "word": "的式",
+      "phonetic": "dik1 sik1",
+      "meaning": "表示“精致，小巧”",
+      "category": "常用语",
+      "example": "哗，噉的式你都揾得翻（哇，这么小巧你都能找到）"
+    },
+    {
+      "word": "你铺话法",
+      "phonetic": "pou1 waa6 faat3",
+      "meaning": "表示“你这么说不对，看你说的”",
+      "category": "常用语",
+      "example": "阿爸，你铺话法啦...（爸，你这么说就不对啦......）"
+    },
+    {
+      "word": "挑通眼眉",
+      "phonetic": "tiu1 tung1 ngaan5 mei4",
+      "meaning": "表示“察颜悦色，观察入微”",
+      "category": "常用语",
+      "example": "你真识挑通眼眉（你真会察言观色）"
+    },
+    {
+      "word": "打趸",
+      "phonetic": "daa2 dan2",
+      "meaning": "表示“长时间停留在一个地方，消磨时间”",
+      "category": "常用语",
+      "example": "表示消磨时间：佢成日都嚟呢度打趸（他每天都来这里消磨时间）"
+    },
+    {
+      "word": "因住",
+      "phonetic": "jan1 zyu6",
+      "meaning": "表示“当心，小心”",
+      "category": "常用语",
+      "example": "因住佢高中，做你上司呀（当心他升职，做你上司啊）；因住电亲（当心触电）"
+    },
+    {
+      "word": "踢晒脚",
+      "phonetic": "tek3 saai3 goek3",
+      "meaning": "表示“很忙，忙的晕头转向”",
+      "category": "常用语",
+      "example": "忙到踢晒脚（忙到晕头转向）"
+    },
+    {
+      "word": "揩",
+      "phonetic": "haai",
+      "meaning": "表示“蹭到，沾上”，如果形容车子刮蹭，则用“揩亲，揩花”",
+      "category": "常用语",
+      "example": "揩亲下啫（刮蹭下而已）；都怪我唔小心揩花隔离个车（怪我不小心刮花了旁边的车）"
+    },
+    {
+      "word": "直头",
+      "phonetic": "zik6 tau4",
+      "meaning": "表示“径直，直接，简直”",
+      "category": "常用语",
+      "example": "表示直接：直头揾佢哋董事长倾（直接找他们董事长谈）；表示简直：佢直头喺度作死（他简直在这作死）"
+    },
+    {
+      "word": "甩底",
+      "phonetic": "lat1 dai2",
+      "meaning": "表示“爽约，糟糕”",
+      "category": "常用语",
+      "example": "表示爽约：七点钟喺戏院门口见，咪甩底啊（七点钟戏院门口见，别爽约啊）；表示事情弄糟：一唔觉意就会甩底（一不小心就会弄糟）"
+    },
+    {
+      "word": "咧气",
+      "phonetic": "le2 he3",
+      "meaning": "表示“狼狈，匆忙，衣冠不整，手足无措”：被动",
+      "category": "常用语",
+      "example": "如果指意我一个，真系咧晒气（如果指望我自已，真是手足无措）"
+    },
+    {
+      "word": "瞌眼训",
+      "phonetic": "hap6 ngaan5 fan3",
+      "meaning": "表示“打瞌睡”，单独的瞌表示“小睡一会”",
+      "category": "常用语",
+      "example": "好攰啊？—— 唔系，瞌咗几粒钟（很累啊？—— 不是，小睡了一会）"
+    },
+    {
+      "word": "冇啦掕",
+      "phonetic": "mou5 laa1 lang3",
+      "meaning": "表示“毫无关系”，不关事“",
+      "category": "常用语",
+      "example": "我同佢冇晒啦掕㗎喇（我和他没有关系了）"
+    },
+    {
+      "word": "匿埋",
+      "phonetic": "nei1",
+      "meaning": "lei1）maai4（表示“藏起来，躲起来“",
+      "category": "常用语",
+      "example": "我哋暂时就匿埋喺个度（我们暂时就藏在那里）"
+    },
+    {
+      "word": "冇埞",
+      "phonetic": "mou5 deng6",
+      "meaning": "表示“没地方...“",
+      "category": "常用语",
+      "example": "冇埞放（没地方放）；冇埞走（走投无路，无路可逃）；冇埞企（没立足之地）；冇埞埋手（无从下手）；冇埞踎（没容身之地）；冇埞使（派不上用场，没机会拿来用）"
+    },
+    {
+      "word": "爆窃",
+      "phonetic": "baau3 sit3",
+      "meaning": "表示“入室盗窃“",
+      "category": "常用语",
+      "example": "我哋出咗去嘅时候，间屋畀人爆窃（我们出门的时候，房子被人一室盗窃）"
+    },
+    {
+      "word": "鲊",
+      "phonetic": "zaa2",
+      "meaning": "表示“差劲，水平低“",
+      "category": "常用语",
+      "example": "乜你游水游得咁鲊（笮）?（怎么你游泳游得这么差的？）"
+    },
+    {
+      "word": "呷醋",
+      "phonetic": "haap3 cou3",
+      "meaning": "表示“吃醋“，形容男女感情方面的忌妒",
+      "category": "常用语",
+      "example": "呢个就系呷醋啊（这个就是呷醋啊）"
+    },
+    {
+      "word": "黐身黐势",
+      "phonetic": "ci1 san1 ci1 sai3",
+      "meaning": "表示“缠人，黏人“，也可以用“黐身”表达",
+      "category": "常用语",
+      "example": "你份人，见到有钱佬就黐身黐势（你这个人，看见有钱人就黏上来）"
+    },
+    {
+      "word": "倔头路",
+      "phonetic": "gwat6 tau4 lou6",
+      "meaning": "表示“死胡同“",
+      "category": "常用语",
+      "example": "个条路行唔通，系倔头路嚟㗎（那条路就不通，是死胡同来着）"
+    },
+    {
+      "word": "揦鲊",
+      "phonetic": "laa5 zaa2",
+      "meaning": "表示“欠缺章法，不道德“：形容人",
+      "category": "常用语",
+      "example": "形容不道德：佢用揦鲊手段先上到呢个位（他用不道德的手段才上到这个位置的）"
+    },
+    {
+      "word": "夹手夹脚",
+      "phonetic": "gaap3 sau2 gaap3 goek3",
+      "meaning": "表示“齐心协力”",
+      "category": "常用语",
+      "example": "大家夹手夹脚将啲行李搬上车先（大家齐心协力将行李先搬上车）；佢哋夹手夹脚，好快就揼好份 PPT（他们齐心协力，很快就做好一份 PPT 了）"
+    },
+    {
+      "word": "埋芡",
+      "phonetic": "maai4 hin3",
+      "meaning": "表示“勾芡“",
+      "category": "常用语",
+      "example": "鸡蛋放六个，之后就可以落生粉水埋芡喇（放六个鸡蛋，然后就可以下生粉水勾芡了）"
+    },
+    {
+      "word": "揗",
+      "phonetic": "tan4/tan2",
+      "meaning": "表示“发抖，来回走动“",
+      "category": "常用语",
+      "example": "表示吓得发抖：佢又唔咬你，你使乜揗揗震（tan4 tan2 zan3）啫；表示凶巴巴的：恶揗揗 ok3 tan4 tan4（凶巴巴的）；表示滑溜溜（贬）：滑揗揗（waat6 tan4 tan4）只手摸埋嚟（滑腻腻的手摸过来）；表示人肥腻（贬）：肥揗揗（fei4 tan4 tan4）（肥佬）"
+    },
+    {
+      "word": "哎吔",
+      "phonetic": "ai1 jaa1",
+      "meaning": "表示“不是真正的，有名无实，非血缘关系“",
+      "category": "常用语",
+      "example": "哎吔老窦（挂名老爸）"
+    },
+    {
+      "word": "好气",
+      "phonetic": "hou2 hei3",
+      "meaning": "表示“啰嗦，健谈“",
+      "category": "常用语",
+      "example": "好声好气 hou2 seng1 hou2 hei3（心平气和），无咁好气 mou5 gam3 hou2 hei3（没功夫）；冇你咁好气 mou5 nei5 gam3 hou2 hei3（不跟你废话）冇好气（没有耐心，没心思）"
+    },
+    {
+      "word": "诈型",
+      "phonetic": "zaa3 jing4",
+      "meaning": "表示“乱发脾气“",
+      "category": "常用语",
+      "example": "家阵用来垫下枱啊嘛，唔使诈型啊（现在用来垫下桌子嘛，有啥好发脾气的啊）"
+    },
+    {
+      "word": "怕且",
+      "phonetic": "paa3 ce2",
+      "meaning": "表示“恐怕“",
+      "category": "常用语",
+      "example": "不过佢已经嫁咗人，怕且都冇乜机会撞到架喇（不过她已经嫁人了，恐怕没机会撞到啦）"
+    },
+    {
+      "word": "炖冬菇",
+      "phonetic": "dan6 dung1 gu1",
+      "meaning": "表示“降级、被贬或失去权力“",
+      "category": "常用语",
+      "example": "炖你冬菇（炒你鱿鱼）"
+    },
+    {
+      "word": "兜踎",
+      "phonetic": "dau1 mau1",
+      "meaning": "表示“无能，窝囊，外貌寒碜“",
+      "category": "常用语",
+      "example": "周 sir，点解咁兜踎？（周 sir，为什么这么窝囊的？）"
+    },
+    {
+      "word": "折堕",
+      "phonetic": "zit3 do6",
+      "meaning": "表示“缺德、没良心，倒霉、糟糕“",
+      "category": "常用语",
+      "example": "边个咁折堕，喺度倒垃圾（谁那么造孽，在这儿倒垃圾）；有咁耐风流，有咁耐折堕。（有多长时间的风光快活，就有多长时间的倒霉）"
+    },
+    {
+      "word": "唔制",
+      "phonetic": "m4 zai3",
+      "meaning": "表示“不干，不愿意“",
+      "category": "常用语",
+      "example": "唔制啊 ! 最憎就系你喇 ， 你行开啊 ! （不行，最讨厌你了，你走开）；制唔制（愿不愿意），制唔过（划不来），唔制得过（划不来，不划算）"
+    },
+    {
+      "word": "你哋咁狗",
+      "phonetic": "nei5 dei6 gam3 gau2",
+      "meaning": "表示“你们手段很脏“",
+      "category": "常用语",
+      "example": ""
+    },
+    {
+      "word": "佗衰家",
+      "phonetic": "to4 seoi1 gaa1",
+      "meaning": "表示“连累/丢脸丢到家“",
+      "category": "常用语",
+      "example": "佗衰家 to4 seoi1 gaa1（害人精，连累/丢脸丢到家）"
+    },
+    {
+      "word": "打横嚟",
+      "phonetic": "daa2 waang4 lei4",
+      "meaning": "表示“不讲道理，硬刚“",
+      "category": "常用语",
+      "example": "你如果打横嚟，我都可以同你打横嚟（你要是不讲道理，我也可以跟你对着干）"
+    },
+    {
+      "word": "醒瞓",
+      "phonetic": "seng2 fan3",
+      "meaning": "表示“容易醒“",
+      "category": "常用语",
+      "example": "佢个人好醒瞓，有小小动静就会醒（他这个人觉很轻，一点动静就会醒）；我不溜醒瞓，从来唔使校闹钟都知醒（我一向觉轻，从来不用调闹钟也能按时醒）"
+    },
+    {
+      "word": "神憎鬼厌",
+      "phonetic": "san4 zang1 gwai2 jim3",
+      "meaning": "表示“人见人厌”",
+      "category": "常用语",
+      "example": "钱又贪唔到，搞得神憎鬼厌（钱又贪不到，搞得人见人厌）"
+    },
+    {
+      "word": "柄埋",
+      "phonetic": "beng2 maai4",
+      "meaning": "表示“躲起来，藏起来，躲到别人身后”",
+      "category": "常用语",
+      "example": "表示躲起来：佢一见到老细就柄埋（他一看到老板就躲起来）；表示躲起来：唔好柄埋喇，出来啦（不要躲起来了，出来吧）；表示躲到别人身后：你冇讲咁多嘢，柄埋先啦（必须那么多了，站我身后去）"
+    },
+    {
+      "word": "过主",
+      "phonetic": "gwo3 zyu2",
+      "meaning": "表示“滚开，滚蛋，到一边去”",
+      "category": "常用语",
+      "example": "得喇得喇，过主啦你！（行了行了，滚吧你!）；悭啲喇，过主喇（省省吧，滚开啦）"
+    },
+    {
+      "word": "士啤呔",
+      "phonetic": "si6 be1 taai1",
+      "meaning": "表示“车的备胎，啤酒肚”",
+      "category": "常用语",
+      "example": "表示车的备胎：放喺车尾做士啤呔啦（放在车尾做备用胎啦）；表示啤酒肚：呔就冇，士啤呔就有（领带没有，啤酒肚就有）"
+    },
+    {
+      "word": "着迹",
+      "phonetic": "zoek6 zik1",
+      "meaning": "表示“露出马脚”",
+      "category": "常用语",
+      "example": "作亲案就冇话一啲都唔着迹嘅（凡是作案就不会一点痕迹都不露的）"
+    },
+    {
+      "word": "臭寸/串",
+      "phonetic": "cau3 cyun3/cyun3",
+      "meaning": "表示“态度嚣张”",
+      "category": "常用语",
+      "example": "佢份人咁串/臭串，点同佢合作啊（他那么嚣张，怎么和他合作啊）；条女好寸㖞（这个女人好嚣张啊），我咁大个仔冇见过寸人（我长这么大没见过嚣张的人）"
+    },
+    {
+      "word": "吹胀",
+      "phonetic": "ceoi1 zoeng3",
+      "meaning": "表示“生气而无可发泄，奈何”",
+      "category": "常用语",
+      "example": "表示生气而无可发泄：点都搞唔掂 ，真系吹胀（怎么也弄不好，真是气死人了）；表示奈何（否定句中）：吹佢唔胀（奈何不了他）；表示奈何（疑问句中）：你吹胀我啊？/ 你吹得我胀咩？（你能奈何我吗？）"
+    },
+    {
+      "word": "拗颈",
+      "phonetic": "aau3 geng2",
+      "meaning": "表示“唱反调，作对”",
+      "category": "常用语",
+      "example": "佢哋成日为咗啲小事拗颈（他们每天为了小事互相作对）"
+    },
+    {
+      "word": "抛窒",
+      "phonetic": "paau1 zat6",
+      "meaning": "表示“吓唬人”",
+      "category": "常用语",
+      "example": "第一铺冇理由被你抛窒嘅（第一局没理由被你吓到的）；你咁都畀佢抛窒？（你就这样被他你吓到了？）"
+    },
+    {
+      "word": "唔争在",
+      "phonetic": "m4 zaang1 zoi6",
+      "meaning": "表示“无所谓”",
+      "category": "常用语",
+      "example": "架车咁大，唔争在坐多几个人；既然你都系去个度，咁唔争在带埋个妹去啦，嗬！；既然份功课你都做咗一半，唔争在做埋另一半啦"
+    },
+    {
+      "word": "均真",
+      "phonetic": "gwan1 zan1",
+      "meaning": "表示“严格，一丝不苟”",
+      "category": "常用语",
+      "example": "佢唔系针对你，佢份人太均真啫（他不是针对你，他这个做事太严格而已）；人情归人情，均真啲好（人情归人情，数目要分明）"
+    },
+    {
+      "word": "啱 key",
+      "phonetic": "ngaam1 key",
+      "meaning": "表示“和人相处合得来，很开心”",
+      "category": "常用语",
+      "example": "下次介绍佢畀你识啊，我觉得你哋会几啱 key"
+    },
+    {
+      "word": "身有屎",
+      "phonetic": "san1 jau5 si2",
+      "meaning": "表示“心里有鬼”",
+      "category": "常用语",
+      "example": "问佢又唔答，一定系身有屎啦（问他又不说，一定是心里有鬼）"
+    },
+    {
+      "word": "劲抽",
+      "phonetic": "ging6 cau1",
+      "meaning": "表示“技术超群”",
+      "category": "常用语",
+      "example": "今晚场波，香港足球代表队真系劲抽（今晚这场球，香港足球对真的是技术超群）；佢当年好劲抽㗎，读书又得，运动又叻（他当年很厉害的，读书又好，运动又好）"
+    },
+    {
+      "word": "企硬",
+      "phonetic": "kei5 ngaang6",
+      "meaning": "表示“唔让步，坚守自己的立场”",
+      "category": "常用语",
+      "example": "佢企硬，一蚊都唔减（他不肯让步，一块钱都不减）；呓咗佢好耐，佢始终企硬，唔肯让步（求了他很久，他始终坚持自己的立场唔让步）"
+    },
+    {
+      "word": "还拖",
+      "phonetic": "waan4 to1",
+      "meaning": "表示“还手，反击”",
+      "category": "常用语",
+      "example": "咩啊？想还拖啊？（怎么？想还手啊？）；畀人打一定要还拖，畀翻啲颜色佢睇（被人打一定要还手，给回点颜色看看）"
+    },
+    {
+      "word": "凑埋",
+      "phonetic": "cau3 maai4",
+      "meaning": "表示“合并，凑起来”",
+      "category": "常用语",
+      "example": "揾多个人凑埋开始麻雀（再找个人，凑起来一起打麻将）；冚唥凑埋得咁多（全部凑起来也只有这么多）；我凑凑埋埋有成千蚊㖞（我拼拼凑凑有一千块呢）"
+    },
+    {
+      "word": "断正",
+      "phonetic": "tyun5 zeng3",
+      "meaning": "表示“被揭发，被抓包，正好被发现”",
+      "category": "常用语",
+      "example": "我今日出猫，畀个老师断咗正（我今天作弊，被老师抓了个正着）"
+    },
+    {
+      "word": "混吉",
+      "phonetic": "wan6 gat1",
+      "meaning": "表示“瞎折腾，白忙活，搞事情”",
+      "category": "常用语",
+      "example": "表示搞事情：都唔知系唔系来混吉嘅（也不知道是不是来搞事情/搞搞震的）；表示白忙活：做咗两日，原来系混吉咋！（干了两天，原来是劳而无功啊！）"
+    },
+    {
+      "word": "奀皮",
+      "phonetic": "ngan1 pei4",
+      "meaning": "表示“顽皮，调皮，不听话”",
+      "category": "常用语",
+      "example": "我个仔好奀皮，好难教。呢个仔真系好奀皮"
+    },
+    {
+      "word": "趣致",
+      "phonetic": "ceoi3 zi3",
+      "meaning": "表示“可爱”",
+      "category": "常用语",
+      "example": "你个仔真系好趣致嘅啫，见到佢个面珠墩就想搣（mit1）（扭一下）啦"
+    },
+    {
+      "word": "多得你唔少",
+      "phonetic": "do1 dak1 nei5 m4 siu2",
+      "meaning": "表示“讽刺人帮倒忙”",
+      "category": "常用语",
+      "example": "你又打烂嘢，我真系多得你唔少啊！（你又打烂东西，我真是谢谢你啊！）"
+    },
+    {
+      "word": "好少可",
+      "phonetic": "hou2 siu2 ho2",
+      "meaning": "表示“很罕见”",
+      "category": "常用语",
+      "example": "大伯，好少可㖞，你早过我起身嘅？（大伯，很罕见㖞，你竟然起的比我早）；佢份人平时好稳阵，好少可会缩骨（他这个人很靠谱，很少会诡计多端的）"
+    },
+    {
+      "word": "不特止",
+      "phonetic": "bat1 dak6 zi2",
+      "meaning": "表示“不单单，不但，不仅，不只”",
+      "category": "常用语",
+      "example": "佢整烂我个袋不特止，仲食晒里面啲零食添啊。猫不特止食老鼠，仲食鱼"
+    },
+    {
+      "word": "祭旗",
+      "phonetic": "zai3 kei4",
+      "meaning": "表示“替罪”",
+      "category": "常用语",
+      "example": "今次公司蚀咗咁多钱，老细肯定揾我嚟祭旗"
+    },
+    {
+      "word": "襟计",
+      "phonetic": "kam1 gai3",
+      "meaning": "表示“长远来看 不划算”",
+      "category": "常用语",
+      "example": "条数唔襟计㖞（这么算好像不太划算）。搬远咗少少，搭车每日贵十蚊，都几襟计㗎"
+    },
+    {
+      "word": "伯爷",
+      "phonetic": "baak3 je4",
+      "meaning": "表示“老头[在别人面前，对自己父亲的称呼]”",
+      "category": "常用语",
+      "example": "想当年我伯爷响呢行都揾唔少钱（想当年，我爸在这行业没少赚钱）"
+    },
+    {
+      "word": "喉擒",
+      "phonetic": "hau4 kam4",
+      "meaning": "表示“急噪，没耐性”",
+      "category": "常用语",
+      "example": "咁喉擒做乜？早到又冇奖嘅（那么急干嘛？早到又没有奖金的）"
+    },
+    {
+      "word": "正一",
+      "phonetic": "zing3 jat1",
+      "meaning": "表示“真是”，通常后面接些负面的描述",
+      "category": "常用语",
+      "example": "佢正一衰人嚟㗎（他真是坏人来着）"
+    },
+    {
+      "word": "自把自为",
+      "phonetic": "zi6 baa2 zi6 wai4",
+      "meaning": "表示“自以为是”",
+      "category": "常用语",
+      "example": "几时轮到你自把自为（什么时候轮到你自以为是啦）；我唔钟意你咩都自把自为啊"
+    },
+    {
+      "word": "似层层",
+      "phonetic": "ci5 cang4 cang4",
+      "meaning": "表示“好像真有其事”",
+      "category": "常用语",
+      "example": "佢话佢见过耶稣㖞，讲到似层层噉（他说他见过耶稣，说的像真的一样）"
+    },
+    {
+      "word": "保你大",
+      "phonetic": "bou2 nei5 daai6",
+      "meaning": "表示“任你做老大，认输”",
+      "category": "常用语",
+      "example": "我屋企被你搞到鸡毛鸭血（一塌糊涂、不可收拾），我保你大喇，你放过我啦好嘛？"
+    },
+    {
+      "word": "扯猫尾",
+      "phonetic": "ce2 maau1 mei5",
+      "meaning": "表示“串通一气，勾结”",
+      "category": "常用语",
+      "example": "佢哋两个扯猫尾呃人啲钱（他们两个串通骗人钱）"
+    },
+    {
+      "word": "捞边瓣",
+      "phonetic": "lou1 bin1 faan6",
+      "meaning": "表示“做什么工作”",
+      "category": "常用语",
+      "example": "你捞边瓣嘅？（你做什么工作的？）"
+    },
+    {
+      "word": "交关",
+      "phonetic": "gaau1 gwaan1",
+      "meaning": "表示“...厉害，...要命”",
+      "category": "常用语",
+      "example": "今日真系热得交关（今天真是热得要命）；乜佢份人衰得咁交关㗎！（他这个人怎么这么差劲的！）"
+    },
+    {
+      "word": "见步行步",
+      "phonetic": "gin3 bou6 haang4 bou6",
+      "meaning": "表示“走一步看一步”",
+      "category": "常用语",
+      "example": "我哋冇时间准备㗎喇，唯有见步行步啦（我们没有时间了，只能走一步看一步啦）"
+    },
+    {
+      "word": "拗手瓜",
+      "phonetic": "ngaau5 sau2 gwaa1",
+      "meaning": "表示“较量，比拼”：类似掰手腕",
+      "category": "常用语",
+      "example": "想同我拗手瓜？手瓜好硬嘅！（想跟我较量？走着瞧！）"
+    },
+    {
+      "word": "黐饮黐食",
+      "phonetic": "ci1 jam2 ci1 sik6",
+      "meaning": "表示“蹭吃蹭喝”",
+      "category": "常用语",
+      "example": "你成日喺人哋度黐饮黐食，你唔丑嘅咩？（你整天在人家这蹭吃蹭喝，不嫌丢人的吗？）"
+    },
+    {
+      "word": "鼠",
+      "phonetic": "syu2",
+      "meaning": "表示“偷偷的，鬼鬼祟祟”",
+      "category": "常用语",
+      "example": "其实我系鼠过来嘅啫，我唔可以坐呢度食嘢㗎（其实我是偷偷过来的，我不能坐在这吃的）；你个死仔，又鼠咗去边啊？（你个死孩崽子，又鬼鬼祟祟去哪了？）"
+    },
+    {
+      "word": "算死草",
+      "phonetic": "syun3 sei2 cou2",
+      "meaning": "表示“有心计，省钱到尽”：贬意词",
+      "category": "常用语",
+      "example": "去旅游就唔好算死草咁喇，玩豪啲（去旅游就别那么省钱了，玩的豪气一点）"
+    },
+    {
+      "word": "挞车",
+      "phonetic": "taat1 ce1",
+      "meaning": "表示“启动引擎”",
+      "category": "常用语",
+      "example": "个电池好似冇电，挞车挞极都挞唔着（这个电池好像没电了，怎么打都打不着火）"
+    },
+    {
+      "word": "踩亲条尾",
+      "phonetic": "caai2 can1 tiu4 mei5",
+      "meaning": "表示“得罪人，惹恼人”",
+      "category": "常用语",
+      "example": "你哋踩亲佢条尾啊，一样笑骑骑嘅（你们得罪了她啊，她还是笑嘻嘻的）"
+    },
+    {
+      "word": "挜住",
+      "phonetic": "ngaa6 zyu6",
+      "meaning": "表示“霸占，不给别人用”",
+      "category": "常用语",
+      "example": "佢嘅书架畀漫画挜住晒，搞到冇位摆正经书"
+    },
+    {
+      "word": "唔等使",
+      "phonetic": "m4 dang2 sai2",
+      "meaning": "表示“不需要，不实际，没用”",
+      "category": "常用语",
+      "example": "做乜买咁多唔等使嘅嘢啊？（干嘛买那么多没用的东西啊）"
+    },
+    {
+      "word": "你讲嘢啊",
+      "phonetic": "nei5 gong2 je5 aa3",
+      "meaning": "质问语气，表示“你放屁呢吧”",
+      "category": "常用语",
+      "example": "咩呀，讲嘢啊而家？（怎么，你放屁呢吧）"
+    },
+    {
+      "word": "话斋",
+      "phonetic": "waa6 zaai1",
+      "meaning": "表示“正如...所讲”",
+      "category": "常用语",
+      "example": "学老细话斋，顾客至上（正如老板所讲，顾客至上）；过来人话斋，做得成朋友就唔使分手啦（正如过来人所讲，做得成朋友就不用分手啦）"
+    },
+    {
+      "word": "拆祠堂",
+      "phonetic": "caak3 ci4 tong2",
+      "meaning": "表示“断子绝孙”",
+      "category": "常用语",
+      "example": "你信不信我拆你祠堂啊？（你信不信我让你断子绝孙（类似踢男生下面）啊？）"
+    },
+    {
+      "word": "阿吱阿咗",
+      "phonetic": "aa3 zi1 aa3 zo1",
+      "meaning": "表示“磨磨唧唧，唧唧歪歪”",
+      "category": "常用语",
+      "example": "我迟咗少少啫，佢就喺度阿吱阿咗（我就迟到了一点而已，他就在那唧唧歪歪）；你唔好再阿吱阿咗，快啲做晒啲功课（你别在那磨磨唧唧的，快点写完作业）"
+    },
+    {
+      "word": "醒你",
+      "phonetic": "sing2 nei5",
+      "meaning": "表示“赏畀你的”",
+      "category": "常用语",
+      "example": "嗱，个苹果醒你嘅（嗱，这个苹果赏给你嘅）；说明：一般在关系较好的朋友、或者长辈和晚辈之间用，因为容易被误解为“施舍给你”"
+    },
+    {
+      "word": "埋尾",
+      "phonetic": "maai4 mei5",
+      "meaning": "表示“收尾，做收尾的工作”",
+      "category": "常用语",
+      "example": "你哋走啦，我埋尾嘚喇。够钟收工喇，快啲埋尾啦"
+    },
+    {
+      "word": "捐被窦",
+      "phonetic": "gyun1 pei5 dau3",
+      "meaning": "表示“窜进被窝”",
+      "category": "常用语",
+      "example": "做咩匿埋喺被窦入面喊啊？（怎么躲在被窝里面哭啊？）"
+    },
+    {
+      "word": "唔对路",
+      "phonetic": "m4 deoi3 lou6",
+      "meaning": "表示“不对劲，不对头”",
+      "category": "常用语",
+      "example": "噉你几时发现条友仔唔对路啊？（那么你什么时候发现这个人不对劲的啊？）"
+    },
+    {
+      "word": "流流长",
+      "phonetic": "lau4 lau4 coeng4",
+      "meaning": "表示“时间漫长”",
+      "category": "常用语",
+      "example": "你唔好以为成世流流长啊，一眨眼就过去啦（你别以为一生很长，一眨眼就过去啦）"
+    },
+    {
+      "word": "四正",
+      "phonetic": "si3 zeng3",
+      "meaning": "表示“端正，整齐”",
+      "category": "常用语",
+      "example": "你第一次去约会，梗系执四正啲，着靓仔啲㗎啦"
+    },
+    {
+      "word": "当正",
+      "phonetic": "dong1 zeng3",
+      "meaning": "表示“真把自己当作，真当自己是”",
+      "category": "常用语",
+      "example": "佢当正我系女噉锡，我亦都当正佢系老窦噉照顾；个个陈生唔系人嚟㗎，当正佢系阿四（类似佣人）噉嚟使"
+    },
+    {
+      "word": "乌搲",
+      "phonetic": "wu1 we2",
+      "meaning": "表示“不修边幅的，蓬头垢面的”",
+      "category": "常用语",
+      "example": "你唔可以成日着得咁乌搲，知唔知啊？"
+    },
+    {
+      "word": "燥底",
+      "phonetic": "cou3 dai2",
+      "meaning": "表示“上火，燥热，急躁，暴躁”",
+      "category": "常用语",
+      "example": "阿叔，今日做咩咁燥底嘅？"
+    },
+    {
+      "word": "唔爹唔吊",
+      "phonetic": "m4 de1 m4 diu3",
+      "meaning": "表示“漫不经心，不紧不慢”",
+      "category": "常用语",
+      "example": "我唔系咩都唔爹唔吊，间唔中出下丑，佢哋就会对我冇戒心；都唔知你哋男人想点㗎，一时谰（扮做）紧张，一时唔爹唔吊，究竟想点啫！"
+    },
+    {
+      "word": "一担担",
+      "phonetic": "jat1 daam4 daam3",
+      "meaning": "表示“一个货色，半斤八两”",
+      "category": "常用语",
+      "example": "你同佢一担担，又冇脑，又容易畀人呃"
+    },
+    {
+      "word": "畀着",
+      "phonetic": "bei2 zoek6",
+      "meaning": "表示“换作是...，假如是...”",
+      "category": "常用语",
+      "example": "畀着系我嘅话，我哋都惊到走咗啦；畀着系我啊，条气都唔顺啦"
+    },
+    {
+      "word": "甩难",
+      "phonetic": "lat1 naan6",
+      "meaning": "表示“解脱”",
+      "category": "常用语",
+      "example": "噉我哋咪可以甩难啦？；佢哋终于分手了，我哋甩难喇"
+    },
+    {
+      "word": "过档",
+      "phonetic": "gwo3 dong3",
+      "meaning": "表示“跳槽，调职”",
+      "category": "常用语",
+      "example": "噉我不如过档，最少啊，我多得几千蚊人工啊；你过档啊？你预埋我啊"
+    },
+    {
+      "word": "起底",
+      "phonetic": "hei2 dai2",
+      "meaning": "表示“摸清底细，查清楚背景资料”",
+      "category": "常用语",
+      "example": "依家嘅人起底咁叻咧，会唔会畀人发现啊；所以咧，我就揾佢起咗你底，果然有料到"
+    },
+    {
+      "word": "待薄",
+      "phonetic": "doi6 bok6",
+      "meaning": "表示“亏待”",
+      "category": "常用语",
+      "example": "我唔会待薄你哋嘅"
+    },
+    {
+      "word": "硬净",
+      "phonetic": "ngaang6 zeng6",
+      "meaning": "表示“坚强，结实”",
+      "category": "常用语",
+      "example": "我对你嘅爱，系硬净过呢啲花岗岩地板；唔通个个一出世，就会硬净嘅咩"
+    },
+    {
+      "word": "唔系人噉品",
+      "phonetic": "m4 hai6 jan4 gam2 ban2",
+      "meaning": "表示“凶狠 不是人”",
+      "category": "常用语",
+      "example": "个帮收数佬咧，真系唔系人噉品㗎；佢一打机就唔系人噉品㗎"
+    },
+    {
+      "word": "秘捞",
+      "phonetic": "bei3 lou1",
+      "meaning": "表示“秘密的兼职，秘密的赚外块”",
+      "category": "常用语",
+      "example": "你哋唔好谂住放咗工，佢屋企秘捞㖞"
+    },
+    {
+      "word": "风头趸",
+      "phonetic": "fung1 tau4 dan2",
+      "meaning": "表示“风头人物，瞩目的公众人物”",
+      "category": "常用语",
+      "example": "人哋阿丸啊，系风头趸嚟㗎，高大威猛有型靓仔啊"
+    },
+    {
+      "word": "较飞",
+      "phonetic": "gaau3 fei1",
+      "meaning": "表示“拿命冒险”",
+      "category": "常用语",
+      "example": "阿 bob 唔系好人嚟㗎，你黐埋等于揾条命嚟较飞"
+    },
+    {
+      "word": "施施然",
+      "phonetic": "si1 si1 jin4",
+      "meaning": "表示“慢条斯理地，慢吞吞地”",
+      "category": "常用语",
+      "example": "过咗成个钟，佢先至施施然出现；但系佢选择施施然噉样"
+    },
+    {
+      "word": "成世人",
+      "phonetic": "seng4 sai3 jan4",
+      "meaning": "表示“一辈子，一生”",
+      "category": "常用语",
+      "example": "成世人未试过咁青春热血啊；我成世女（人）都未试过咁叹㗎"
+    },
+    {
+      "word": "顶心杉",
+      "phonetic": "ding2 sam1 caam3",
+      "meaning": "表示“经常顶撞，杠精”",
+      "category": "常用语",
+      "example": "我成日都顶心杉噉样喺佢面前，佢点会钟意我啫！"
+    },
+    {
+      "word": "x 多两钱重",
+      "phonetic": "x do1 loeng5 cin2 cung5",
+      "meaning": "表示“...得更糟糕”",
+      "category": "常用语",
+      "example": "一阵间肥晒条腰啊，衰多两钱重啊（等会腰肥了，更衰啊）；如果照直讲，你实衰多两钱重啦（如果摊牌讲，你一定更衰啦）；真系忙多几钱重啊！（真是太忙了啊！）；你当面同佢讲？仲死多两钱重啊（你当面跟他说？还会死得更惨）"
+    },
+    {
+      "word": "伊挹",
+      "phonetic": "ji1 jap1",
+      "meaning": "表示“暧昧亲热，偷情”",
+      "category": "常用语",
+      "example": "表示两个人偷情：你老公趁你唔喺屋企，同个女人喺度伊挹啊；表示暧昧亲热：老细就返嚟啦，仲喺度伊伊挹挹"
+    },
+    {
+      "word": "割席",
+      "phonetic": "got3 zek6",
+      "meaning": "表示“断交，绝交，划清界限”",
+      "category": "常用语",
+      "example": "割席割得够干净，就可以置身事外；你依家都要同我割席㗎喇"
+    },
+    {
+      "word": "缩沙",
+      "phonetic": "suk1 saa1",
+      "meaning": "表示“退缩，变卦，打退堂鼓”",
+      "category": "常用语",
+      "example": "缩沙正契弟，嚟啊！；你惊啊，想缩沙？；听你噉讲，你系打算缩沙啊？"
+    },
+    {
+      "word": "犹自可",
+      "phonetic": "jau4 zi6 ho2",
+      "meaning": "表示“还算可以，尚可”",
+      "category": "常用语",
+      "example": "唉，真系唔睇犹自可，一睇就眼冤（辣眼睛）咯！"
+    },
+    {
+      "word": "二打六",
+      "phonetic": "ji6 daa2 luk2",
+      "meaning": "表示“水平低的人，不熟练的人”",
+      "category": "常用语",
+      "example": "叻仔你唔用，点解用埋啲二打六咧？；全部都系二打六嚟㗎㖞！"
+    },
+    {
+      "word": "心甘命抵",
+      "phonetic": "sam1 gam1 meng6 dai2",
+      "meaning": "表示“心甘情愿”",
+      "category": "常用语",
+      "example": "输都输得心甘命抵；个阵时啊，佢就唔会心甘命抵啊，帮你㗎喇！"
+    },
+    {
+      "word": "好闲",
+      "phonetic": "hou2 haan4",
+      "meaning": "表示“小意思，没啥大不了的”",
+      "category": "常用语",
+      "example": "你畀唔畀面，我都好闲嘅啫"
+    },
+    {
+      "word": "断估",
+      "phonetic": "dyun3 gu2",
+      "meaning": "表示“猜想，瞎蒙”",
+      "category": "常用语",
+      "example": "佢系人哋老公，断估都唔会对我有非分之想嘅"
+    },
+    {
+      "word": "有毛有翼",
+      "phonetic": "jau5 mou4 jau5 jik6",
+      "meaning": "表示“翅膀硬了”",
+      "category": "常用语",
+      "example": "男人有毛有翼，就想飞㗎啦"
+    },
+    {
+      "word": "冇人冇物",
+      "phonetic": "mou5 jan4 mou5 mat6",
+      "meaning": "表示“无依无靠”",
+      "category": "常用语",
+      "example": "好彩有你，如果唔系，我身边冇人冇物，一定撑唔到今日"
+    },
+    {
+      "word": "你同我定",
+      "phonetic": "nei5 tung4 ngo5 ding6",
+      "meaning": "表示“你放心”",
+      "category": "常用语",
+      "example": "你同我定，我已经组织咗一个危机处理小组"
+    },
+    {
+      "word": "阴阴嘴笑",
+      "phonetic": "jam1 jam1 zeoi2 siu3",
+      "meaning": "表示“偷偷地笑”",
+      "category": "常用语",
+      "example": "辉辉啊，你做咩笑都阴阴嘴噉嘅？舅父，你睇咩，睇到阴阴嘴（噉）笑啊？"
+    },
+    {
+      "word": "杯葛",
+      "phonetic": "bui1 got3",
+      "meaning": "表示“排斥”",
+      "category": "常用语",
+      "example": "佢哋成班夹埋嚟杯葛你啊？（他们一帮人合计起来排斥你啊？）"
+    },
+    {
+      "word": "重皮",
+      "phonetic": "cung5 pei2",
+      "meaning": "表示“成本高，费用高”",
+      "category": "常用语",
+      "example": "call 个火车很重皮㗎（call 个火车费用很高的）"
+    },
+    {
+      "word": "兜口兜面",
+      "phonetic": "dau1 hau2 dau1 min6",
+      "meaning": "表示“当面...”",
+      "category": "常用语",
+      "example": "傻咗咩？兜口兜面话大龙生系奸商（傻了吗，当面说大龙生是奸商）"
+    },
+    {
+      "word": "卒之",
+      "phonetic": "zeot1 zi1",
+      "meaning": "表示“最后，终于”",
+      "category": "常用语",
+      "example": "恭喜晒㖞，卒之可以做到自己想做嘅嘢（恭喜了㖞，终于可以做到自己想做的事）"
+    },
+    {
+      "word": "形住",
+      "phonetic": "jing4 zyu6",
+      "meaning": "表示“隐隐约约觉得”",
+      "category": "常用语",
+      "example": "我成日形住有人跟踪我（我整天隐隐约约觉得有人跟踪我）"
+    },
+    {
+      "word": "攞彩",
+      "phonetic": "lo2 coi2",
+      "meaning": "表示“炫耀，出风头”",
+      "category": "常用语",
+      "example": "今日大龙生真系攞晒彩啊（今日大龙生真是出了风头）"
+    },
+    {
+      "word": "扠㖞",
+      "phonetic": "caa5 wo5",
+      "meaning": "表示“弄坏，搞砸一件事”",
+      "category": "常用语",
+      "example": "我争啲畀你扠㖞咗单生意啊；只要你畀十万我，我就可以帮你扠㖞个表演"
+    },
+    {
+      "word": "唆摆",
+      "phonetic": "so1 baai2",
+      "meaning": "表示“指使，怂恿”",
+      "category": "常用语",
+      "example": "你系受咩人嘅唆摆噉样做嘅？；你专登过来就系想唆摆我？"
+    },
+    {
+      "word": "睩大对眼",
+      "phonetic": "luk1 daai6 deoi3 ngaan5",
+      "meaning": "表示“睁大眼睛”",
+      "category": "常用语",
+      "example": "你做咩 睩大对眼望住我啊？；一个二个睩大对眼啤（瞪）住我嘅？"
+    },
+    {
+      "word": "冇穿冇烂",
+      "phonetic": "mou5 cyun1 mou5 laan6",
+      "meaning": "表示“完好无损”",
+      "category": "常用语",
+      "example": "好哇，好彩冇穿冇烂！；唔使但心 你睇下我 冇穿冇烂"
+    },
+    {
+      "word": "精精地",
+      "phonetic": "zeng1 zeng1 dei2",
+      "meaning": "表示“聪明的话，识相的话”",
+      "category": "常用语",
+      "example": "你精精地咧，就冇爆响口（说出去）；你精精地咧，就好放咗我哋啊！"
+    },
+    {
+      "word": "狼戾",
+      "phonetic": "long1 lai2",
+      "meaning": "表示“蛮横无理的发脾气”",
+      "category": "常用语",
+      "example": "发狼戾，心烦，一定系更年期；佢今朝好狼戾啊！"
+    },
+    {
+      "word": "老奉",
+      "phonetic": "lou5 fung2",
+      "meaning": "表示“视为理所当然”",
+      "category": "常用语",
+      "example": "Mary 系你员工嚟㗎，唔系老奉要受你气㗎嘛；老奉啊依家？成日当人妹子噉使㖞！"
+    },
+    {
+      "word": "生保",
+      "phonetic": "saang1 bou2",
+      "meaning": "表示“不熟悉，陌生”",
+      "category": "常用语",
+      "example": "其实你系惊瞓生保床㗎咋；做咩你哋两个咁生保嘅？"
+    },
+    {
+      "word": "久唔久",
+      "phonetic": "gau2 m4 gau2",
+      "meaning": "表示“时不时”",
+      "category": "常用语",
+      "example": "我久唔久就会去跑步（我时不时就会去跑步）"
+    },
+    {
+      "word": "生安白造",
+      "phonetic": "saang1 on1 baak6 zou6",
+      "meaning": "表示“无中生有”",
+      "category": "常用语",
+      "example": "麻烦你哋唔好喺度生安白造（麻烦你们不要在这无中生有）"
+    },
+    {
+      "word": "木独",
+      "phonetic": "muk6 duk6",
+      "meaning": "表示“木讷，不善交际”",
+      "category": "常用语",
+      "example": "睇唔出你平时木木独独咁，仲识追女仔嘅㖞；我份人就木独啲"
+    },
+    {
+      "word": "忟憎",
+      "phonetic": "mang2 zang2",
+      "meaning": "表示“暴躁，烦躁，发脾气”",
+      "category": "常用语",
+      "example": "噉忟憎做咩啫！；你唔好咁忟憎至得㗎（你不要这么烦躁才好啊）"
+    },
+    {
+      "word": "开正你���范",
+      "phonetic": "hoi1 zeng3 nei5 go2 faan6",
+      "meaning": "表示“正好是你擅长的”",
+      "category": "常用语",
+      "example": "简直开正佢个范啊（简直是他的强项）"
+    },
+    {
+      "word": "范范掂",
+      "phonetic": "faan6 faan6 dim3",
+      "meaning": "表示“样样都行，啥都牛”",
+      "category": "常用语",
+      "example": "呢个中医，按摩、推拿，范范掂（这个中医，按摩推拿，样样都行）"
+    },
+    {
+      "word": "冇范掂",
+      "phonetic": "mou5 faan6 dim3",
+      "meaning": "表示“样样都不行”",
+      "category": "常用语",
+      "example": "琴棋书画，睇你都冇范掂啦，细佬（琴棋书画，一看你就都不行，小老弟）"
+    },
+    {
+      "word": "耍家",
+      "phonetic": "saa2 gaa1",
+      "meaning": "表示“擅长，拿手”",
+      "category": "常用语",
+      "example": "我帮你按摩啦，呢样嘢，我好耍家架（我帮你按摩啦，这对我来说很拿手的）"
+    },
+    {
+      "word": "离远",
+      "phonetic": "lei4 jyun5",
+      "meaning": "表示“在远处，远远的，大老远的”",
+      "category": "常用语",
+      "example": "我离远就见到你啦（我大老远的就看到你啦）"
+    },
+    {
+      "word": "趷起条尾",
+      "phonetic": "gat6 hei2 tiu4 mei5",
+      "meaning": "表示“翘起尾巴”",
+      "category": "常用语",
+      "example": "见你趷起条尾，就知你想点喇（你一翘起尾巴，就知道你想干嘛啦 ）"
+    },
+    {
+      "word": "摎搅",
+      "phonetic": "laau2 gaau6",
+      "meaning": "表示“杂乱，做事没条理，程序繁琐”",
+      "category": "常用语",
+      "example": "表示杂乱：间屋咁摎搅，执下佢啦（房间这么乱，收拾下啦 ）；表示做事没条理：咁大个人，做嘢都仲系咁摎搅嘅；表示程序繁琐：我哋公司嘅报销流程认真摎搅"
+    },
+    {
+      "word": "声沙",
+      "phonetic": "seng1 saa1",
+      "meaning": "表示“声音沙哑”",
+      "category": "常用语",
+      "example": "点解你把声听落沙沙地嘅？（怎么你的声音听起来有点沙哑的？ ）"
+    },
+    {
+      "word": "米饭班主",
+      "phonetic": "mai5 faan6 baan1 zyu2",
+      "meaning": "表示“金主、背后老板”",
+      "category": "常用语",
+      "example": "个个系我哋嘅米饭班主嚟㗎，唔该你态度好少少啦"
+    },
+    {
+      "word": "揦手唔成势",
+      "phonetic": "laa2 sau2 m4 sing4 sai3",
+      "meaning": "表示“手忙脚乱，不知所措”",
+      "category": "常用语",
+      "example": "今晚记得准备好听日嘅资料，费事到时又揦手唔成势"
+    },
+    {
+      "word": "喊惊",
+      "phonetic": "haam3 geng1",
+      "meaning": "表示“鬼哭狼嚎似的声音、像叫魂一样”",
+      "category": "常用语",
+      "example": "做咩啊，晨早流流喊惊噉（干嘛呀，一大早像叫魂一样）"
+    },
+    {
+      "word": "同你死过",
+      "phonetic": "tung4 nei5 seig2 wo3",
+      "meaning": "表示“跟你拼了”",
+      "category": "常用语",
+      "example": "如果佢唔还钱，我就同佢死过（如果他不还钱，我就跟他拼了）"
+    },
+    {
+      "word": "把鬼",
+      "phonetic": "baa2 gwai2",
+      "meaning": "用在反问句中，表示“有个屁用？”",
+      "category": "常用语",
+      "example": "呢啲噉嘅垃圾，爱嚟把鬼咩？（这些垃圾，要嚟有什么用呢？）"
+    },
+    {
+      "word": "把炮",
+      "phonetic": "baa2 paau3",
+      "meaning": "表示“有本事”",
+      "category": "常用语",
+      "example": "我准备咗两个好把炮嘅师父畀你；咁把炮，讲嚟听下？"
+    },
+    {
+      "word": "劈炮唔捞",
+      "phonetic": "pek3 paau3 m4 lou1",
+      "meaning": "表示“辞职不干”",
+      "category": "常用语",
+      "example": "你为咗咁小嘅事就劈炮唔捞？我一阵间返公司就劈炮！"
+    },
+    {
+      "word": "冇啖好食",
+      "phonetic": "mou5 daam6 hou2 sik6",
+      "meaning": "表示“没有好日子过”",
+      "category": "常用语",
+      "example": "你一个人喺外边，一定冇啖好食咖喇（你一个人在外边，一定过得不好）"
+    },
+    {
+      "word": "攞景定赠兴",
+      "phonetic": "lo2 ging2 ding6 zang6 hing3",
+      "meaning": "表示“找茬还是祝贺？”",
+      "category": "常用语",
+      "example": "你究竟嚟攞景定赠兴呀？（你到底是来找茬的还是来祝贺的？）"
+    },
+    {
+      "word": "割禾青",
+      "phonetic": "got3 wo4 ceng1",
+      "meaning": "表示“赢了就走，获利后撤资（捞一票）”",
+      "category": "常用语",
+      "example": "你系唔系想割禾青呀？（你是不是想赢了钱就就呀？）"
+    },
+    {
+      "word": "烧埋我���沓",
+      "phonetic": "siu1 maai4 ngo5 go2 daap6",
+      "meaning": "表示“又扯到我”",
+      "category": "常用语",
+      "example": "做咩无端端烧埋我个沓呀？（干嘛好端端的又扯到我呀？）"
+    },
+    {
+      "word": "抆水",
+      "phonetic": "man3 seoi2",
+      "meaning": "表示“稍有不慎，容易失败，勉强”",
+      "category": "常用语",
+      "example": "临时抱佛脚，今次考试睇怕佢都抆水咖喇（临时抱佛脚，这次考试恐怕容易不过的啊）；一个钟去到机场？抆水啲㖞（一个钟到达机场？未必赶得上哦）"
+    },
+    {
+      "word": "顶栊",
+      "phonetic": "ding2 lung2",
+      "meaning": "表示“顶多、最多”",
+      "category": "常用语",
+      "example": "我平时行路返工顶栊半个钟啫嘛（我平时走路上班顶多半个钟而已）"
+    },
+    {
+      "word": "唔经唔觉",
+      "phonetic": "m4 ging1 m4 gok3",
+      "meaning": "表示“不知不觉”",
+      "category": "常用语",
+      "example": "唔经唔觉就快过年啦（不知不觉就快过年啦）"
+    },
+    {
+      "word": "出面",
+      "phonetic": "ceot1 min2",
+      "meaning": "表示“露骨，明显”",
+      "category": "常用语",
+      "example": "表示露骨：哇，出晒面嘅？（哇，这么露骨的？）；表示明显：我当然明啦，做得咁出面（我当然懂啦，做得这么明显）"
+    },
+    {
+      "word": "出位",
+      "phonetic": "ceot1 wai2",
+      "meaning": "中性词：表示“突出，引人注意”",
+      "category": "常用语",
+      "example": "我哋嘅 landa 畀人哋做得更加出位（我们的 landa 做得比别人突出、出色）"
+    },
+    {
+      "word": "噏耷",
+      "phonetic": "ap1 dap1",
+      "meaning": "表示“场所脏乱差，人穷困潦倒”",
+      "category": "常用语",
+      "example": "表示场所脏乱差：间屋咁噏耷，点住啊？（房间这么脏乱，怎么住啊？）；表示人穷困潦倒：你个噏耷老细，又问你借钱啊？"
+    },
+    {
+      "word": "周身唔聚财",
+      "phonetic": "zau1 san1 m4 zeoi6 coi4",
+      "meaning": "表示“浑身不自在/舒服”",
+      "category": "常用语",
+      "example": "听你讲呢的嘢，我周身唔聚财（听你说这些话，我浑身不自在/舒服）"
+    },
+    {
+      "word": "老利",
+      "phonetic": "lou5 lai2",
+      "meaning": "表示“吉利，吉祥”",
+      "category": "常用语",
+      "example": "新年着红底，够晒老利㖞（新年穿红色内衣，够吉利的㖞）"
+    },
+    {
+      "word": "帛金",
+      "phonetic": "baak6 gam1",
+      "meaning": "表示“丧礼金，白包”",
+      "category": "常用语",
+      "example": "你死咗之后，我一定会送帛金畀你屋企人（你死了之后，我一定会给你家人送白包的）"
+    },
+    {
+      "word": "拥趸",
+      "phonetic": "jung2 dan2",
+      "meaning": "表示“支持者，狂迷”",
+      "category": "常用语",
+      "example": "佢系呢队球队嘅拥趸（他是这个球队的支持者）"
+    }
+  ],
+  "vocabulary": [
+    {
+      "word": "咪",
+      "phonetic": "mai5",
+      "meaning": "别，不要",
+      "category": "否定词",
+      "example": "咪嘈：mai5 cou4（别吵）；咪住：mai5 zyu6（等一下）；咪郁：mai5 juk1（别动）；咪喊：mai5 haam3（别哭）；咪走：mai5 zau2（别走）；咪呃我：mai5 ngaak1 ngo5（别骗我）；咪使指意：mai5 sai2 zi2 ji3（别指望）；说明：咪：mai1 相等于“就”，常与“系”连用，表示：不就，，，不就是；例如：咪系啰：mai1 hai6 lo1（不就是啰）"
+    },
+    {
+      "word": "冇",
+      "phonetic": "mou5",
+      "meaning": "没有",
+      "category": "否定词",
+      "example": "冇计：mou5 gai2（没办法）冇计啦（没办法啦）；冇行：mou5 hong4（没戏，没机会，没希望）唔通呢次又冇行？（难道这次又是失望而归？）；冇瘾：mou5 jan5（无聊，没意思）玩亲都输，真冇瘾！（玩起来总是输，真没劲！）；冇料：mou5 liu2（没能力，没本事）佢冇料嘅（他没本事的）；无晒符：mou5 saai3 fu4（没办法了）真系搞到我冇晒符（真是让我一点办法也没有了）；冇声气：mou5 seng1 hei3（没动静，没希望）有无声气？（有没有希望？）"
+    },
+    {
+      "word": "未",
+      "phonetic": "mei6",
+      "meaning": "还没有，还不",
+      "category": "否定词",
+      "example": "未得：mei6 dak1（还不行）仲未得（还不可以，还没有好）；未够：mei6 gau3（还不够）你仲未够班！（你还不够资格！）；未使：mei6 sai2（先不用）未使买（先不用买）；未去：mei6 heoi3（还没有去）仲未去？（还不去？）（打算去，但是还没有去）"
+    },
+    {
+      "word": "紧",
+      "phonetic": "gan2",
+      "meaning": "表示正在进行的动作",
+      "category": "进行完成",
+      "example": "人哋等紧你（人家正在等你）；佢依家饮紧茶（他现在正在喝查）"
+    },
+    {
+      "word": "喺/响度",
+      "phonetic": "hai2 /hoeng2 dou6",
+      "meaning": "表示正在",
+      "category": "进行完成",
+      "example": "你喺度/响度谂乜？（你在这想啥呢？）"
+    },
+    {
+      "word": "住",
+      "phonetic": "zyu6",
+      "meaning": "表示动作的持续",
+      "category": "进行完成",
+      "example": "睇住佢（看着他）；攞住（拿着）"
+    },
+    {
+      "word": "实",
+      "phonetic": "sat6",
+      "meaning": "表示动作的持续，大致相当于普通话的“紧”",
+      "category": "进行完成",
+      "example": "睇实啲（看紧点）；门要闩实啲（门要关紧点）"
+    },
+    {
+      "word": "咗",
+      "phonetic": "zo2",
+      "meaning": "表示动作已经完成了",
+      "category": "进行完成",
+      "example": "唔记得咗（不记得了）；讲咗好多（说了好多）"
+    },
+    {
+      "word": "晒",
+      "phonetic": "saai3",
+      "meaning": "表示动作已经完成了，与“咗”不同，“晒”表示“全部...光了”",
+      "category": "进行完成",
+      "example": "食晒饭（饭都吃光了）；通通识晒（全部都懂了）；识晒未？（全都懂了没？）"
+    },
+    {
+      "word": "嚟",
+      "phonetic": "lai4",
+      "meaning": "强调最近发生的事情，表示刚刚经历过",
+      "category": "进行完成",
+      "example": "我去完嚟（我刚去过）"
+    },
+    {
+      "word": "开",
+      "phonetic": "hoi1",
+      "meaning": "作为动词词尾，表示动作的持续，“一直...一向...素来...”",
+      "category": "进行完成",
+      "example": "我用开呢个（我一直在用这个）；佢饮开早茶（他一向都喝早茶）"
+    },
+    {
+      "word": "就嚟",
+      "phonetic": "zau6 lai4",
+      "meaning": "就要，马上",
+      "category": "进行完成",
+      "example": "就嚟食饭啦（就要吃饭啦）；就嚟到你啦（就要到你啦）"
+    },
+    {
+      "word": "仲",
+      "phonetic": "zung6",
+      "meaning": "更、还",
+      "category": "程度词",
+      "example": "佢仲靓啲添（他更漂亮点）；呢个畀个个仲好（这个比那个更好）"
+    },
+    {
+      "word": "几...下",
+      "phonetic": "gei2...haa5",
+      "meaning": "挺...的",
+      "category": "程度词",
+      "example": "几高下（挺高的）"
+    },
+    {
+      "word": "太过",
+      "phonetic": "taai3 gwo3",
+      "meaning": "过于...",
+      "category": "程度词",
+      "example": "太过细个（太小了）；太过样衰（太丑了）"
+    },
+    {
+      "word": "得滞",
+      "phonetic": "dak1 zai6",
+      "meaning": "过于... 太... 只能用在肯定句+句尾",
+      "category": "程度词",
+      "example": "短得滞（太短了）；今晚食得滞（今晚吃的太撑了）"
+    },
+    {
+      "word": "零舍",
+      "phonetic": "ling4 se2",
+      "meaning": "特别，格外",
+      "category": "程度词",
+      "example": "琴日零舍冻（昨天特别冷）；佢做得零舍快（他做的特别快）"
+    },
+    {
+      "word": "至",
+      "phonetic": "zi3",
+      "meaning": "表示“最，极”，还表示“才，再”",
+      "category": "程度词",
+      "example": "至靓系呢个啦（最好的就是这个了）；佢翻来至迟（他回来最晚）；噉做至啱（这样做才对）"
+    },
+    {
+      "word": "亲",
+      "phonetic": "can1",
+      "meaning": "放在动词后面，和动词连用，表示身体或心理遭受",
+      "category": "特殊词",
+      "example": "表示被动或者感受：佢琴日冻亲（他昨天着凉了）；畀你吓亲（被你吓着了）；表示一...就...：呢啲嘢，我睇亲就识，做亲就错（这些东西，我一看就会，一做就错）"
+    },
+    {
+      "word": "埋",
+      "phonetic": "maai4",
+      "meaning": "放在动词后面，表示“使贴近”",
+      "category": "特殊词",
+      "example": "表示趋向或出现某种结果：推埋去（推进去）；坐埋嚟（坐过来）；企埋啲（站过来点）；表示连带连同，连....也：话埋你知（连带说给你听）；畀埋你个份佢（连带你那份也给他）"
+    },
+    {
+      "word": "添",
+      "phonetic": "tim1",
+      "meaning": "放在动词后面，表示“增添”，相等于“再”",
+      "category": "特殊词",
+      "example": "表示增加：食多啲添（再多吃点）；买多两个添（再多买两个）；表示强调：想当于“还...呢”：唔使担心，仲有我添（不用担心，还有我呢）；表示强调：想当于“还...呢”：我唔记得咗添（我还忘记了呢）"
+    },
+    {
+      "word": "梗/实",
+      "phonetic": "gang2/sat6",
+      "meaning": "放在形容词或动词前，表示“肯定，当然”",
+      "category": "特殊词",
+      "example": "表示肯定：梗/实好啦（肯定好啦）；表示一定会（用在形容词或动词后）：听日我去梗（明天我一定会去）"
+    },
+    {
+      "word": "一于",
+      "phonetic": "jat1 jyu1",
+      "meaning": "放在动词前，表示十分肯定的语气“一定”",
+      "category": "特殊词",
+      "example": "一于噉话（就这样说定了）；一于系噉啦（就这样吧）；一于唔制（坚决不答应）"
+    },
+    {
+      "word": "都",
+      "phonetic": "dou1",
+      "meaning": "有“都”的意思，也有“也”的意思",
+      "category": "特殊词",
+      "example": "表示都：大家都唔错（大家都不错）；表示也：你都去啦（你也去吧）"
+    },
+    {
+      "word": "一路",
+      "phonetic": "jat1 lou6",
+      "meaning": "表示“一直”的意思，但“一路...一路表示“一边...一边”",
+      "category": "副词-特殊",
+      "example": "一路行落去（一直走下去）；一路行一路谂（边走边想）"
+    },
+    {
+      "word": "净系",
+      "phonetic": "zing6 hai6",
+      "meaning": "表示“只有，仅仅，总是，光”",
+      "category": "副词-特殊",
+      "example": "表示只有，总是：净系得一蚊（只有一块钱）；净系唔食饭（总是不吃饭）；表示光：净系呢度就唔止呢个数啦（光是这儿就不止这个数了）"
+    },
+    {
+      "word": "是但",
+      "phonetic": "si6 daan6",
+      "meaning": "表示“随便，无所谓”",
+      "category": "副词-特殊",
+      "example": "是但啦（随便啦）；是但你拣（随便你选）"
+    },
+    {
+      "word": "特登/专登",
+      "phonetic": "dak6 dang1/zyun1 dang1",
+      "meaning": "表示“故意，特意”",
+      "category": "副词-特殊",
+      "example": "我特登来揾你嘅（我专门来找你的）；特登留番只猪肉包畀你（特意留个猪肉包给你）"
+    },
+    {
+      "word": "横掂",
+      "phonetic": "waang4 dim6",
+      "meaning": "表示“反正”",
+      "category": "副词-特殊",
+      "example": "横掂都是咁啦（反正都是这样子了）；横掂系佢搞错咗（反正是他搞错了）"
+    },
+    {
+      "word": "间（唔）中",
+      "phonetic": "gaan3",
+      "meaning": "m4）zung1（表示“偶尔”",
+      "category": "副词-特殊",
+      "example": "佢间中嚟呢度住一两晚（他偶尔来这里住一两个晚上）；我间中去下（我偶尔去一下）"
+    },
+    {
+      "word": "咁滞",
+      "phonetic": "gam3 zai6",
+      "meaning": "放在状况的词语后面，表示“差不多...，几乎...”",
+      "category": "副词-特殊",
+      "example": "啲人走晒咁滞喇（那些人差不多走光了）；食晒咁滞（几乎全吃光了）"
+    },
+    {
+      "word": "不溜",
+      "phonetic": "bat1 lau1",
+      "meaning": "表示“一向”",
+      "category": "副词-特殊",
+      "example": "不溜都系噉㗎喇（一向都是这样的啦）；我不溜搭呢路车嘅（我一向都乘这路车的）"
+    },
+    {
+      "word": "同/同埋",
+      "phonetic": "tung4/tung4 maai4",
+      "meaning": "表示“和，同，跟”",
+      "category": "副词-特殊",
+      "example": "我同你（我和你）；呢个同埋个个（这个和那个）"
+    },
+    {
+      "word": "嘛/咩",
+      "phonetic": "maa3/me1",
+      "meaning": "表示疑问的语气词，相当于“吗”",
+      "category": "语气助词",
+      "example": "陈生喺屋企嘛?（陈先生在家吗?）；你识讲英文咩?（你会讲英文吗?）"
+    },
+    {
+      "word": "啩",
+      "phonetic": "gwaa3",
+      "meaning": "相当于“吧”",
+      "category": "语气助词",
+      "example": "唔系啩!（不是吧!）；你自己想去啫啩!（你自己想去而已吧!）"
+    },
+    {
+      "word": "咧/嗬",
+      "phonetic": "le46/ho2",
+      "meaning": "带有商议语气，希望对方相信或接受意见，相当于“吧”",
+      "category": "语气助词",
+      "example": "表示希望对方相信：噉样唔好咧（le4）！（这样不好的！）；表示希望对方接受自己（的意见）：我试下咧（le4）？（我试一试吧？）；表示早就预料到了，进一步求证：咁平，好抵买咧（le6）?（这么便宜，很值得买吧?）；表示试探、附和的语气，相当于“是吧”：几抵下，嗬?（挺便宜的，是吧?）；4.啊/㗎/呢/嘅：aa3/gaa3/ne1/ge2；表示一般的询问、求证（啊/㗎）：食唔食得晒啊/㗎？（吃不吃得下啊？）；与普通话“呢”的用法一致（呢）：攞六斤定七斤好呢？（拿六斤好还是拿七斤好呢？）；一般用于询问情况、原因（嘅）：咁快趣返嚟嘅？（这么快就回来了？）"
+    },
+    {
+      "word": "啰/咯",
+      "phonetic": "lo1/lo3",
+      "meaning": "表示理解或肯定的语气",
+      "category": "语气助词",
+      "example": "佢讲你咪信咯（他说你就信吧）"
+    },
+    {
+      "word": "子嘛",
+      "phonetic": "zi1 maa3",
+      "meaning": "表示无所谓的语气，相当于“罢了，而已”",
+      "category": "语气助词",
+      "example": "我争两蚊之嘛（我差两块而已）；试下之嘛（试下而已）"
+    },
+    {
+      "word": "噃/㖞",
+      "phonetic": "bo3/wo3",
+      "meaning": "表示提醒、叮嘱、肯定，㖞：用于转述别人的话",
+      "category": "语气助词",
+      "example": "表示肯定（噃）：你好叻噃（你好能干啊）；表示提醒（噃）：你记住准时到噃（你记住要准时都啊）；表示转述（㖞）：佢话九点三个字到㖞（他说九点十五分到）；表示转述（㖞）：家姐叫唔好嘈住佢㖞（姐姐说不要嘈到她）"
+    },
+    {
+      "word": "咋",
+      "phonetic": "zaa3",
+      "meaning": "表示仅此而已的语气，相当于“才，仅”",
+      "category": "语气助词",
+      "example": "嚟咗十零人咋（才来十几个人而已）；系佢唔听我讲咋（是他不听我讲而已）"
+    },
+    {
+      "word": "啫",
+      "phonetic": "ze1",
+      "meaning": "相当于“而已，吧”",
+      "category": "语气助词",
+      "example": "都唔系好攰啫（也不算太累吧/而已）"
+    },
+    {
+      "word": "啦",
+      "phonetic": "laa1",
+      "meaning": "相当于“啦”",
+      "category": "语气助词",
+      "example": "好啦（好啦）；你唔好攞啦（你不要拿啦）"
+    },
+    {
+      "word": "喇",
+      "phonetic": "laak3",
+      "meaning": "相当于“了”",
+      "category": "语气助词",
+      "example": "都叫你唔好去喇（都叫你不要去了）；冇晒瘾喇（没意思了）我识做喇（我知道怎样做了）"
+    },
+    {
+      "word": "哗/哗哎",
+      "phonetic": "waa1/waa1 aai1",
+      "meaning": "表示赞赏高兴的语气，相当于普通话“哗/啊”",
+      "category": "语气助词",
+      "example": "哗/哗哎，又做得几好睇噃（哗，做得也挺好看的）"
+    },
+    {
+      "word": "嗱",
+      "phonetic": "laa4",
+      "meaning": "用在问句后面，表示向对方确认",
+      "category": "语气助词",
+      "example": "食咗嘢嗱？（吃过东西了吗？）"
+    },
+    {
+      "word": "逼",
+      "phonetic": "bik1",
+      "meaning": "表示“挤，拥挤”",
+      "category": "情绪环境",
+      "example": "坐好啦，唔好逼嚟逼去（坐好啦，不要挤来挤去）"
+    },
+    {
+      "word": "憎",
+      "phonetic": "zang1",
+      "meaning": "表示“讨厌”",
+      "category": "情绪环境",
+      "example": "我好憎人哋食烟（我好讨厌别人吸烟）；我憎到佢鬼噉（我恨透了他）"
+    },
+    {
+      "word": "恨",
+      "phonetic": "han6",
+      "meaning": "表示“后悔，惋惜，巴不得，羡慕”",
+      "category": "情绪环境",
+      "example": "表示”巴不得”：恨不得你快啲走（巴不得你快点离开）；表示”羡慕”：我好恨食雪条（我很羡慕吃冰棍）；呢度咁好，边个都恨啦；表示”羡慕”：你唔恨得咁多㗎喇（你羡慕不来的啦）"
+    },
+    {
+      "word": "呃",
+      "phonetic": "ngak1",
+      "meaning": "表示“被骗”",
+      "category": "情绪环境",
+      "example": "小心，唔好被人呃（小心点，别被人骗了）；你呃唔到我（你骗不到我）"
+    },
+    {
+      "word": "闹",
+      "phonetic": "naau6",
+      "meaning": "表示“骂”",
+      "category": "情绪环境",
+      "example": "做错嘢，畀人闹咗几句（做错事被人骂了几句）"
+    },
+    {
+      "word": "嘈",
+      "phonetic": "cou4",
+      "meaning": "表示“吵”",
+      "category": "情绪环境",
+      "example": "咪嘈住我瞓觉（别吵到我睡觉）"
+    },
+    {
+      "word": "污哩单刀",
+      "phonetic": "wu1 lei1 daan1 dou1",
+      "meaning": "表示“乱七八糟”",
+      "category": "情绪环境",
+      "example": "你间房间咁污哩单刀㗎？平时冇执过房定啦（你的房间这么乱，平时一定没打扫过）"
+    },
+    {
+      "word": "执定",
+      "phonetic": "zap1 ding6",
+      "meaning": "表示“收拾好”",
+      "category": "情绪环境",
+      "example": "呢啲行李？——冇，我执定丫嘛（这些行李？——没，我收拾好而已）"
+    }
+  ]
+}
