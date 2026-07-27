@@ -432,11 +432,6 @@ class VocabApp {
       }
     }
 
-    // 导入按钮
-    const importBtn = document.getElementById('importBtn');
-    importBtn.addEventListener('click', () => self.showImportModal());
-    importBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.showImportModal(); });
-    
     // 模态框关闭
     document.querySelectorAll('.modal-overlay').forEach(el => {
       el.addEventListener('click', (e) => {
@@ -483,31 +478,6 @@ class VocabApp {
     const saveWordBtn = document.getElementById('saveWordBtn');
     saveWordBtn.addEventListener('click', () => self.saveWord());
     saveWordBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.saveWord(); });
-    
-    // 导入确认
-    const confirmImportBtn = document.getElementById('confirmImportBtn');
-    confirmImportBtn.addEventListener('click', () => self.confirmImport());
-    confirmImportBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.confirmImport(); });
-    
-    // 文件选择
-    document.getElementById('importFile').addEventListener('change', (e) => self.handleFileSelect(e));
-    
-    // 导入拖拽
-    const importZone = document.getElementById('importZone');
-    importZone.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      importZone.classList.add('dragover');
-    });
-    importZone.addEventListener('dragleave', () => {
-      importZone.classList.remove('dragover');
-    });
-    importZone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      importZone.classList.remove('dragover');
-      if (e.dataTransfer.files.length) {
-        self.handleFileSelect({ target: { files: e.dataTransfer.files } });
-      }
-    });
 
     // 卡片点击翻转（仅非触摸设备）
     const flashcard = document.getElementById('flashcard');
@@ -1455,7 +1425,6 @@ class VocabApp {
     return colMap.word !== undefined ? colMap : null;
   }
 
-  /** 无 recognized 表头时使用的历史列下标 */
   getLegacyImportColumnMap() {
     return {
       word: 0,
@@ -1467,46 +1436,6 @@ class VocabApp {
       jyutping: 6,
       cantoneseExample: 7
     };
-  }
-
-  parseCSVLine(line) {
-    const out = [];
-    let cur = '';
-    let i = 0;
-    let inQ = false;
-    while (i < line.length) {
-      const c = line[i];
-      if (inQ) {
-        if (c === '"') {
-          if (line[i + 1] === '"') {
-            cur += '"';
-            i += 2;
-            continue;
-          }
-          inQ = false;
-          i++;
-          continue;
-        }
-        cur += c;
-        i++;
-        continue;
-      }
-      if (c === '"') {
-        inQ = true;
-        i++;
-        continue;
-      }
-      if (c === ',') {
-        out.push(cur.trim());
-        cur = '';
-        i++;
-        continue;
-      }
-      cur += c;
-      i++;
-    }
-    out.push(cur.trim());
-    return out;
   }
 
   normalizeImportedWord(raw) {
@@ -2204,7 +2133,7 @@ class VocabApp {
             <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
           </div>
           <h3 class="empty-title">词库为空</h3>
-          <p class="empty-desc">点击上方按钮导入词库开始学习</p>
+          <p class="empty-desc">暂无单词数据</p>
         </div>
       `;
       document.getElementById('pagination')?.remove();
@@ -2489,12 +2418,6 @@ class VocabApp {
   }
 
   // ==================== 模态框 ====================
-  showImportModal() {
-    document.getElementById('importModal').classList.add('active');
-    document.getElementById('importPreview').innerHTML = '';
-    this.importedWords = [];
-  }
-
   closeModals() {
     document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('active'));
     
@@ -2558,77 +2481,7 @@ class VocabApp {
     }
   }
 
-  // 处理文件选择
-  handleFileSelect(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const fileName = file.name.toLowerCase();
-    
-    if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
-      // 处理Excel文件
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        try {
-          const data = new Uint8Array(event.target.result);
-          const workbook = XLSX.read(data, { type: 'array' });
-          const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-          
-          const words = this.parseExcel(jsonData);
-          if (!Array.isArray(words)) {
-            this.showToast('文件格式错误');
-            return;
-          }
-
-          this.importedWords = words;
-          this.showImportPreview(words);
-        } catch (error) {
-          this.showToast('Excel文件解析失败');
-          console.error(error);
-        }
-      };
-      reader.readAsArrayBuffer(file);
-    } else {
-      // 处理JSON和CSV文件
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        try {
-          const content = event.target.result;
-          let words = [];
-
-          if (fileName.endsWith('.json')) {
-            const parsed = JSON.parse(content);
-            const arr = Array.isArray(parsed) ? parsed : (parsed.words || []);
-            if (!Array.isArray(arr)) {
-              this.showToast('JSON 格式错误：应为词汇数组');
-              return;
-            }
-            words = arr.map((item) => this.normalizeImportedWord(item));
-          } else if (fileName.endsWith('.csv')) {
-            words = this.parseCSV(content);
-          } else {
-            this.showToast('请选择 JSON、CSV、XLSX 或 XLS 文件');
-            return;
-          }
-
-          if (!Array.isArray(words)) {
-            this.showToast('文件格式错误');
-            return;
-          }
-
-          this.importedWords = words;
-          this.showImportPreview(words);
-        } catch (error) {
-          this.showToast('文件解析失败');
-          console.error(error);
-        }
-      };
-      reader.readAsText(file);
-    }
-  }
-
-  // 解析Excel数据（首行为表头，列名规则与 parseCSV / resolveImportHeaderKey 一致）
+  // 解析Excel数据（首行为表头，列名规则与 resolveImportHeaderKey 一致）
   parseExcel(data) {
     if (!data || data.length < 2) return [];
     const headerCells = data[0].map((c) => String(c ?? '').trim());
@@ -2664,83 +2517,6 @@ class VocabApp {
       );
     }
     return words;
-  }
-
-  // 解析 CSV（首行为表头，与 Excel 一致）
-  parseCSV(content) {
-    const lines = content.trim().split(/\r?\n/).filter((l) => l.length);
-    if (lines.length < 2) return [];
-
-    const headerParts = this.parseCSVLine(lines[0]);
-    let colMap = this.buildImportColumnMap(headerParts);
-    if (!colMap) colMap = this.getLegacyImportColumnMap();
-
-    const words = [];
-    for (let i = 1; i < lines.length; i++) {
-      const parts = this.parseCSVLine(lines[i]);
-      const get = (key) => {
-        const idx = colMap[key];
-        if (idx === undefined || idx === null) return '';
-        return String(parts[idx] ?? '').trim();
-      };
-
-      const wordText = get('word');
-      if (!wordText) continue;
-
-      words.push(
-        this.normalizeImportedWord({
-          word: wordText,
-          meaning: get('meaning'),
-          phonetic: get('phonetic'),
-          example: get('example'),
-          category: get('category'),
-          language: get('language'),
-          jyutping: get('jyutping'),
-          cantonese: get('cantonese'),
-          cantoneseExample: get('cantoneseExample')
-        })
-      );
-    }
-
-    return words;
-  }
-
-  // 显示导入预览
-  showImportPreview(words) {
-    const preview = document.getElementById('importPreview');
-    preview.innerHTML = `
-      <p style="margin-bottom: 12px; color: var(--text-secondary);">
-        共 ${words.length} 条数据，确认导入？
-      </p>
-    `;
-  }
-
-  // 确认导入
-  async confirmImport() {
-    if (!this.importedWords || this.importedWords.length === 0) {
-      this.showToast('请先选择文件');
-      return;
-    }
-
-    // 获取导入模式
-    const importMode = document.querySelector('input[name="importMode"]:checked')?.value || 'append';
-    
-    if (importMode === 'overwrite') {
-      // 覆盖模式：先清空词库
-      await this.db.clearAllWords();
-    }
-
-    const count = await this.db.batchAddWords(this.importedWords);
-    this.showToast(`成功导入 ${count} 个单词`);
-    this.closeModals();
-    
-    if (this.currentPage === 'library') {
-      this.renderLibrary();
-      this.renderCategoryOptions();
-    }
-    if (this.currentPage === 'learn') {
-      this.prepareLearnSession();
-    }
   }
 
   // Toast 提示

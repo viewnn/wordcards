@@ -24,11 +24,6 @@
     <!-- 头部 -->
     <header class="header">
       <h1>📚 单词卡</h1>
-      <div class="header-actions">
-        <button class="header-btn" id="importBtn" title="导入词库">
-          <svg viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
-        </button>
-      </div>
     </header>
 
     <!-- 页面内容 -->
@@ -44,7 +39,7 @@
             <span class="progress-text" id="progressText">0/0</span>
           </div>
           <!-- 提示信息 -->
-          <div class="notice">手指左滑<-表示已掌握；右滑->表示跳过至下一词</div>
+          <div class="notice">手指左滑 <- 表示已掌握；右滑 -> 表示跳过至下一词</div>
           <!-- 统计卡片 -->
           <div class="stats-row">
             <div class="stat-card">
@@ -94,7 +89,7 @@
               <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
             </div>
             <h3 class="empty-title">还没有可学习的单词</h3>
-            <p class="empty-desc">点击右上角导入词库</p>
+            <p class="empty-desc">暂无单词数据</p>
           </div>
 
           <!-- 完成页面 -->
@@ -144,7 +139,7 @@
           </div>
           <div class="category-dropdown" id="categoryDropdown">
             <div class="dropdown-trigger">
-              <span id="categoryLabel">分类（category）</span>
+              <span id="categoryLabel">分类</span>
               <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5H7z"/></svg>
             </div>
             <div class="dropdown-content">
@@ -336,15 +331,15 @@
         <form id="wordForm">
           <input type="hidden" id="wordId">
           <div class="form-group">
-            <label class="form-label">词汇 *</label>
+            <label class="form-label">词汇</label>
             <input type="text" class="form-input" id="wordInput" placeholder="请输入词汇" required>
           </div>
           <div class="form-group">
-            <label class="form-label">音标 *</label>
+            <label class="form-label">音标</label>
             <input type="text" class="form-input" id="phoneticInput" placeholder="请输入音标">
           </div>
           <div class="form-group">
-            <label class="form-label">释义 *</label>
+            <label class="form-label">释义</label>
             <input type="text" class="form-input" id="meaningInput" placeholder="请输入释义" required>
           </div>
           <div class="form-group">
@@ -365,51 +360,9 @@
     </div>
   </div>
 
-  <!-- 导入词库模态框 -->
-  <div class="modal-overlay" id="importModal">
-    <div class="modal">
-      <div class="modal-header">
-        <h2 class="modal-title">导入词库</h2>
-        <button class="modal-close">
-          <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-        </button>
-      </div>
-      <div class="modal-body">
-        <div class="import-zone" id="importZone">
-          <svg viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
-          <p>上传Excel文件，请<span>点击选择</span></p>
-        </div>
-        <input type="file" id="importFile" accept=".json,.csv,.xlsx,.xls" style="display: none;">
-        
-        <div class="import-options">
-          <label class="radio-label">
-            <input type="radio" name="importMode" value="overwrite" checked>
-            <span>覆盖词库</span>
-          </label>
-          <label class="radio-label">
-            <input type="radio" name="importMode" value="append">
-            <span>追加到词库</span>
-          </label>
-        </div>
-        
-        <div class="import-preview" id="importPreview"></div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-secondary" onclick="app.closeModals()">取消</button>
-        <button class="btn-primary" id="confirmImportBtn">确认导入</button>
-      </div>
-    </div>
-  </div>
-
   <!-- Toast -->
   <div class="toast" id="toast"></div>
 
   <script src="app.js"></script>
-  <script>
-    // 文件上传点击处理
-    document.getElementById('importZone').addEventListener('click', () => {
-      document.getElementById('importFile').click();
-    });
-  </script>
 </body>
 </html>

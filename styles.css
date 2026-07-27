@@ -74,35 +74,6 @@ html, body {
   color: var(--primary);
 }
 
-.header-actions {
-  display: flex;
-  gap: 12px;
-}
-
-.header-btn {
-  width: 40px;
-  height: 40px;
-  border: none;
-  background: var(--bg-primary);
-  border-radius: 50%;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-}
-
-.header-btn:active {
-  transform: scale(0.95);
-  background: var(--text-light);
-}
-
-.header-btn svg {
-  width: 22px;
-  height: 22px;
-  fill: var(--text-secondary);
-}
-
 /* ==================== 底部导航 ==================== */
 .bottom-nav {
   display: flex;
@@ -1431,71 +1402,6 @@ html, body {
   text-align: right;
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
-}
-
-/* ==================== 导入区域 ==================== */
-.import-zone {
-  border: 2px dashed var(--text-light);
-  border-radius: var(--radius-md);
-  padding: 40px 20px;
-  text-align: center;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.import-zone:hover,
-.import-zone.dragover {
-  border-color: var(--primary);
-  background: rgba(74, 144, 217, 0.05);
-}
-
-.import-zone svg {
-  width: 48px;
-  height: 48px;
-  fill: var(--text-light);
-  margin-bottom: 12px;
-}
-
-.import-zone p {
-  color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-}
-
-.import-zone span {
-  color: var(--primary);
-  font-weight: 500;
-}
-
-.import-options {
-  display: flex;
-  gap: 24px;
-  padding: 16px 0;
-  border-bottom: 1px solid var(--bg-primary);
-  margin-top: 16px;
-}
-
-.radio-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-}
-
-.radio-label input[type="radio"] {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--primary);
-}
-
-.import-preview {
-  margin-top: 16px;
-  background: var(--bg-primary);
-  border-radius: var(--radius-sm);
-  padding: 16px;
-  max-height: 200px;
-  overflow-y: auto;
 }
 
 /* ==================== Toast 提示 ==================== */
