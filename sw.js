@@ -1,5 +1,10 @@
-﻿const CACHE_NAME = 'vocab-app-v4';
-const DATA_CACHE_NAME = 'vocab-data-v1';
+﻿// ==================== 部署更新说明 ====================
+// 每次推送新版本到 GitHub Pages 前，请将下方 CACHE_NAME
+// 的数字加 1（例如 v4 → v5），浏览器会自动检测 SW 更新、
+// 删除旧缓存并加载最新文件。不需要额外操作。
+// ====================================================
+const CACHE_NAME = 'vocab-app-v1.3';
+const DATA_CACHE_NAME = 'vocab-data-v1.3';
 
 // 使用相对路径，避免部署在子目录时缓存失效
 const urlsToCache = [

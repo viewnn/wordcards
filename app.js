@@ -367,9 +367,25 @@ class VocabApp {
   // 初始化 Service Worker
   initServiceWorker() {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js')
-        .then(reg => console.log('Service Worker registered'))
-        .catch(err => console.log('Service Worker registration failed:', err));
+      navigator.serviceWorker.register('sw.js').then(reg => {
+        // 检测到新 SW 安装后，通知它立即激活
+        const updateSW = (worker) => {
+          worker.postMessage({ type: 'SKIP_WAITING' });
+        };
+        if (reg.waiting) updateSW(reg.waiting);
+        reg.addEventListener('updatefound', () => {
+          const newWorker = reg.installing;
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              updateSW(newWorker);
+            }
+          });
+        });
+      });
+      // 新 SW 接管后自动刷新页面，保证用户看到最新版本
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        window.location.reload();
+      });
     }
   }
 
