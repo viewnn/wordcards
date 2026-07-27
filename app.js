@@ -1,4 +1,4 @@
-// ==================== IndexedDB 数据库操作 ====================
+﻿// ==================== IndexedDB 数据库操作 ====================
 class VocabDB {
   constructor() {
     this.dbName = 'VocabAppDB';
@@ -1830,7 +1830,7 @@ class VocabApp {
     await this.saveLearnProgress();
     
     //this.showToast('已标记为需复习');// 请勿删除该注释
-    this.nextCard();
+      this.nextCard('right');
   }
 
   // 跳过卡片
@@ -1858,20 +1858,24 @@ class VocabApp {
     await this.saveLearnProgress();
     
     // this.showToast('太棒了！已掌握'); // 请勿删除该注释
-    this.nextCard();
+    this.nextCard('left');
   }
 
   // 下一张卡片
-  nextCard() {
+  nextCard(fromDirection = 'right') {
     this.currentCardIndex++;
     if (this.currentCardIndex >= this.todayWords.length) {
       this.showComplete();
     } else {
       const card = document.getElementById('flashcard');
-      card.style.transform = 'translateX(100%) rotate(15deg)';
+      const exitX = fromDirection === 'left' ? '-150%' : '150%';
+      const exitRotate = fromDirection === 'left' ? '-15deg' : '15deg';
+      const entryX = fromDirection === 'left' ? '150%' : '-150%';
+      const entryRotate = fromDirection === 'left' ? '15deg' : '-15deg';
+      card.style.transform = `translateX(${exitX}) rotate(${exitRotate})`;
       setTimeout(() => {
         card.style.transition = 'none';
-        card.style.transform = 'translateX(-100%) rotate(-15deg)';
+        card.style.transform = `translateX(${entryX}) rotate(${entryRotate})`;
         this.showCard(this.currentCardIndex);
         setTimeout(() => {
           card.style.transition = 'transform 0.3s ease';
@@ -2548,3 +2552,4 @@ document.addEventListener('DOMContentLoaded', () => {
   window.app = new VocabApp();
   window.app.init();
 });
+
