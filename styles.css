@@ -152,7 +152,7 @@ html, body {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 8px 8px 0;
+  padding: 8px 8px 72px;
   box-sizing: border-box;
   background: white;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
@@ -854,6 +854,7 @@ html, body {
 
 .library-container {
   padding: 20px;
+  padding-bottom: calc(80px + env(safe-area-inset-bottom));
   background: white;
 }
 

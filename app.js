@@ -416,20 +416,30 @@ class VocabApp {
   bindEvents() {
     const self = this;
     
-    // 导航切换
+    // 导航切换：移动端会先 touchstart 再合成 click，需要短时间内忽略紧随其后的 click
+    let lastNavTouchTs = 0;
     document.querySelectorAll('.nav-item').forEach(item => {
       item.addEventListener('click', handleNavClick);
-      item.addEventListener('touchstart', handleNavClick);
+      item.addEventListener('touchstart', handleNavClick, { passive: false });
     });
     
     function handleNavClick(e) {
-      e.preventDefault();
-      // 使用 closest 确保获取到正确的 nav-item 元素
       const navItem = e.target.closest('.nav-item');
-      if (navItem) {
-        const page = navItem.dataset.page;
-        self.switchPage(page);
+      if (!navItem) return;
+      
+      if (e.type === 'click') {
+        if (Date.now() - lastNavTouchTs < 450) {
+          if (e.cancelable) e.preventDefault();
+          return;
+        }
+      } else {
+        lastNavTouchTs = Date.now();
+        if (e.cancelable) e.preventDefault();
+        e.stopPropagation();
       }
+      
+      const page = navItem.dataset.page;
+      self.switchPage(page);
     }
 
     // 模态框关闭
