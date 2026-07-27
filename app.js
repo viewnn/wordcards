@@ -158,18 +158,19 @@ class VocabApp {
     this.todayWords = [];
     this.isFlipped = false;
     this.settings = {
-      dailyGoal: 50,
+      dailyGoal: 100,
       cardBgColor: '#E8F5E9',
       fontSize: 'medium',
       soundEnabled: false,
+      speechEnabled: false,
       phoneticAutoRead: false,
       /** 默认先展示释义面；点击后翻到词汇面 */
       cardDefinitionFirst: false,
       learnMode: 'sequential',
       /** 音标渐显延迟（秒），0表示立即显示 */
-      phoneticDelay: 0,
+      phoneticDelay: 2,
       /** 单词重复出现频率（天），0表示每日目标内不重复 */
-      repeatFrequency: 0,
+      repeatFrequency: 2,
       /** 词典导入范围：all / phrase / word，与设置页下拉同步 */
       dictImportType: 'all'
     };
@@ -391,15 +392,15 @@ class VocabApp {
 
   // 加载设置
   async loadSettings() {
-    this.settings.dailyGoal = await this.db.getSetting('dailyGoal', 50);
+    this.settings.dailyGoal = await this.db.getSetting('dailyGoal', 100);
     this.settings.cardBgColor = await this.db.getSetting('cardBgColor', '#E8F5E9');
-    this.settings.fontSize = await this.db.getSetting('fontSize', 'medium');
+    this.settings.speechEnabled = await this.db.getSetting('speechEnabled', false);
     this.settings.soundEnabled = await this.db.getSetting('soundEnabled', false);
     this.settings.phoneticAutoRead = await this.db.getSetting('phoneticAutoRead', false);
     this.settings.cardDefinitionFirst = await this.db.getSetting('cardDefinitionFirst', false);
     this.settings.learnMode = await this.db.getSetting('learnMode', 'sequential');
-    this.settings.phoneticDelay = await this.db.getSetting('phoneticDelay', 0);
-    this.settings.repeatFrequency = await this.db.getSetting('repeatFrequency', 0);
+    this.settings.phoneticDelay = await this.db.getSetting('phoneticDelay', 2);
+    this.settings.repeatFrequency = await this.db.getSetting('repeatFrequency', 2);
     this.settings.dictImportType = await this.db.getSetting('dictImportType', 'all');
   }
 
@@ -529,6 +530,7 @@ class VocabApp {
     document.addEventListener('touchstart', handleSpeakClick, { passive: false });
 
     function handleSpeakClick(e) {
+      if (!self.settings.speechEnabled) return;
       const btn = e.target.closest('.speak-btn');
       if (!btn) return;
       const isVisible = window.getComputedStyle(btn).display !== 'none';
@@ -785,6 +787,27 @@ class VocabApp {
     goalValue.textContent = String(this.settings.dailyGoal);
   }
 
+  /** 语音朗读开关影响例句朗读和音标朗读的可用状态 */
+  refreshSpeechDependentToggles() {
+    const speechOn = this.settings.speechEnabled;
+    const soundToggle = document.getElementById('soundToggle');
+    const phoneticToggle = document.getElementById('phoneticReadToggle');
+    if (soundToggle) {
+      soundToggle.style.opacity = speechOn ? '1' : '0.4';
+      soundToggle.style.cursor = speechOn ? 'pointer' : 'not-allowed';
+    }
+    if (phoneticToggle) {
+      phoneticToggle.style.opacity = speechOn ? '1' : '0.4';
+      phoneticToggle.style.cursor = speechOn ? 'pointer' : 'not-allowed';
+    }
+    document.querySelectorAll('.speak-btn').forEach(btn => {
+      btn.classList.toggle('disabled', !speechOn);
+    });
+    document.querySelectorAll('.library-speak-btn').forEach(btn => {
+      btn.classList.toggle('disabled', !speechOn);
+    });
+  }
+
   /** 词典导入后：分类下拉勾选全部真实分类（等同于「全部」），列表展示当前库全部词条 */
   async syncLibraryCategoryFilterToDictType() {
     const words = await this.db.getAllWords();
@@ -886,11 +909,41 @@ class VocabApp {
     }
 
     // 音效开关
+    const speechToggle = document.getElementById('speechToggle');
+    if (speechToggle) {
+      speechToggle.addEventListener('click', handleSpeechToggle);
+      speechToggle.addEventListener('touchstart', handleSpeechToggle);
+    }
+
+    async function handleSpeechToggle(e) {
+      e.preventDefault();
+      const toggle = document.getElementById('speechToggle');
+      toggle.classList.toggle('active');
+      self.settings.speechEnabled = toggle.classList.contains('active');
+      await self.db.setSetting('speechEnabled', self.settings.speechEnabled);
+      if (!self.settings.speechEnabled) {
+        self.settings.soundEnabled = false;
+        self.settings.phoneticAutoRead = false;
+        await self.db.setSetting('soundEnabled', false);
+        await self.db.setSetting('phoneticAutoRead', false);
+        const st = document.getElementById('soundToggle');
+        if (st) st.classList.remove('active');
+        const pt = document.getElementById('phoneticReadToggle');
+        if (pt) pt.classList.remove('active');
+      }
+      self.refreshSpeechDependentToggles();
+      self.applySettings();
+    }
+
     const soundToggle = document.getElementById('soundToggle');
     soundToggle.addEventListener('click', handleSoundToggle);
     soundToggle.addEventListener('touchstart', handleSoundToggle);
     
     async function handleSoundToggle(e) {
+      if (!self.settings.speechEnabled) {
+        self.showToast('请先开启「语音朗读」');
+        return;
+      }
       e.preventDefault();
       const toggle = document.getElementById('soundToggle');
       toggle.classList.toggle('active');
@@ -905,6 +958,10 @@ class VocabApp {
     }
 
     async function handlePhoneticReadToggle(e) {
+      if (!self.settings.speechEnabled) {
+        self.showToast('请先开启「语音朗读」');
+        return;
+      }
       e.preventDefault();
       const toggle = document.getElementById('phoneticReadToggle');
       toggle.classList.toggle('active');
@@ -994,6 +1051,8 @@ class VocabApp {
     if (flashcard) {
       flashcard.style.background = this.settings.cardBgColor;
     }
+
+    this.refreshSpeechDependentToggles();
 
     const fontSizes = { small: '14px', medium: '16px', large: '20px' };
     document.documentElement.style.setProperty('--font-size-md', fontSizes[this.settings.fontSize] || '16px');
@@ -1377,6 +1436,7 @@ class VocabApp {
         this.speakCurrentWord();
       }, 2000);
     }
+    this.refreshSpeechDependentToggles();
   }
 
   // 翻转卡片
@@ -2230,10 +2290,11 @@ class VocabApp {
     // 绑定编辑和删除事件
     container.querySelectorAll('.library-speak-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => {
+        if (!this.settings.speechEnabled) return;
         e.stopPropagation();
         const id = parseInt(btn.dataset.id, 10);
         const word = this._librarySpeakWordsById.get(id);
-        if (word) this.speakWordEntryFront(word);
+        if (word && this.settings.speechEnabled) this.speakWordEntryFront(word);
       });
     });
 
@@ -2347,6 +2408,11 @@ class VocabApp {
     });
     
     document.getElementById('soundToggle').classList.toggle('active', this.settings.soundEnabled);
+    const speechToggle = document.getElementById('speechToggle');
+    if (speechToggle) {
+      speechToggle.classList.toggle('active', this.settings.speechEnabled);
+    }
+    this.refreshSpeechDependentToggles();
     const phoneticReadToggle = document.getElementById('phoneticReadToggle');
     if (phoneticReadToggle) {
       phoneticReadToggle.classList.toggle('active', this.settings.phoneticAutoRead);

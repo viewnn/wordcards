@@ -1,4 +1,4 @@
-/* ==================== 全局样式 ==================== */
+﻿/* ==================== 全局样式 ==================== */
 :root {
   --primary: #4A90D9;
   --primary-color: #4A90D9;
@@ -374,6 +374,26 @@ html, body {
 .speak-btn:active {
   transform: scale(0.9);
   background: rgba(74, 144, 217, 0.2);
+}
+
+.speak-btn.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.speak-btn.disabled svg {
+  fill: var(--text-light);
+}
+
+.library-speak-btn.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.library-speak-btn.disabled svg {
+  fill: var(--text-light);
 }
 
 .speak-btn svg {

@@ -177,7 +177,7 @@
                 <p>每日学习的单词数量</p>
               </div>
               <div class="slider-container">
-                <input type="range" class="slider" id="goalSlider" min="5" max="100" value="50">
+                <input type="range" class="slider" id="goalSlider" min="5" max="200" value="100">
                 <span class="slider-value" id="goalValue">50</span>
               </div>
             </div>
@@ -213,6 +213,13 @@
           <!-- 朗读设置 -->
           <div class="settings-section">
             <h3 class="settings-section-title">朗读设置</h3>
+            <div class="setting-item">
+              <div class="setting-info">
+                <h4>语音朗读</h4>
+                <p>开启后，才能开启例句朗读、音标朗读</p>
+              </div>
+              <div class="toggle" id="speechToggle"></div>
+            </div>
             <div class="setting-item">
               <div class="setting-info">
                 <h4>例句朗读</h4>
