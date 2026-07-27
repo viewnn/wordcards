@@ -187,7 +187,7 @@ class VocabApp {
     /** 触摸翻面后浏览器会合成 click，需忽略下一次点击避免立刻翻回正面 */
     this._suppressNextCardClickFlip = false;
     this._phoneticReadTimer = null;
-    /** 词库列表当前展示的词条 id → 对象，避免点击喇叭时 await IndexedDB 导致用户手势失效而无法发声 */
+/** 词库列表当前展示的词条 id → 对象，避免点击喇叭时 await IndexedDB 导致用户手势失效而无法发声 */
     this._librarySpeakWordsById = new Map();
     /** 离开学习页时保存的会话快照，用于返回学习页时恢复进度条与队列（不可仅用 switchPage 局部变量） */
     this._learnSessionSnapshot = null;
@@ -416,30 +416,27 @@ class VocabApp {
   bindEvents() {
     const self = this;
     
-    // 导航切换：移动端会先 touchstart 再合成 click，需要短时间内忽略紧随其后的 click
-    let lastNavTouchTs = 0;
-    document.querySelectorAll('.nav-item').forEach(item => {
-      item.addEventListener('click', handleNavClick);
-      item.addEventListener('touchstart', handleNavClick, { passive: false });
-    });
+    // 导航切换
+    document.querySelector('.bottom-nav').addEventListener('click', handleNavClick);
+    document.querySelector('.bottom-nav').addEventListener('touchstart', handleNavClick);
     
+    /** 导航点击处理（使用事件委托，确保点击文字/图标均可触发） */
     function handleNavClick(e) {
+      e.preventDefault();
+      // 使用 closest 确保获取到正确的 nav-item 元素
       const navItem = e.target.closest('.nav-item');
-      if (!navItem) return;
-      
-      if (e.type === 'click') {
-        if (Date.now() - lastNavTouchTs < 450) {
-          if (e.cancelable) e.preventDefault();
-          return;
+      if (navItem) {
+        const page = navItem.dataset.page;
+        self.switchPage(page);
+        // 切换到设置页后更新滑块 disabled 状态
+        if (page === 'settings') {
+          setTimeout(() => {
+            if (self.currentPage === 'settings') {
+              self.refreshGoalSliderLockedState();
+            }
+          }, 100);
         }
-      } else {
-        lastNavTouchTs = Date.now();
-        if (e.cancelable) e.preventDefault();
-        e.stopPropagation();
       }
-      
-      const page = navItem.dataset.page;
-      self.switchPage(page);
     }
 
     // 模态框关闭
@@ -836,15 +833,7 @@ class VocabApp {
     });
     
     // 监听页面切换，更新滑块状态
-    document.querySelectorAll('.nav-item').forEach(item => {
-      item.addEventListener('click', () => {
-        setTimeout(() => {
-          if (self.currentPage === 'settings') {
-            updateGoalSliderState();
-          }
-        }, 100);
-      });
-    });
+    // 已合并到 handleNavClick 事件委托中，此监听器删除
 
     // 学习模式
     document.querySelectorAll('.mode-option').forEach(option => {

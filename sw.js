@@ -1,4 +1,4 @@
-const CACHE_NAME = 'vocab-app-v3';
+﻿const CACHE_NAME = 'vocab-app-v4';
 const DATA_CACHE_NAME = 'vocab-data-v1';
 
 // 使用相对路径，避免部署在子目录时缓存失效
