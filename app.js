@@ -1,4 +1,4 @@
-﻿// ==================== IndexedDB 数据库操作 ====================
+// ==================== IndexedDB 数据库操作 ====================
 class VocabDB {
   constructor() {
     this.dbName = 'VocabAppDB';
@@ -287,21 +287,42 @@ class VocabApp {
       // 获取已存在的单词用于去重
       const existingWords = await this.db.getAllWords();
       const existingWordSet = new Set(existingWords.map(w => w.word.toLowerCase()));
+      const existingWordMap = new Map(existingWords.map(w => [w.word.toLowerCase(), w]));
       
-      // 过滤掉已存在的单词
-      const newWords = allWords.filter(w => !existingWordSet.has(w.word.toLowerCase()));
-      
-      if (newWords.length === 0) {
-        console.log('dict.xlsx 中没有新单词');
-        await this.refreshLibraryFiltersAfterDictChange();
-        if (this.currentPage === 'learn') {
-          await this.prepareLearnSession();
+      // 区分新单词和需要更新的单词
+      const newWords = [];
+      const updateWords = [];
+      for (const w of allWords) {
+        const existing = existingWordMap.get(w.word.toLowerCase());
+        if (existing) {
+          // 检查是否需要更新字段（粤拼、粤语字等）
+          const needsUpdate = 
+            (!existing.jyutping && w.jyutping) || 
+            (!existing.cantonese && w.cantonese) ||
+            (!existing.cantoneseExample && w.cantoneseExample);
+          if (needsUpdate) {
+            updateWords.push({ ...existing, ...w, id: existing.id });
+          }
+        } else {
+          newWords.push(w);
         }
-        return;
       }
-
-      await this.db.batchAddWords(newWords);
-      this.showToast(`已自动导入 ${newWords.length} 个新单词`);
+      
+      if (updateWords.length > 0) {
+        for (const w of updateWords) {
+          await this.db.updateWord(w);
+        }
+        console.log(`更新了 ${updateWords.length} 个单词的粤拼/粤语字段`);
+      }
+      
+      if (newWords.length > 0) {
+        await this.db.batchAddWords(newWords);
+        this.showToast(`已自动导入 ${newWords.length} 个新单词`);
+      } else if (updateWords.length > 0) {
+        this.showToast(`已更新 ${updateWords.length} 个单词的粤拼字段`);
+      } else {
+        console.log('dict.xlsx 中没有新单词');
+      }
 
       await this.refreshLibraryFiltersAfterDictChange();
 
@@ -1475,12 +1496,15 @@ class VocabApp {
     if (!raw) return null;
     const lowerAscii = /^[\x00-\x7f]+$/.test(raw) ? raw.toLowerCase() : raw;
     const pairs = [
-      ['word', ['word', '词汇']],
+      ['word', ['word', '词汇', '字', '短语', 'phrase']],
       ['meaning', ['meaning', '释义']],
       ['phonetic', ['phonetic', '音标']],
       ['example', ['example', '例句']],
       ['category', ['category', '分类']],
       ['language', ['language', '语言']],
+      ['jyutping', ['jyutping', '粤拼', 'jytping']],
+      ['cantonese', ['cantonese', '粤语字', 'cantonese_word']],
+      ['cantoneseExample', ['cantoneseExample', '粤语例句', 'cantonese_example']],
     ];
     for (const [key, aliases] of pairs) {
       for (const a of aliases) {
@@ -2193,12 +2217,15 @@ class VocabApp {
       words = words.filter((w) => this.selectedCategories.includes(w.category || '未分类'));
     }
     
-    // 应用搜索
+    // 应用搜索（支持单词、释义、粤拼、粤语字、粤语例句搜索）
     if (this.searchQuery) {
       const q = this.searchQuery;
       words = words.filter(w => {
         const mean = (w.definition || w.meaning || '').toLowerCase();
-        return w.word.toLowerCase().includes(q) || mean.includes(q);
+        const phon = (w.phonetic || w.jyutping || '').toLowerCase();
+        const canto = (w.cantonese || '').toLowerCase();
+        const cantoEx = (w.cantoneseExample || w.example || '').toLowerCase();
+        return w.word.toLowerCase().includes(q) || mean.includes(q) || phon.includes(q) || canto.includes(q) || cantoEx.includes(q);
       });
     }
     
@@ -2302,6 +2329,19 @@ class VocabApp {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const id = parseInt(btn.dataset.id);
+        this.viewWord(id);
+      });
+    });
+
+    // 卡片点击事件 - 显示详情弹窗
+    container.querySelectorAll('.word-item').forEach(item => {
+      item.style.cursor = 'pointer';
+      item.addEventListener('click', (e) => {
+        // 如果点击的是按钮或标签等可交互元素，则不触发卡片点击
+        if (e.target.closest('.word-action-btn') || e.target.closest('.status-switch') || e.target.closest('.unfavorite-btn')) {
+          return;
+        }
+        const id = parseInt(item.dataset.id);
         this.viewWord(id);
       });
     });
