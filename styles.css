@@ -287,7 +287,7 @@ html, body {
 }
 
 .flashcard .word {
-  font-size: var(--font-size-xxl);
+  font-size: var(--font-size-xl);
   font-weight: 700;
   color: var(--text-primary);
   /* margin-bottom: 16px; */
@@ -547,7 +547,7 @@ html, body {
 
 .flashcard-back .meaning {
   color: white;
-  font-size: var(--font-size-xxl);
+  font-size: var(--font-size-xl);
 }
 
 .flashcard-back .example {
@@ -1455,7 +1455,7 @@ html, body {
   }
   
   .flashcard .word {
-    font-size: var(--font-size-xxl);
+    font-size: var(--font-size-xl);
   }
   
 }
