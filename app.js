@@ -1,4 +1,4 @@
-// ==================== IndexedDB 数据库操作 ====================
+﻿// ==================== IndexedDB 数据库操作 ====================
 class VocabDB {
   constructor() {
     this.dbName = 'VocabAppDB';
@@ -166,7 +166,7 @@ class VocabApp {
       phoneticAutoRead: false,
       /** 默认先展示释义面；点击后翻到词汇面 */
       cardDefinitionFirst: false,
-      learnMode: 'sequential',
+      learnMode: 'random',
       /** 音标渐显延迟（秒），0表示立即显示 */
       phoneticDelay: 2,
       /** 单词重复出现频率（天），0表示每日目标内不重复 */
@@ -419,7 +419,7 @@ class VocabApp {
     this.settings.soundEnabled = await this.db.getSetting('soundEnabled', false);
     this.settings.phoneticAutoRead = await this.db.getSetting('phoneticAutoRead', false);
     this.settings.cardDefinitionFirst = await this.db.getSetting('cardDefinitionFirst', false);
-    this.settings.learnMode = await this.db.getSetting('learnMode', 'sequential');
+    this.settings.learnMode = await this.db.getSetting('learnMode', 'random');
     this.settings.phoneticDelay = await this.db.getSetting('phoneticDelay', 2);
     this.settings.repeatFrequency = await this.db.getSetting('repeatFrequency', 2);
     this.settings.dictImportType = await this.db.getSetting('dictImportType', 'all');

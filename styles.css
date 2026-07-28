@@ -547,7 +547,7 @@ html, body {
 
 .flashcard-back .meaning {
   color: white;
-  font-size: var(--font-size-xl);
+  font-size: var(--font-size-xxl);
 }
 
 .flashcard-back .example {
@@ -1455,7 +1455,7 @@ html, body {
   }
   
   .flashcard .word {
-    font-size: var(--font-size-xl);
+    font-size: var(--font-size-xxl);
   }
   
 }
