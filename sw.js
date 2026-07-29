@@ -3,8 +3,8 @@
 // 的数字加 1（例如 v4 → v5），浏览器会自动检测 SW 更新、
 // 删除旧缓存并加载最新文件。不需要额外操作。
 // ====================================================
-const CACHE_NAME = 'vocab-app-v1.3.4';
-const DATA_CACHE_NAME = 'vocab-data-v1.3.4';
+const CACHE_NAME = 'vocab-app-v1.3.5';
+const DATA_CACHE_NAME = 'vocab-data-v1.3.5';
 
 // 使用相对路径，避免部署在子目录时缓存失效
 const urlsToCache = [
