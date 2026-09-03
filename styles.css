@@ -151,8 +151,10 @@ html, body {
   width: 100%;
   display: flex;
   flex-direction: column;
-  height: 100%;
-  padding: 8px 8px 72px;
+  /* 用 min-height 代替固定 height：高度不足时容器可撑开，
+     由 .page-content 出滚动条，而不是内容溢出互相遮挡 */
+  min-height: 100%;
+  padding: 8px 8px 8px;
   box-sizing: border-box;
   background: white;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
@@ -235,7 +237,9 @@ html, body {
   width: 100%;
   height: auto;
   flex: 1;
-  min-height: 0;
+  /* 卡片区不小于卡片最小高度：空间不足时容器撑开、页面出滚动条，
+     避免卡片溢出遮挡下方操作按钮 */
+  min-height: 260px;
   position: relative;
   perspective: 1000px;
   display: flex;
@@ -572,6 +576,10 @@ html, body {
   margin: 0 -8px;
   flex-shrink: 0;
   background: white;
+  /* 页面高度不足出现滚动条时，按钮始终吸底显示，不被卡片遮挡 */
+  position: sticky;
+  bottom: 0;
+  z-index: 50;
 }
 
 .action-btn {
