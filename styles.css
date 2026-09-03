@@ -152,9 +152,9 @@ html, body {
   display: flex;
   flex-direction: column;
   /* 用 min-height 代替固定 height：高度不足时容器可撑开，
-     由 .page-content 出滚动条，而不是内容溢出互相遮挡 */
+     由 .page-content 出滚动条，而不是卡片溢出遮挡下方按钮 */
   min-height: 100%;
-  padding: 8px 8px 8px;
+  padding: 8px 8px 72px;
   box-sizing: border-box;
   background: white;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
@@ -237,24 +237,25 @@ html, body {
   width: 100%;
   height: auto;
   flex: 1;
-  /* 卡片区不小于卡片最小高度：空间不足时容器撑开、页面出滚动条，
-     避免卡片溢出遮挡下方操作按钮 */
-  min-height: 260px;
+  /* 卡片+按钮组不小于其内容高度：空间不足时容器撑开、页面出滚动条，
+     避免卡片溢出遮挡下方操作按钮（260 卡片 + 80 按钮 + 12 上下内边距） */
+  min-height: 352px;
   position: relative;
   perspective: 1000px;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  justify-content: flex-start;
+  /* 卡片与按钮作为一组垂直居中，按钮始终紧贴单词卡下方 */
+  justify-content: center;
   padding: 4px 0 8px;
   overflow: visible;
 }
 
 .flashcard {
   width: 100%;
-  height: 100%;
-  max-height: 360px;
-  min-height: 260px;
+  /* 高度在 260px ~ 360px 间自适应：随卡片区域空间伸缩，
+     并为下方操作按钮预留约 96px 空间 */
+  height: clamp(260px, calc(100% - 96px), 360px);
   background: var(--bg-card);
   border-radius: var(--radius-lg);
   display: flex;
@@ -576,10 +577,6 @@ html, body {
   margin: 0 -8px;
   flex-shrink: 0;
   background: white;
-  /* 页面高度不足出现滚动条时，按钮始终吸底显示，不被卡片遮挡 */
-  position: sticky;
-  bottom: 0;
-  z-index: 50;
 }
 
 .action-btn {

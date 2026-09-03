@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -81,6 +81,21 @@
                 </div>
               </div>
             </div>
+            <!-- 操作按钮：置于卡片区域内，紧贴单词卡下方 -->
+            <div class="card-actions">
+              <button class="action-btn skip" id="btnSkip">
+                <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+                <span>跳过</span>
+              </button>
+              <button class="action-btn mastered" id="btnMastered">
+                <svg viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
+                <span>掌握</span>
+              </button>
+              <button class="action-btn difficult" id="btnDifficult">
+                <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+                <span>陌生</span>
+              </button>
+            </div>
           </div>
 
           <!-- 空状态（无可学习单词时显示） -->
@@ -107,22 +122,6 @@
               </div>
             </div>
             <button class="btn-primary" id="restartBtn">继续学习</button>
-          </div>
-
-          <!-- 操作按钮 -->
-          <div class="card-actions">
-            <button class="action-btn skip" id="btnSkip">
-              <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
-              <span>跳过</span>
-            </button>
-            <button class="action-btn mastered" id="btnMastered">
-              <svg viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
-              <span>掌握</span>
-            </button>
-            <button class="action-btn difficult" id="btnDifficult">
-              <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
-              <span>陌生</span>
-            </button>
           </div>
         </div>
       </div>
