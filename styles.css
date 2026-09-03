@@ -246,7 +246,7 @@ html, body {
   flex-direction: column;
   align-items: stretch;
   /* 卡片与按钮作为一组垂直居中，按钮始终紧贴单词卡下方 */
-  justify-content: center;
+  /* justify-content: center; */
   padding: 4px 0 8px;
   overflow: visible;
 }
@@ -573,7 +573,7 @@ html, body {
   display: flex;
   justify-content: space-around;
   gap: 12px;
-  padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+  padding: 12px 8px calc(8px + env(safe-area-inset-bottom));
   margin: 0 -8px;
   flex-shrink: 0;
   background: white;
@@ -582,7 +582,7 @@ html, body {
 .action-btn {
   flex: 1;
   min-width: 80px;
-  max-width: 128px;
+  /* max-width: 128px; */
   height: 64px;
   border: none;
   cursor: pointer;
