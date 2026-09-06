@@ -1,4 +1,4 @@
-﻿// ==================== IndexedDB 数据库操作 ====================
+// ==================== IndexedDB 数据库操作 ====================
 class VocabDB {
   constructor() {
     this.dbName = 'VocabAppDB';
@@ -93,6 +93,16 @@ class VocabDB {
       const transaction = this.db.transaction(['words'], 'readonly');
       const store = transaction.objectStore('words');
       const request = store.getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async getWord(id) {
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['words'], 'readonly');
+      const store = transaction.objectStore('words');
+      const request = store.get(id);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -419,6 +429,7 @@ class VocabApp {
     this.settings.soundEnabled = await this.db.getSetting('soundEnabled', false);
     this.settings.phoneticAutoRead = await this.db.getSetting('phoneticAutoRead', false);
     this.settings.cardDefinitionFirst = await this.db.getSetting('cardDefinitionFirst', false);
+    this.settings.categoryDisplay = await this.db.getSetting('categoryDisplay', true);
     this.settings.learnMode = await this.db.getSetting('learnMode', 'random');
     this.settings.phoneticDelay = await this.db.getSetting('phoneticDelay', 2);
     this.settings.repeatFrequency = await this.db.getSetting('repeatFrequency', 2);
@@ -996,12 +1007,33 @@ class VocabApp {
       cardDefinitionFirstToggle.addEventListener('touchstart', handleCardDefinitionFirstToggle);
     }
 
+    // 分类显示设置
+    const categoryDisplayToggle = document.getElementById('categoryDisplayToggle');
+    if (categoryDisplayToggle) {
+      categoryDisplayToggle.addEventListener('click', handleCategoryDisplayToggle);
+      categoryDisplayToggle.addEventListener('touchstart', handleCategoryDisplayToggle);
+    }
+
     async function handleCardDefinitionFirstToggle(e) {
       e.preventDefault();
       const toggle = document.getElementById('cardDefinitionFirstToggle');
       toggle.classList.toggle('active');
       self.settings.cardDefinitionFirst = toggle.classList.contains('active');
       await self.db.setSetting('cardDefinitionFirst', self.settings.cardDefinitionFirst);
+      if (self.currentPage === 'learn' && self.todayWords.length > 0) {
+        self.cancelScheduledPhoneticRead();
+        self.showCard(self.currentCardIndex);
+        self.schedulePhoneticReadAfterCardSwitch();
+      }
+    }
+
+    // 分类显示设置
+    async function handleCategoryDisplayToggle(e) {
+      e.preventDefault();
+      const toggle = document.getElementById('categoryDisplayToggle');
+      toggle.classList.toggle('active');
+      self.settings.categoryDisplay = toggle.classList.contains('active');
+      await self.db.setSetting('categoryDisplay', self.settings.categoryDisplay);
       if (self.currentPage === 'learn' && self.todayWords.length > 0) {
         self.cancelScheduledPhoneticRead();
         self.showCard(self.currentCardIndex);
@@ -1371,10 +1403,14 @@ class VocabApp {
     const badgeLabel = this.getLanguageBadgeLabel(word);
     
     // 添加分类标签（显示在语言标签后面）
-    const category = word.category || '';
-    const categoryHtml = category
-      ? `<span class="language-badge category-badge">${this.escapeHtml(category)}</span>`
-      : '';
+    // 关闭"分类显示"开关时，不显示分类徽标；开启时显示 dict 表 category 列内容
+    let categoryHtml = '';
+    if (this.settings.categoryDisplay !== false) {
+      const category = word.category || '';
+      if (category) {
+        categoryHtml = `<span class="language-badge category-badge">${this.escapeHtml(category)}</span>`;
+      }
+    }
     
     const badgeHtml = badgeLabel
       ? `<span class="language-badge">${this.escapeHtml(badgeLabel)}</span>`
@@ -1922,6 +1958,9 @@ class VocabApp {
     // 将当前卡片移到队列末尾
     const skipped = this.todayWords.splice(this.currentCardIndex, 1)[0];
     skipped.lastStudied = Date.now(); // 记录学习时间
+    // 持久化学习时间：否则"跳过"的单词在下次会话仍被视为从未学过，
+    // 导致重复频率筛选（如 2 天内不再出现）失效
+    this.db.updateWord(skipped).catch((err) => console.error('保存跳过学习时间失败:', err));
     this.todayWords.push(skipped);
     this.showCard(this.currentCardIndex);
     this.schedulePhoneticReadAfterCardSwitch();
@@ -2462,6 +2501,11 @@ class VocabApp {
       cardDefinitionFirstToggle.classList.toggle('active', this.settings.cardDefinitionFirst);
     }
 
+    const categoryDisplayToggle = document.getElementById('categoryDisplayToggle');
+    if (categoryDisplayToggle) {
+      categoryDisplayToggle.classList.toggle('active', this.settings.categoryDisplay);
+    }
+
     const dictTypeEl = document.getElementById('dictTypeSelect');
     if (dictTypeEl) dictTypeEl.value = this.settings.dictImportType || 'all';
 
@@ -2585,7 +2629,10 @@ class VocabApp {
 
       if (id) {
         word.id = parseInt(id);
-        await this.db.updateWord(word);
+        // put 会整体替换记录：只传表单字段会把 status/lastStudied 等学习数据清空，
+        // 导致重复频率筛选把该词当作从未学过而提前重现，因此先合并已保存的完整记录
+        const existing = await this.db.getWord(word.id);
+        await this.db.updateWord({ ...(existing || {}), ...word });
         this.showToast('词汇已更新');
       } else {
         await this.db.addWord(word);
