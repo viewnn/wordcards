@@ -126,17 +126,6 @@ class VocabDB {
     });
   }
 
-  async clearAllWords() {
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['words'], 'readwrite');
-      const store = transaction.objectStore('words');
-      const request = store.clear();
-      
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
-  }
-
   // 设置操作
   async getSetting(key, defaultValue = null) {
     return new Promise((resolve, reject) => {
@@ -195,6 +184,10 @@ class VocabApp {
     };
     this.searchQuery = '';
     this.filterStatus = 'all';
+    /** 按分类(字/短语)归档的今日统计：{ word:{mastered,review}, phrase:{mastered,review} } */
+    this._scopeToday = this._emptyScopeStats();
+    /** 按分类(字/短语)归档的今日之前累计统计（每日跨天时并入） */
+    this._scopeTotal = this._emptyScopeStats();
     /** 触摸翻面后浏览器会合成 click，需忽略下一次点击避免立刻翻回正面 */
     this._suppressNextCardClickFlip = false;
     this._phoneticReadTimer = null;
@@ -214,7 +207,6 @@ class VocabApp {
         this.settings.dictImportType = 'all';
         await this.db.setSetting('dictImportType', 'all');
       }
-      await this.loadTodayStats();
       const dictTypeSelectInit = document.getElementById('dictTypeSelect');
       if (dictTypeSelectInit) {
         dictTypeSelectInit.value = this.settings.dictImportType || 'all';
@@ -223,8 +215,10 @@ class VocabApp {
       this.bindEvents();
       this.primeSpeechSynthesis();
 
-      // 先导入词典，再渲染学习页，确保卡片队列为「全部」（短语+字）
+      // 先导入词典（字+短语全量常驻并标注分类），再加载按分类归档的统计，
+      // 保证首次升级时迁移能按现有词条分类拆分历史累计记录
       await this.autoLoadDict();
+      await this.loadTodayStats();
       this.render();
     } catch (error) {
       console.error('App initialization failed:', error);
@@ -242,7 +236,52 @@ class VocabApp {
     }
   }
 
+  /** 依据 sheet 名判断词条分类（对应设置页的 短语/字） */
+  sheetDictScope(sheetName) {
+    const n = String(sheetName || '').toLowerCase();
+    return /phrase|短/.test(n) ? 'phrase' : 'word';
+  }
+
+  /**
+   * 旧版未标注分类的词条与某一行内容是否吻合（判断它原本来自字表还是短语表）。
+   * 匹配的字段越多得分越高；行与旧词条完全同源时通常 meaning/category/phonetic 都一致。
+   */
+  _legacySimilarityScore(row, legacy) {
+    const eq = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
+    let score = 0;
+    const rowMeaning = String(row.meaning ?? row.definition ?? '').trim();
+    const legacyMeaning = String(legacy.definition ?? legacy.meaning ?? '').trim();
+    if (rowMeaning && eq(rowMeaning, legacyMeaning)) score += 3;
+    if (row.category && eq(row.category, legacy.category)) score += 2;
+    if (row.phonetic && eq(row.phonetic, legacy.phonetic)) score += 2;
+    if (row.example && eq(row.example, legacy.example)) score += 1;
+    if (row.jyutping && eq(row.jyutping, legacy.jyutping)) score += 1;
+    if (row.cantonese && eq(row.cantonese, legacy.cantonese)) score += 1;
+    return score;
+  }
+
+  /** 同分类内的两个词条内容列是否一致（一致则无需重写） */
+  _sameScopeContentEqual(row, existing) {
+    const eq = (a, b) => String(a ?? '').trim() === String(b ?? '').trim();
+    const rowMeaning = String(row.meaning ?? row.definition ?? '').trim();
+    const oldMeaning = String(existing.definition ?? existing.meaning ?? '').trim();
+    return (
+      eq(rowMeaning, oldMeaning) &&
+      eq(row.category, existing.category) &&
+      eq(row.phonetic, existing.phonetic) &&
+      eq(row.example, existing.example) &&
+      eq(row.language, existing.language) &&
+      eq(row.jyutping, existing.jyutping) &&
+      eq(row.cantonese, existing.cantonese) &&
+      eq(row.cantoneseExample, existing.cantoneseExample)
+    );
+  }
+
   // 自动加载 dict.xlsx 文件
+  // 字（word sheet）与短语（phrase sheet）始终全量导入并常驻词库，每个词条标注
+  // dictScope（'word'|'phrase'），同一文本若同时出现在两个字库（如「一」「钱」），
+  // 会保留两条各自独立的记录，绝不跨分类覆盖。
+  // settings.dictImportType 只决定当前“学习/展示/统计”使用哪个分类。
   async autoLoadDict() {
     try {
       const response = await fetch('dict.xlsx');
@@ -251,85 +290,201 @@ class VocabApp {
         await this.refreshLibraryFiltersAfterDictChange();
         return;
       }
-      
+
       const arrayBuffer = await response.arrayBuffer();
       const data = new Uint8Array(arrayBuffer);
       const workbook = XLSX.read(data, { type: 'array' });
-      
+
       const dictTypeSelect = document.getElementById('dictTypeSelect');
       const dictType = this.settings.dictImportType || dictTypeSelect?.value || 'all';
       if (dictTypeSelect) dictTypeSelect.value = dictType;
-      
-      let allWords = [];
 
-      // 根据词典类型选择要导入的 sheet
-      if (dictType === 'all') {
-        for (const sheetName of workbook.SheetNames) {
-          const worksheet = workbook.Sheets[sheetName];
-          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-          const words = this.parseExcel(jsonData);
-          if (Array.isArray(words) && words.length > 0) {
-            allWords = allWords.concat(words);
-          }
-        }
-      } else if (dictType === 'phrase') {
-        const sheetName = workbook.SheetNames.find(name => name.toLowerCase().includes('phrase')) || workbook.SheetNames[1];
-        if (sheetName) {
-          const worksheet = workbook.Sheets[sheetName];
-          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-          allWords = this.parseExcel(jsonData);
-        }
-      } else if (dictType === 'word') {
-        const sheetName = workbook.SheetNames.find(name => name.toLowerCase().includes('word')) || workbook.SheetNames[0];
-        if (sheetName) {
-          const worksheet = workbook.Sheets[sheetName];
-          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-          allWords = this.parseExcel(jsonData);
+      // 遍历全部 sheet 导入（按 sheet 归属标注 字/短语 分类）
+      let allWords = [];
+      for (const sheetName of workbook.SheetNames) {
+        const worksheet = workbook.Sheets[sheetName];
+        if (!worksheet) continue;
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        const words = this.parseExcel(jsonData, this.sheetDictScope(sheetName));
+        if (Array.isArray(words) && words.length > 0) {
+          allWords = allWords.concat(words);
         }
       }
-      
+
+      // 源词典同一 sheet 内可能存在完全重复的行，按“分类+内容签名”去重，避免词库出现重复词条
+      if (allWords.length > 1) {
+        const seen = new Set();
+        const deduped = [];
+        for (const w of allWords) {
+          const sig = [
+            w.dictScope, w.word, w.meaning, w.phonetic, w.example, w.category,
+            w.language, w.jyutping, w.cantonese, w.cantoneseExample
+          ]
+            .map((v) => String(v ?? ''))
+            .join('|');
+          if (!seen.has(sig)) {
+            seen.add(sig);
+            deduped.push(w);
+          }
+        }
+        if (deduped.length !== allWords.length) {
+          console.log(`词典去重：移除 ${allWords.length - deduped.length} 个完全重复的词条行`);
+          allWords = deduped;
+        }
+      }
+
       if (!Array.isArray(allWords) || allWords.length === 0) {
         console.log('dict.xlsx 文件内容为空或格式错误');
         await this.refreshLibraryFiltersAfterDictChange();
         return;
       }
-      
-      // 获取已存在的单词用于去重
+
+      // 读取现有词条。同分类内可能出现“同文本但内容不同”的词条（如多读音字），
+      // 因此只按文本建立分组，再按“内容吻合度”把词典行对应到它原本的那条记录上；
+      // 未标注分类的旧词条单独收集，稍后同样按内容吻合度认领到它原本所属的分类。
       const existingWords = await this.db.getAllWords();
-      const existingWordSet = new Set(existingWords.map(w => w.word.toLowerCase()));
-      const existingWordMap = new Map(existingWords.map(w => [w.word.toLowerCase(), w]));
-      
+      const scopedByText = { word: new Map(), phrase: new Map() };
+      const untaggedByText = new Map();
+      for (const e of existingWords) {
+        const t = String(e.word || '').toLowerCase();
+        if (e.dictScope === 'word' || e.dictScope === 'phrase') {
+          if (!scopedByText[e.dictScope].has(t)) scopedByText[e.dictScope].set(t, []);
+          scopedByText[e.dictScope].get(t).push(e);
+        } else {
+          if (!untaggedByText.has(t)) untaggedByText.set(t, []);
+          untaggedByText.get(t).push(e);
+        }
+      }
+
+      // 在候选记录中挑一条与词典行内容最吻合的（无吻合则返回 null）
+      const bestRowFor = (list, row) => {
+        if (!list || list.length === 0) return null;
+        let best = null;
+        let bestScore = -1;
+        for (const cand of list) {
+          const s = this._legacySimilarityScore(row, cand);
+          if (s > bestScore) {
+            bestScore = s;
+            best = cand;
+          }
+        }
+        return bestScore >= 1 ? best : null;
+      };
+
+      // 认领一条未标注的旧词条到当前行所在分类（内容最吻合者优先）
+      const adoptLegacyFor = (t, row) => {
+        const list = untaggedByText.get(t);
+        const best = bestRowFor(list, row);
+        if (!best) return null;
+        const idx = list.indexOf(best);
+        list.splice(idx, 1);
+        if (list.length === 0) untaggedByText.delete(t);
+        return best;
+      };
+
       // 区分新单词和需要更新的单词
       const newWords = [];
       const updateWords = [];
+      // 每个文本本轮已匹配过的词条 id（用于同文本多条记录时逐条对应）
+      const usedByText = new Map();
+      // 每个“分类+文本”在词典文件中的行数（用于修复此前被整行覆盖的脏数据）
+      const fileCountByKey = new Map();
       for (const w of allWords) {
-        const existing = existingWordMap.get(w.word.toLowerCase());
+        const key = (w.dictScope === 'phrase' ? 'phrase' : 'word') + '|' + String(w.word || '').toLowerCase();
+        fileCountByKey.set(key, (fileCountByKey.get(key) || 0) + 1);
+      }
+      for (const w of allWords) {
+        const t = String(w.word || '').toLowerCase();
+        const scope = w.dictScope === 'phrase' ? 'phrase' : 'word';
+        const arr = scopedByText[scope];
+        let list = arr.get(t);
+        if (!list) {
+          list = [];
+          arr.set(t, list);
+        }
+        let usedIds = usedByText.get(t);
+        if (!usedIds) {
+          usedIds = new Set();
+          usedByText.set(t, usedIds);
+        }
+
+        let existing = null;
+        // 同文本多条记录时，优先匹配“本轮尚未被使用”且内容最吻合的记录，
+        // 避免把多读音字的不同词条合并/覆盖成一条
+        const best = bestRowFor(
+          list.filter((c) => !usedIds.has(c.id)),
+          w
+        );
+        if (best) {
+          existing = best;
+          usedIds.add(best.id);
+        }
+        let isAdoptedLegacy = false;
+        if (!existing) {
+          const legacy = adoptLegacyFor(t, w);
+          if (legacy) {
+            list.push(legacy);
+            existing = legacy;
+            isAdoptedLegacy = true;
+          }
+        }
+        if (!existing) {
+          // 修复兜底：词典行与库内记录无法按内容对应时——
+          // 若文件与该分类+文本的行数等于库中未被占用的记录数，说明这些记录是
+          // 曾被“另一张表内容整行覆盖”的脏数据，按顺序逐条用文件内容修复；
+          // 文件只有一行、库中也只剩一条时直接修复它。
+          const key = scope + '|' + t;
+          const unused = list.filter((c) => !usedIds.has(c.id));
+          const fileRows = fileCountByKey.get(key) || 0;
+          if (unused.length > 0 && (unused.length === fileRows || (unused.length === 1 && fileRows === 1))) {
+            existing = unused[0];
+            usedIds.add(existing.id);
+          }
+        }
+
         if (existing) {
-          // 检查是否需要更新字段（粤拼、粤语字等）
-          const needsUpdate = 
-            (!existing.jyutping && w.jyutping) || 
+          // 需要更新：认领旧词条、字段补全、或词典内容有更新（含此前被跨分类覆盖的脏数据）
+          const needFieldBackfill =
+            (!existing.jyutping && w.jyutping) ||
             (!existing.cantonese && w.cantonese) ||
             (!existing.cantoneseExample && w.cantoneseExample);
+          const needsUpdate =
+            isAdoptedLegacy ||
+            needFieldBackfill ||
+            !this._sameScopeContentEqual(w, existing);
           if (needsUpdate) {
-            updateWords.push({ ...existing, ...w, id: existing.id });
+            // 合并词典内容时保留学习记录（状态/收藏/学习时间等），避免已掌握、待复习记录被清空
+            updateWords.push({
+              ...existing,
+              ...w,
+              id: existing.id,
+              createdAt: existing.createdAt,
+              status: existing.status,
+              favorite: existing.favorite,
+              lastStudied: existing.lastStudied,
+              reviewCount: existing.reviewCount,
+              lastReview: existing.lastReview,
+              nextReview: existing.nextReview,
+              dictScope: scope
+            });
           }
         } else {
           newWords.push(w);
         }
       }
-      
+
       if (updateWords.length > 0) {
         for (const w of updateWords) {
           await this.db.updateWord(w);
         }
-        console.log(`更新了 ${updateWords.length} 个单词的粤拼/粤语字段`);
+        console.log(`更新了 ${updateWords.length} 个单词的字段/分类标注`);
       }
-      
+
       if (newWords.length > 0) {
         await this.db.batchAddWords(newWords);
         this.showToast(`已自动导入 ${newWords.length} 个新单词`);
       } else if (updateWords.length > 0) {
-        this.showToast(`已更新 ${updateWords.length} 个单词的粤拼字段`);
+        this.showToast(`已更新 ${updateWords.length} 个单词字段`);
       } else {
         console.log('dict.xlsx 中没有新单词');
       }
@@ -436,28 +591,172 @@ class VocabApp {
     this.settings.dictImportType = await this.db.getSetting('dictImportType', 'all');
   }
 
-  // 加载今日统计和累计统计
+  // ==================== 按分类(字/短语)归档的学习统计 ====================
+  // 学习记录按词条分类（word=字 / phrase=短语）分开统计：
+  //   scopeToday = 今日事件数   { word:{mastered,review}, phrase:{mastered,review} }
+  //   scopeTotal = 今日之前的事件数（每日跨天时把 scopeToday 并入对应分类）
+  // 展示时：全部 = 字 + 短语之和；字/短语 = 各自分类。口径与原 todayStats/totalStats 一致。
+
+  _emptyScopeStats() {
+    return {
+      word: { mastered: 0, review: 0 },
+      phrase: { mastered: 0, review: 0 }
+    };
+  }
+
+  /** 当前设置（全部/字/短语）对应的分类键列表；全部 = 字+短语 */
+  activeScopeKeys() {
+    const t = this.settings.dictImportType || 'all';
+    if (t === 'phrase') return ['phrase'];
+    if (t === 'word') return ['word'];
+    return ['word', 'phrase'];
+  }
+
+  /** 词条归属的分类键；旧数据/示例词未标注时按当前展示范围兜底 */
+  scopeKeyOfWord(w) {
+    if (w && (w.dictScope === 'word' || w.dictScope === 'phrase')) return w.dictScope;
+    const t = this.settings.dictImportType || 'all';
+    return t === 'phrase' ? 'phrase' : 'word';
+  }
+
+  /** 词条是否属于当前学习/展示范围（字+短语词条常驻词库，仅按分类展示与学习） */
+  isWordInActiveScope(w) {
+    if (!w) return false;
+    if (!w.dictScope) return (this.settings.dictImportType || 'all') === 'all';
+    return this.activeScopeKeys().includes(w.dictScope);
+  }
+
+  // 加载今日统计与累计统计（含首次升级迁移与每日跨天累加）
   async loadTodayStats() {
-    // 加载累计统计数据
-    this.totalStats = await this.db.getSetting('totalStats', { mastered: 0, review: 0 });
-    
     const today = new Date().toDateString();
     const savedDate = await this.db.getSetting('statsDate', '');
-    
-    if (savedDate !== today) {
-      // 新的一天，先将昨日的统计累加到累计统计中
-      const yesterdayStats = await this.db.getSetting('todayStats', { mastered: 0, review: 0, total: 0 });
-      this.totalStats.mastered += yesterdayStats.mastered;
-      this.totalStats.review += yesterdayStats.review;
-      await this.db.setSetting('totalStats', this.totalStats);
-      
-      // 重置今日统计
-      this.todayStats = { mastered: 0, review: 0, total: 0 };
-      await this.db.setSetting('statsDate', today);
-      await this.db.setSetting('todayStats', this.todayStats);
+
+    // 确保计数结构完整：{ word:{mastered,review}, phrase:{mastered,review} }
+    const ensureShape = (obj) => ({
+      word: {
+        mastered: Number(obj && obj.word && obj.word.mastered) || 0,
+        review: Number(obj && obj.word && obj.word.review) || 0
+      },
+      phrase: {
+        mastered: Number(obj && obj.phrase && obj.phrase.mastered) || 0,
+        review: Number(obj && obj.phrase && obj.phrase.review) || 0
+      }
+    });
+
+    let scopeToday = await this.db.getSetting('scopeToday', null);
+    let scopeTotal = await this.db.getSetting('scopeTotal', null);
+
+    if (scopeToday === null || scopeTotal === null) {
+      // —— 首次升级运行：把旧版全局计数迁移成按分类计数 ——
+      const legacyToday = await this.db.getSetting('todayStats', { mastered: 0, review: 0, total: 0 });
+      const legacyTotal = await this.db.getSetting('totalStats', { mastered: 0, review: 0 });
+      if (savedDate && savedDate !== today) {
+        // 跨天时先按旧逻辑把昨日今日计数并入累计，保持与用户已看到的数字衔接
+        legacyTotal.mastered += legacyToday.mastered;
+        legacyTotal.review += legacyToday.review;
+        legacyToday.mastered = 0;
+        legacyToday.review = 0;
+      }
+
+      scopeToday = this._emptyScopeStats();
+      scopeTotal = this._emptyScopeStats();
+
+      // 以词库中现有 mastered/review 记录的分类分布为权重拆分旧计数
+      // （「全部」口径的合计保持不变，避免升级后累计数字跳变）
+      const dist = this._emptyScopeStats();
+      const words = await this.db.getAllWords();
+      for (const w of words) {
+        if (!w.dictScope || (w.dictScope !== 'word' && w.dictScope !== 'phrase')) continue;
+        if (w.status !== 'mastered' && w.status !== 'review') continue;
+        dist[w.dictScope][w.status]++;
+      }
+      const splitInto = (legacyVal, kind, target) => {
+        if (!legacyVal) return;
+        const wordN = dist.word[kind];
+        const phraseN = dist.phrase[kind];
+        const sum = wordN + phraseN;
+        if (sum > 0) {
+          const wordPart = Math.round((legacyVal * wordN) / sum);
+          target.word[kind] = wordPart;
+          target.phrase[kind] = legacyVal - wordPart;
+        } else if (this.activeScopeKeys().length === 1) {
+          target[this.activeScopeKeys()[0]][kind] = legacyVal;
+        } else {
+          // 无任何记录可参照：平均拆分到字、短语（合计不变）
+          const wordPart = Math.floor(legacyVal / 2);
+          target.word[kind] = wordPart;
+          target.phrase[kind] = legacyVal - wordPart;
+        }
+      };
+      splitInto(legacyTotal.mastered, 'mastered', scopeTotal);
+      splitInto(legacyTotal.review, 'review', scopeTotal);
+      splitInto(legacyToday.mastered, 'mastered', scopeToday);
+      splitInto(legacyToday.review, 'review', scopeToday);
     } else {
-      this.todayStats = await this.db.getSetting('todayStats', { mastered: 0, review: 0, total: 0 });
+      // 正常读取：先规范化再处理跨天累加
+      scopeToday = ensureShape(scopeToday);
+      scopeTotal = ensureShape(scopeTotal);
+      if (savedDate !== today) {
+        // 新的一天：把昨日各类别的今日统计并入该类别的累计
+        for (const key of ['word', 'phrase']) {
+          scopeTotal[key].mastered += scopeToday[key].mastered;
+          scopeTotal[key].review += scopeToday[key].review;
+        }
+        scopeToday = this._emptyScopeStats();
+      }
     }
+
+    await this.db.setSetting('scopeToday', scopeToday);
+    await this.db.setSetting('scopeTotal', scopeTotal);
+    if (savedDate !== today) {
+      await this.db.setSetting('statsDate', today);
+    }
+
+    this._scopeToday = ensureShape(scopeToday);
+    this._scopeTotal = ensureShape(scopeTotal);
+    this.syncActiveStatsMirrors();
+  }
+
+  async persistScopeStats() {
+    await this.db.setSetting('scopeToday', this._scopeToday);
+    await this.db.setSetting('scopeTotal', this._scopeTotal);
+  }
+
+  /** 把按分类的计数映射为当前展示范围（全部=字+短语合计）的今日/累计统计 */
+  syncActiveStatsMirrors() {
+    const keys = this.activeScopeKeys();
+    let todayMastered = 0;
+    let todayReview = 0;
+    let totalMastered = 0;
+    let totalReview = 0;
+    for (const key of keys) {
+      todayMastered += this._scopeToday[key].mastered;
+      todayReview += this._scopeToday[key].review;
+      totalMastered += this._scopeTotal[key].mastered;
+      totalReview += this._scopeTotal[key].review;
+    }
+    this.todayStats.mastered = todayMastered;
+    this.todayStats.review = todayReview;
+    this.totalStats.mastered = totalMastered;
+    this.totalStats.review = totalReview;
+    // todayStats.total 是当日学习队列长度，由 prepareLearnSession 维护，此处不动
+  }
+
+  /** 记录某词条的一次学习动作（kind: mastered/review，delta ±1），并按该词条分类归档 */
+  async bumpScopeStats(word, kind, delta) {
+    if (!word) return;
+    const key = this.scopeKeyOfWord(word);
+    this._scopeToday[key][kind] = Math.max(0, (Number(this._scopeToday[key][kind]) || 0) + delta);
+    this.syncActiveStatsMirrors();
+    await this.persistScopeStats();
+  }
+
+  /** 清空今日与累计统计（数据管理 - 清除记录时调用） */
+  async resetScopeStats() {
+    this._scopeToday = this._emptyScopeStats();
+    this._scopeTotal = this._emptyScopeStats();
+    await this.persistScopeStats();
+    this.syncActiveStatsMirrors();
   }
 
 
@@ -706,22 +1005,40 @@ class VocabApp {
     const checkedBoxes = document.querySelectorAll('#categoryOptions input[type="checkbox"]:checked');
     this.selectedCategories = Array.from(checkedBoxes).map(cb => cb.dataset.category);
     
-    const label = document.getElementById('categoryLabel');
-    if (this.selectedCategories.length === 0) {
-      label.textContent = '选择分类';
-    } else if (this.selectedCategories.length === 1) {
-      label.textContent = this.selectedCategories[0];
-    } else {
-      label.textContent = `全部`;
-    }
+    this.updateCategoryLabel();
     
     this.resetPageNum();
     this.renderLibrary();
   }
+
+  /** 设置页「词典导入」对应的展示文字：全部 / 字 / 短语 */
+  getDictScopeLabel() {
+    const t = this.settings.dictImportType || 'all';
+    if (t === 'word') return '字';
+    if (t === 'phrase') return '短语';
+    return '全部';
+  }
+
+  /**
+   * 分类下拉框触发按钮的文字：
+   * 默认按当前词典范围显示（全部 / 字 / 短语）；
+   * 仅当用户精确勾选了某一个分类时才显示该分类名。
+   */
+  updateCategoryLabel() {
+    const label = document.getElementById('categoryLabel');
+    if (!label) return;
+    const boxes = document.querySelectorAll('#categoryOptions input[type="checkbox"]');
+    const checkedBoxes = document.querySelectorAll('#categoryOptions input[type="checkbox"]:checked');
+    if (boxes.length > 0 && checkedBoxes.length === 1) {
+      label.textContent = checkedBoxes[0].dataset.category;
+    } else {
+      label.textContent = this.getDictScopeLabel();
+    }
+  }
   
-  // 渲染分类选项（仅词条自身的分类列，词典短语/字不设单独勾选项）
+  // 渲染分类选项（仅当前展示分类内的词条；词典短语/字不设单独勾选项）
   async renderCategoryOptions() {
-    const words = await this.db.getAllWords();
+    const words = (await this.db.getAllWords()).filter((w) => this.isWordInActiveScope(w));
     const categories = [...new Set(words.map((w) => w.category || '未分类'))];
     const container = document.getElementById('categoryOptions');
 
@@ -755,6 +1072,9 @@ class VocabApp {
       document.getElementById('category-all').checked = categories.length > 0;
       this.selectedCategories = [...categories];
     }
+
+    // 默认文字跟随当前词典范围（全部/字/短语）
+    this.updateCategoryLabel();
   }
   
   // 重置页码
@@ -840,9 +1160,9 @@ class VocabApp {
     });
   }
 
-  /** 词典导入后：分类下拉勾选全部真实分类（等同于「全部」），列表展示当前库全部词条 */
+  /** 词典导入/范围切换后：分类下拉勾选当前展示分类下的全部真实分类（等同于「全部」） */
   async syncLibraryCategoryFilterToDictType() {
-    const words = await this.db.getAllWords();
+    const words = (await this.db.getAllWords()).filter((w) => this.isWordInActiveScope(w));
     const userCats = [...new Set(words.map((w) => w.category || '未分类'))];
     this.selectedCategories = [...userCats];
   }
@@ -1072,19 +1392,24 @@ class VocabApp {
     const dictTypeSelect = document.getElementById('dictTypeSelect');
     if (dictTypeSelect) {
       dictTypeSelect.addEventListener('change', async () => {
-        self.settings.dictImportType = dictTypeSelect.value;
-        await self.db.setSetting('dictImportType', self.settings.dictImportType);
-        await self.db.clearAllWords();
-        // 进入词库时应用「全部」筛选；导入完成后立即切换筛选状态
-        self.filterStatus = 'all';
-        // 词典切换后词库已重建，清除学习会话缓存，避免返回学习页时恢复旧队列
+        const newType = dictTypeSelect.value;
+
+        // 字（word）与短语（phrase）的词条始终全量常驻词库并保留各自学习记录，
+        // 切换范围只是改变“当前学习/展示/统计的分类”，不删除任何词条、不清空任何记录
+        self.settings.dictImportType = newType;
+        await self.db.setSetting('dictImportType', newType);
+
+        // 按当前分类重新映射统计数字（全部 = 字 + 短语）
+        self.syncActiveStatsMirrors();
+
+        // 学习队列按新范围重建，清除会话缓存，避免返回学习页时恢复旧范围的队列
         await self.db.setSetting('learnProgress', null);
         self._learnSessionSnapshot = null;
         self.currentCardIndex = 0;
-        self.todayStats = { mastered: 0, review: 0, total: 0 };
-        await self.db.setSetting('todayStats', self.todayStats);
-        await self.autoLoadDict();
 
+        // 词库页展示范围已变化，同步分类勾选并刷新列表
+        await self.syncLibraryCategoryFilterToDictType();
+        await self.renderCategoryOptions();
         if (self.currentPage === 'library') {
           await self.renderLibrary();
         }
@@ -1231,6 +1556,8 @@ class VocabApp {
         this.todayWords = snap.todayWords;
         this.currentCardIndex = snap.currentCardIndex;
         this.todayStats = { ...snap.todayStats };
+        // 统计数据以按分类归档的计数为准，避免恢复会话快照时把数字回退到旧值
+        this.syncActiveStatsMirrors();
         const emptyState = document.getElementById('learnEmptyState');
         if (emptyState) emptyState.style.display = 'none';
         
@@ -1337,7 +1664,8 @@ class VocabApp {
       return;
     }
 
-    const allWords = await this.db.getAllWords();
+    // 只取当前展示分类（全部/字/短语）的词条；另一分类的词条常驻词库，记录不会被清除
+    const allWords = (await this.db.getAllWords()).filter((w) => this.isWordInActiveScope(w));
     
     // 根据重复频率筛选单词
     const frequency = this.settings.repeatFrequency;
@@ -1594,6 +1922,8 @@ class VocabApp {
       jyutping: String(raw.jyutping ?? '').trim(),
       cantonese: String(raw.cantonese ?? '').trim(),
       cantoneseExample: String(raw.cantoneseExample ?? '').trim(),
+      // 词条分类标注：仅当明确为 word/phrase 时写入，供按分类统计/筛选使用
+      dictScope: raw.dictScope === 'phrase' || raw.dictScope === 'word' ? raw.dictScope : undefined,
       favorite: !!raw.favorite,
       status: raw.status || 'new',
       reviewCount: raw.reviewCount ?? 0,
@@ -1943,8 +2273,8 @@ class VocabApp {
     word.status = 'review';
     word.lastStudied = Date.now(); // 记录学习时间
     await this.db.updateWord(word);
-    this.todayStats.review++;
-    await this.db.setSetting('todayStats', this.todayStats);
+    // 按词条分类（字/短语）归档今日统计
+    await this.bumpScopeStats(word, 'review', 1);
     
     // 保存学习进度
     await this.saveLearnProgress();
@@ -1974,8 +2304,8 @@ class VocabApp {
     word.status = 'mastered';
     word.lastStudied = Date.now(); // 记录学习时间
     await this.db.updateWord(word);
-    this.todayStats.mastered++;
-    await this.db.setSetting('todayStats', this.todayStats);
+    // 按词条分类（字/短语）归档今日统计
+    await this.bumpScopeStats(word, 'mastered', 1);
     
     // 保存学习进度
     await this.saveLearnProgress();
@@ -2240,7 +2570,8 @@ class VocabApp {
       tab.classList.toggle('active', tab.dataset.filter === this.filterStatus);
     });
     
-    let words = await this.db.getAllWords();
+    // 仅展示当前分类（全部/字/短语）的词条
+    let words = (await this.db.getAllWords()).filter((w) => this.isWordInActiveScope(w));
     
     // 应用状态筛选（包括收藏筛选）
     if (this.filterStatus !== 'all') {
@@ -2330,6 +2661,9 @@ class VocabApp {
                       ${word.status === 'review' ? `
                         <span class="status-switch to-mastered" data-id="${word.id}" data-status="mastered">➔掌握</span>
                       ` : ''}
+                      ${word.status === 'new' ? `
+                        <span class="status-switch to-review" data-id="${word.id}" data-status="review">➔陌生</span>
+                      ` : ''}
                       <span class="status-badge ${word.status}">${
                         word.status === 'mastered' ? '已掌握' : 
                         word.status === 'review' ? '待复习' : '新词'
@@ -2405,13 +2739,16 @@ class VocabApp {
             if (todayWordIndex !== -1) {
               this.todayWords[todayWordIndex].status = newStatus;
               
-              // 更新统计数据
+              // 更新统计数据（按词条分类归档今日统计，口径与学习页按钮一致）
               if (oldStatus === 'review' && newStatus === 'mastered') {
-                this.todayStats.mastered++;
-                this.todayStats.review--;
+                await this.bumpScopeStats(word, 'mastered', 1);
+                await this.bumpScopeStats(word, 'review', -1);
               } else if (oldStatus === 'mastered' && newStatus === 'review') {
-                this.todayStats.mastered--;
-                this.todayStats.review++;
+                await this.bumpScopeStats(word, 'mastered', -1);
+                await this.bumpScopeStats(word, 'review', 1);
+              } else if (oldStatus === 'new' && newStatus === 'review') {
+                // 新词标记为陌生，与学习页"陌生"按钮的统计口径一致
+                await this.bumpScopeStats(word, 'review', 1);
               }
               
               // 更新学习会话快照（以便切换回学习页面时能看到更新后的数据）
@@ -2526,7 +2863,8 @@ class VocabApp {
       await this.db.setSetting('todayCount', 0);
       await this.db.setSetting('learnProgress', null);
       
-      // 清除今日统计和累计统计
+      // 清除今日统计和累计统计（含按分类归档的字/短语计数）
+      await this.resetScopeStats();
       this.todayStats = { mastered: 0, review: 0, total: 0 };
       this.totalStats = { mastered: 0, review: 0 };
       await this.db.setSetting('todayStats', this.todayStats);
@@ -2654,7 +2992,8 @@ class VocabApp {
   }
 
   // 解析Excel数据（首行为表头，列名规则与 resolveImportHeaderKey 一致）
-  parseExcel(data) {
+  // dictScope：该 sheet 归属的词典分类（word=字 / phrase=短语）
+  parseExcel(data, dictScope) {
     if (!data || data.length < 2) return [];
     const headerCells = data[0].map((c) => String(c ?? '').trim());
     let colMap = this.buildImportColumnMap(headerCells);
@@ -2684,7 +3023,8 @@ class VocabApp {
           language: get('language'),
           jyutping: get('jyutping'),
           cantonese: get('cantonese'),
-          cantoneseExample: get('cantoneseExample')
+          cantoneseExample: get('cantoneseExample'),
+          dictScope
         })
       );
     }
