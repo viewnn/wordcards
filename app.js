@@ -1,11 +1,57 @@
-// ==================== IndexedDB 数据库操作 ====================
+/**
+ * ============================================================
+ * WordCards（单词卡片）应用 —— 主逻辑 app.js
+ * ============================================================
+ * 整个应用由两个类组成：
+ *
+ * 【1. VocabDB —— 数据层】封装浏览器 IndexedDB，负责数据持久化。
+ *   数据库名 VocabAppDB，当前版本 3，含 3 个对象仓库（相当于表）：
+ *     - words      词条表（主键为自增 id），并建了 category / status /
+ *                  createdAt / favorite / language 等索引便于查询
+ *     - categories 分类表（预留）
+ *     - settings   设置表，结构为 { key, value } 的键值对
+ *
+ * 【2. VocabApp —— 应用层】负责全部界面渲染与用户交互，按功能分块：
+ *     - 初始化：init() 打开数据库 → 读设置 → 注册 Service Worker →
+ *               绑定事件 → 自动导入 dict.xlsx → 加载统计 → 首次渲染
+ *     - 学习页：抽词成今日队列(prepareLearnSession) → 渲染卡片(showCard)
+ *               → 翻面(flipCard) → 掌握/陌生/跳过(markMastered/markDifficult/skipCard)
+ *               → 更新进度条与统计(updateProgress)
+ *     - 词库页：搜索、状态筛选（全部/新词/待复习/已掌握/收藏）、
+ *               分类多选下拉、按分类分组渲染(renderLibrary)
+ *     - 设置页：每日目标、学习模式（随机/顺序）、语音朗读、音效、
+ *               卡片背景色、音标渐显、重复频率、词典范围等
+ *     - 语音：使用浏览器自带的 Web Speech API（speechSynthesis），
+ *             按词条语种（英语 / 普通话 / 粤语）挑选合适的系统音色朗读
+ *
+ * 关键概念：
+ *   - dictScope：词条的词典归属，'word'=字、'phrase'=短语。两类词条始终
+ *     全量常驻词库；settings.dictImportType（all/word/phrase）只决定
+ *     “当前学哪一类、展示哪一类、统计算哪一类”，切换范围不会删词或清记录。
+ *   - 学习统计：内部按 字/短语 分别计数（_scopeToday 今日、_scopeTotal 累计），
+ *     再按当前展示范围汇总成 todayStats / totalStats 供界面显示；
+ *     每天首次打开时会把昨日“今日计数”并入“累计计数”。
+ *   - 学习进度：今日队列 todayWords + 当前卡片下标 currentCardIndex。
+ *     离开学习页时快照到 _learnSessionSnapshot；同一天刷新页面也会从
+ *     settings.learnProgress 恢复，避免进度丢失。
+ *
+ * 底部导航在三个页面间切换：learn（学习）/ library（词库）/ settings（设置）。
+ * 页面加载完成后（DOMContentLoaded）创建 VocabApp 实例并调用 init() 启动。
+ */
+
+// ==================== IndexedDB 数据库操作（数据层） ====================
+/**
+ * 数据层类：对 IndexedDB 的 Promise 化封装。
+ * 词条以普通对象存储，主键为自增 id；所有异步方法都返回 Promise。
+ */
 class VocabDB {
   constructor() {
-    this.dbName = 'VocabAppDB';
-    this.version = 3;
-    this.db = null;
+    this.dbName = 'VocabAppDB'; // 数据库名（固定）
+    this.version = 3;           // 数据库版本号；结构变更时 +1 会触发 onupgradeneeded
+    this.db = null;             // 打开后的 IDBDatabase 实例
   }
-  
+
+  /** 删除整个数据库（初始化失败、重置数据时使用） */
   async deleteDatabase() {
     return new Promise((resolve, reject) => {
       const request = indexedDB.deleteDatabase(this.dbName);
@@ -18,6 +64,11 @@ class VocabDB {
     });
   }
 
+  /**
+   * 打开（或首次创建）数据库。
+   * onupgradeneeded 只在“数据库不存在 / 版本号升高”时触发：
+   * 这里负责建表、建索引；老用户升级时只补缺失的索引，绝不删数据。
+   */
   async init() {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(this.dbName, this.version);
@@ -65,7 +116,8 @@ class VocabDB {
     });
   }
 
-  // 词汇操作
+  // ---------- 词汇（words 表）操作 ----------
+  /** 新增一条词条；自动补 createdAt（创建时间）和 status='new'（新词），返回新 id */
   async addWord(word) {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(['words'], 'readwrite');
@@ -78,6 +130,7 @@ class VocabDB {
     });
   }
 
+  /** 按 id 整体覆盖更新一条词条（put：有则更新、无则新增） */
   async updateWord(word) {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(['words'], 'readwrite');
@@ -88,6 +141,7 @@ class VocabDB {
     });
   }
 
+  /** 读取词库中的全部词条（返回对象数组） */
   async getAllWords() {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(['words'], 'readonly');
@@ -98,6 +152,7 @@ class VocabDB {
     });
   }
 
+  /** 按主键 id 读取单条词条 */
   async getWord(id) {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(['words'], 'readonly');
@@ -108,6 +163,7 @@ class VocabDB {
     });
   }
 
+  /** 批量新增词条（在同一个事务内完成，性能更好）；返回成功写入的条数 */
   async batchAddWords(words) {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(['words'], 'readwrite');
@@ -126,7 +182,8 @@ class VocabDB {
     });
   }
 
-  // 设置操作
+  // ---------- 设置（settings 表）操作：键值对存取 ----------
+  /** 读取某项设置；库里没有该 key 时返回 defaultValue（即“默认值”） */
   async getSetting(key, defaultValue = null) {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(['settings'], 'readonly');
@@ -137,6 +194,7 @@ class VocabDB {
     });
   }
 
+  /** 写入某项设置（以 { key, value } 形式存储，同名 key 会被覆盖） */
   async setSetting(key, value) {
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(['settings'], 'readwrite');
@@ -148,42 +206,48 @@ class VocabDB {
   }
 }
 
-// ==================== 主应用类 ====================
+// ==================== 主应用类（应用层） ====================
+/**
+ * 应用层类：持有全部运行状态，负责页面渲染、事件交互、学习流程、
+ * 词库管理、设置读写与语音朗读。全局唯一实例为 window.app。
+ */
 class VocabApp {
   constructor() {
-    this.db = new VocabDB();
-    this.currentPage = 'learn';
-    this.currentCardIndex = 0;
-    this.todayWords = [];
-    this.isFlipped = false;
+    this.db = new VocabDB();          // 数据层实例（IndexedDB 封装）
+    this.currentPage = 'learn';       // 当前所在页面：learn 学习 / library 词库 / settings 设置
+    this.currentCardIndex = 0;        // 今日学习队列中，当前卡片的下标
+    this.todayWords = [];             // 今日学习队列（词条对象数组）
+    this.isFlipped = false;           // 当前卡片是否处于翻面（释义面朝上）状态
+    // 全部用户设置；启动时由 loadSettings() 从数据库读取覆盖默认值
     this.settings = {
-      dailyGoal: 100,
-      cardBgColor: '#E8F5E9',
-      fontSize: 'medium',
-      soundEnabled: false,
-      speechEnabled: false,
-      phoneticAutoRead: false,
+      dailyGoal: 100,                 // 每日目标（每天学习多少张卡片）
+      cardBgColor: '#E8F5E9',         // 卡片背景色
+      fontSize: 'medium',             // 字号（预留）
+      soundEnabled: false,            // 翻到释义面后自动朗读例句/释义
+      speechEnabled: false,           // 总开关：语音朗读（关闭后喇叭按钮不可用）
+      phoneticAutoRead: false,        // 切换卡片后自动朗读音标两遍
       /** 默认先展示释义面；点击后翻到词汇面 */
       cardDefinitionFirst: false,
-      learnMode: 'random',
+      learnMode: 'random',            // 学习模式：random 随机 / sequential 顺序
       /** 音标渐显延迟（秒），0表示立即显示 */
       phoneticDelay: 2,
       /** 单词重复出现频率（天），0表示每日目标内不重复 */
       repeatFrequency: 2,
       /** 词典导入范围：all / phrase / word，与设置页下拉同步 */
-      dictImportType: 'all'
+      dictImportType: 'all',
+      categoryDisplay: false          // 卡片上方是否显示分类徽标（默认关闭；loadSettings 会从库中读取用户选择）
     };
-    this.todayStats = {
-      mastered: 0,
-      review: 0,
-      total: 0
+    this.todayStats = {               // 今日统计（按当前展示范围汇总后的镜像值）
+      mastered: 0,                    //   今日“已掌握”次数
+      review: 0,                      //   今日“待复习/陌生”次数
+      total: 0                        //   今日队列长度（由 prepareLearnSession 维护）
     };
-    this.totalStats = {
+    this.totalStats = {               // 今日之前的累计统计（镜像值）
       mastered: 0,
       review: 0
     };
-    this.searchQuery = '';
-    this.filterStatus = 'all';
+    this.searchQuery = '';            // 词库页搜索框内容（已转小写）
+    this.filterStatus = 'all';        // 词库页状态筛选：all/new/review/mastered/favorite
     /** 按分类(字/短语)归档的今日统计：{ word:{mastered,review}, phrase:{mastered,review} } */
     this._scopeToday = this._emptyScopeStats();
     /** 按分类(字/短语)归档的今日之前累计统计（每日跨天时并入） */
@@ -195,8 +259,16 @@ class VocabApp {
     this._librarySpeakWordsById = new Map();
     /** 离开学习页时保存的会话快照，用于返回学习页时恢复进度条与队列（不可仅用 switchPage 局部变量） */
     this._learnSessionSnapshot = null;
+    /** 当前词典范围内各状态的词条数缓存 { mastered, review }，与词库页筛选结果一致 */
+    this._cachedStatusCounts = { mastered: 0, review: 0 };
   }
-
+  /**
+   * 应用启动入口（DOMContentLoaded 后调用一次）。
+   * 流程：测量滚动条 → 打开数据库 → 读取设置 → 首次使用默认词典范围为「字」
+   * → 注册 Service Worker（离线缓存）→ 绑定全部事件 → 预加载语音音色
+   * → 自动导入 dict.xlsx → 加载/迁移学习统计 → 首次渲染。
+   * 任何一步失败都会走 recoverFromError() 兜底重建。
+   */
   async init() {
     try {
       this.measureScrollbarWidth();
@@ -204,12 +276,12 @@ class VocabApp {
       await this.loadSettings();
       const savedDictType = await this.db.getSetting('dictImportType', null);
       if (savedDictType === null) {
-        this.settings.dictImportType = 'all';
-        await this.db.setSetting('dictImportType', 'all');
+        this.settings.dictImportType = 'word';
+        await this.db.setSetting('dictImportType', 'word');
       }
       const dictTypeSelectInit = document.getElementById('dictTypeSelect');
       if (dictTypeSelectInit) {
-        dictTypeSelectInit.value = this.settings.dictImportType || 'all';
+        dictTypeSelectInit.value = this.settings.dictImportType || 'word';
       }
       this.initServiceWorker();
       this.bindEvents();
@@ -535,6 +607,7 @@ class VocabApp {
     await this.db.batchAddWords(samples);
   }
 
+  /** 初始化失败后的自救：删库 → 重建空库 → 写入两条示例词，保证应用能打开、能学习 */
   async recoverFromError() {
     try {
       await this.db.deleteDatabase();
@@ -551,7 +624,7 @@ class VocabApp {
     }
   }
 
-  // 初始化 Service Worker
+  /** 注册 Service Worker（sw.js）实现离线缓存；发现新版本时让其立即激活并自动刷新页面 */
   initServiceWorker() {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').then(reg => {
@@ -576,7 +649,7 @@ class VocabApp {
     }
   }
 
-  // 加载设置
+  /** 从数据库读取全部设置项覆盖默认值；getSetting 第二参数即“用户从未设置时”的默认值 */
   async loadSettings() {
     this.settings.dailyGoal = await this.db.getSetting('dailyGoal', 100);
     this.settings.cardBgColor = await this.db.getSetting('cardBgColor', '#E8F5E9');
@@ -584,7 +657,7 @@ class VocabApp {
     this.settings.soundEnabled = await this.db.getSetting('soundEnabled', false);
     this.settings.phoneticAutoRead = await this.db.getSetting('phoneticAutoRead', false);
     this.settings.cardDefinitionFirst = await this.db.getSetting('cardDefinitionFirst', false);
-    this.settings.categoryDisplay = await this.db.getSetting('categoryDisplay', true);
+    this.settings.categoryDisplay = await this.db.getSetting('categoryDisplay', false);
     this.settings.learnMode = await this.db.getSetting('learnMode', 'random');
     this.settings.phoneticDelay = await this.db.getSetting('phoneticDelay', 2);
     this.settings.repeatFrequency = await this.db.getSetting('repeatFrequency', 2);
@@ -715,6 +788,8 @@ class VocabApp {
     this._scopeToday = ensureShape(scopeToday);
     this._scopeTotal = ensureShape(scopeTotal);
     this.syncActiveStatsMirrors();
+    // 初始化时从数据库统计真实状态计数，供学习页累计统计显示
+    await this.refreshStatusCounts();
   }
 
   async persistScopeStats() {
@@ -751,6 +826,20 @@ class VocabApp {
     await this.persistScopeStats();
   }
 
+  /**
+   * 从数据库实时统计当前词典范围内各状态的词条数，缓存到 _cachedStatusCounts。
+   * 用于学习页"累计已掌握/待复习"显示——与词库页按状态筛选的结果完全一致。
+   * 在以下场景调用：词条状态变更、词典范围切换、初始化、清除进度等。
+   */
+  async refreshStatusCounts() {
+    const allWords = await this.db.getAllWords();
+    const scoped = allWords.filter((w) => this.isWordInActiveScope(w));
+    this._cachedStatusCounts = {
+      mastered: scoped.filter((w) => w.status === 'mastered').length,
+      review: scoped.filter((w) => w.status === 'review').length
+    };
+  }
+
   /** 清空今日与累计统计（数据管理 - 清除记录时调用） */
   async resetScopeStats() {
     this._scopeToday = this._emptyScopeStats();
@@ -760,7 +849,13 @@ class VocabApp {
   }
 
 
-  // 绑定事件
+  /**
+   * 绑定全局事件（只在启动时绑定一次）：
+   * 底部导航切换、弹窗关闭、首页统计数字点击、保存单词按钮、
+   * 卡片点击翻面、喇叭发音/收藏按钮（同时监听 click 与 touchstart 并去重）、
+   * 卡片滑动手势、学习页三个操作按钮；设置页与词库页的事件分别委托给
+   * bindSettingsEvents() / bindLibraryEvents()。
+   */
   bindEvents() {
     const self = this;
     
@@ -933,7 +1028,7 @@ class VocabApp {
     
   }
   
-  // 词库页面事件绑定
+  /** 词库页事件：搜索框输入/清空、状态筛选标签（全部/新词/待复习/已掌握/收藏）、分类下拉多选 */
   bindLibraryEvents() {
     const searchInput = document.getElementById('searchInput');
     const searchClearBtn = document.getElementById('searchClearBtn');
@@ -1126,6 +1221,7 @@ class VocabApp {
     );
   }
 
+  /** 按 isDailyGoalSliderLocked() 的结果启用/禁用每日目标滑块，并同步显示数值 */
   refreshGoalSliderLockedState() {
     const goalSlider = document.getElementById('goalSlider');
     const goalValue = document.getElementById('goalValue');
@@ -1180,7 +1276,12 @@ class VocabApp {
     );
   }
 
-  // 设置事件绑定
+  /**
+   * 设置页事件绑定：每日目标滑块、学习模式、卡片背景色、
+   * 语音朗读总开关 / 例句自动朗读 / 音标自动朗读（后两者依赖总开关）、
+   * 卡片释义优先、分类显示、音标渐显时长、重复频率、清除进度、词典范围切换。
+   * 每个开关改动后都会立即写入数据库（setSetting），并按需刷新当前界面。
+   */
   bindSettingsEvents() {
     const self = this;
     
@@ -1402,6 +1503,9 @@ class VocabApp {
         // 按当前分类重新映射统计数字（全部 = 字 + 短语）
         self.syncActiveStatsMirrors();
 
+        // 词典范围已变更，重新统计真实状态计数
+        await self.refreshStatusCounts();
+
         // 学习队列按新范围重建，清除会话缓存，避免返回学习页时恢复旧范围的队列
         await self.db.setSetting('learnProgress', null);
         self._learnSessionSnapshot = null;
@@ -1423,7 +1527,7 @@ class VocabApp {
     updateGoalSliderState();
   }
 
-  // 应用设置
+  /** 把当前设置应用到界面：卡片背景色、语音相关控件可用状态、字号等 */
   applySettings() {
     const flashcard = document.getElementById('flashcard');
     if (flashcard) {
@@ -1436,7 +1540,14 @@ class VocabApp {
     document.documentElement.style.setProperty('--font-size-md', fontSizes[this.settings.fontSize] || '16px');
   }
 
-  // 初始化卡片滑动
+  /**
+   * 初始化学习卡片的触摸手势（移动端）：
+   * - 短按（<500ms 且未移动）：翻转卡片；
+   * - 向左滑超过 80px：标记“已掌握”；
+   * - 向右滑超过 80px：跳过当前词（移到队尾）；
+   * - 其余情况：卡片回弹原位。
+   * 滑动过程中让卡片跟手平移并轻微旋转。
+   */
   initCardSwipe() {
     const card = document.getElementById('flashcard');
     let startX = 0, startY = 0, currentX = 0;
@@ -1519,7 +1630,11 @@ class VocabApp {
     });
   }
 
-  // 切换页面
+  /**
+   * 切换底部导航页面（learn / library / settings）。
+   * 离开学习页时把当前队列与下标快照到 _learnSessionSnapshot；
+   * 回到学习页时，若快照队列长度与每日目标一致则恢复进度，否则重建今日队列。
+   */
   switchPage(page) {
     if (this.currentPage === page) return;
 
@@ -1585,7 +1700,7 @@ class VocabApp {
     }
   }
 
-  // 渲染页面
+  /** 首次渲染：准备今日学习队列（学习页默认显示）并把设置应用到界面 */
   render() {
     this.prepareLearnSession();
     this.applySettings();
@@ -1618,7 +1733,13 @@ class VocabApp {
     return null;
   }
 
-  // 准备学习会话
+  /**
+   * 准备（或恢复）今日学习会话：
+   * 1) 若今天保存过进度且队列长度与每日目标一致 → 恢复进度；
+   * 2) 否则取当前词典范围（全部/字/短语）的词条，按“重复频率”过滤掉近期学过的；
+   * 3) 随机模式打散并尽量让相邻卡片分类不同；顺序模式按 新词→待复习 排列；
+   * 4) 截取每日目标数量作为今日队列，渲染第一张卡并更新进度条。
+   */
   async prepareLearnSession() {
     this.cancelScheduledPhoneticRead();
     this._learnSessionSnapshot = null;
@@ -1712,11 +1833,17 @@ class VocabApp {
       this.showEmptyState();
     }
     
+    // 刷新累计统计缓存后再更新进度，确保数字与词库一致
+    await this.refreshStatusCounts();
     this.updateProgress();
     this.refreshGoalSliderLockedState();
   }
 
-  // 显示卡片
+  /**
+   * 渲染指定下标的卡片：拼接正反面 HTML（正面=词汇+音标+收藏/喇叭，
+   * 背面=释义+例句），按“释义优先”设置决定初始朝向，处理音标渐显定时，
+   * 并在开启音效且背面朝上时延迟自动朗读。
+   */
   showCard(index) {
     if (index >= this.todayWords.length) {
       return;
@@ -1824,7 +1951,7 @@ class VocabApp {
     this.refreshSpeechDependentToggles();
   }
 
-  // 翻转卡片
+  /** 翻转卡片（正面↔背面）；翻到背面且开启音效时 2 秒后自动朗读例句 */
   flipCard() {
     const card = document.getElementById('flashcard');
     if (!card) {
@@ -1847,6 +1974,7 @@ class VocabApp {
     }
   }
 
+  /** 把 & < > " 转义成 HTML 实体；所有用户/词典内容拼进 innerHTML 前都要先过它，防止注入 */
   escapeHtml(text) {
     return String(text ?? '')
       .replace(/&/g, '&amp;')
@@ -1855,6 +1983,7 @@ class VocabApp {
       .replace(/"/g, '&quot;');
   }
 
+  /** 把导入表格的表头单元格（如「词汇/word/字/短语」「释义」「粤拼」）识别成内部字段名；无法识别返回 null */
   resolveImportHeaderKey(cell) {
     const raw = String(cell ?? '').trim();
     if (!raw) return null;
@@ -1879,6 +2008,7 @@ class VocabApp {
     return null;
   }
 
+  /** 根据表头行生成 { 内部字段名: 列下标 } 映射；连 word 列都识别不出时返回 null（调用方会改用旧版固定列顺序） */
   buildImportColumnMap(headerCells) {
     const colMap = {};
     headerCells.forEach((cell, idx) => {
@@ -1888,6 +2018,7 @@ class VocabApp {
     return colMap.word !== undefined ? colMap : null;
   }
 
+  /** 旧版词典的固定列顺序兜底（表头无法识别时按位置取值：词/释义/音标/例句/分类/语言/粤拼/粤语例句） */
   getLegacyImportColumnMap() {
     return {
       word: 0,
@@ -1901,6 +2032,8 @@ class VocabApp {
     };
   }
 
+  /** 把导入的一行原始数据规范化成标准词条对象：去空白、补 meaning/definition 双字段、
+   *  缺分类时记为「未分类」、缺语言时按粤拼/汉字/英文推断，并初始化学习状态字段 */
   normalizeImportedWord(raw) {
     const meaning = String(raw.meaning ?? raw.definition ?? '').trim();
     const wordText = String(raw.word ?? '').trim();
@@ -1959,6 +2092,7 @@ class VocabApp {
     return 'english';
   }
 
+  /** 没有 language 列时，根据发音类型推断卡片角标文字（粤语/英语/中文） */
   inferLanguageBadgeLabel(word) {
     const k = this.getSpeechKind(word);
     if (k === 'cantonese') return '粤语';
@@ -1978,6 +2112,7 @@ class VocabApp {
     return this.inferLanguageBadgeLabel(word);
   }
 
+  /** 该词条是否按粤语处理（决定音标优先粤拼、朗读用 zh-HK 音色） */
   isCantoneseWord(word) {
     return this.getSpeechKind(word) === 'cantonese';
   }
@@ -2057,7 +2192,12 @@ class VocabApp {
     }
   }
 
-  // 发音功能
+  /**
+   * 朗读一段文本（发音功能入口）。
+   * 先取消正在播放的语音，再创建 SpeechSynthesisUtterance；
+   * 部分浏览器音色列表是异步加载的，这里用 voiceschanged 事件 +
+   * 两个超时兜底（120ms / 1800ms）确保最终一定能开口朗读。
+   */
   speakWord(text, lang = 'zh-CN') {
     if (!text) return;
 
@@ -2120,6 +2260,11 @@ class VocabApp {
     }, 1800);
   }
   
+  /**
+   * 在系统可用音色列表里为目标语言（en / zh-CN / zh-HK）挑选最合适的音色并朗读：
+   * 粤语严格匹配 zh-HK / Cantonese（避免错用普通话）；英语用 pickBestEnglishVoice 打分；
+   * 普通话优先 zh-CN；都找不到时退而求其次用同语种前缀或英语音色。
+   */
   trySpeakWithVoice(utterance, lang, voices) {
     if (!voices || voices.length === 0) {
       window.speechSynthesis.speak(utterance);
@@ -2278,7 +2423,10 @@ class VocabApp {
     
     // 保存学习进度
     await this.saveLearnProgress();
-    
+
+    // 刷新累计统计缓存（状态已变更，确保与词库页一致）
+    await this.refreshStatusCounts();
+
     //this.showToast('已标记为需复习');// 请勿删除该注释
       this.nextCard('right');
   }
@@ -2309,12 +2457,19 @@ class VocabApp {
     
     // 保存学习进度
     await this.saveLearnProgress();
-    
+
+    // 刷新累计统计缓存（状态已变更，确保与词库页一致）
+    await this.refreshStatusCounts();
+
     // this.showToast('太棒了！已掌握'); // 请勿删除该注释
     this.nextCard('left');
   }
 
-  // 下一张卡片
+  /**
+   * 前进到下一张卡片（掌握/陌生操作后调用）。
+   * fromDirection 指示滑出方向（left 左滑/right 右滑），用于做方向一致的
+   * “旧卡滑出 → 新卡滑入”动画；已经是最后一张时显示完成页。
+   */
   nextCard(fromDirection = 'right') {
     this.currentCardIndex++;
     if (this.currentCardIndex >= this.todayWords.length) {
@@ -2341,6 +2496,7 @@ class VocabApp {
     this.refreshGoalSliderLockedState();
   }
 
+  /** 取消尚未触发的“自动朗读音标”定时器（切页/重建队列时调用，避免对着旧卡片朗读） */
   cancelScheduledPhoneticRead() {
     if (this._phoneticReadTimer != null) {
       clearTimeout(this._phoneticReadTimer);
@@ -2490,20 +2646,21 @@ class VocabApp {
 
   // 更新进度
   updateProgress() {
-    const progress = this.settings.dailyGoal > 0 
-      ? Math.round((this.currentCardIndex / this.settings.dailyGoal) * 100) 
+    const progress = this.settings.dailyGoal > 0
+      ? Math.round((this.currentCardIndex / this.settings.dailyGoal) * 100)
       : 0;
-    
+
     document.getElementById('progressFill').style.width = `${progress}%`;
     document.getElementById('progressText').textContent = `${this.currentCardIndex}/${this.settings.dailyGoal}`;
-    
+
+    // 今日统计 = 今日学习动作计数（进度指标）
     document.getElementById('statMastered').textContent = this.todayStats.mastered;
     document.getElementById('statReview').textContent = this.todayStats.review;
-    
-    // 更新累计统计显示
-    document.getElementById('totalMastered').textContent = this.totalStats.mastered + this.todayStats.mastered;
-    document.getElementById('totalReview').textContent = this.totalStats.review + this.todayStats.review;
-    
+
+    // 累计统计 = 当前词库中各状态的真实词条数（与词库页筛选结果一致）
+    document.getElementById('totalMastered').textContent = this._cachedStatusCounts.mastered;
+    document.getElementById('totalReview').textContent = this._cachedStatusCounts.review;
+
     // 更新可点击状态
     const statMastered = document.getElementById('statMastered');
     const statReview = document.getElementById('statReview');
@@ -2514,6 +2671,17 @@ class VocabApp {
     if (statReview) {
       statReview.style.cursor = this.todayStats.review >= 1 ? 'pointer' : 'default';
       statReview.style.opacity = this.todayStats.review >= 1 ? '1' : '0.6';
+    }
+    // 累计统计的可点击状态
+    const totalMastered = document.getElementById('totalMastered');
+    const totalReview = document.getElementById('totalReview');
+    if (totalMastered) {
+      totalMastered.style.cursor = this._cachedStatusCounts.mastered >= 1 ? 'pointer' : 'default';
+      totalMastered.style.opacity = this._cachedStatusCounts.mastered >= 1 ? '1' : '0.6';
+    }
+    if (totalReview) {
+      totalReview.style.cursor = this._cachedStatusCounts.review >= 1 ? 'pointer' : 'default';
+      totalReview.style.opacity = this._cachedStatusCounts.review >= 1 ? '1' : '0.6';
     }
   }
   
@@ -2526,11 +2694,11 @@ class VocabApp {
     }
   }
 
-  // 累计统计点击处理
+  // 累计统计点击处理（用缓存的真实状态计数判断，与词库页一致）
   handleTotalStatClick(filter) {
-    const count = filter === 'mastered' 
-      ? this.totalStats.mastered + this.todayStats.mastered 
-      : this.totalStats.review + this.todayStats.review;
+    const count = filter === 'mastered'
+      ? this._cachedStatusCounts.mastered
+      : this._cachedStatusCounts.review;
     if (count >= 1) {
       this.filterStatus = filter;
       this.switchPage('library');
@@ -2766,7 +2934,13 @@ class VocabApp {
               }
             }
           }
-          
+
+          // 刷新累计统计缓存（词库内状态切换后，确保学习页累计数字一致）
+          await this.refreshStatusCounts();
+          if (this.currentPage === 'learn') {
+            this.updateProgress();
+          }
+
           this.renderLibrary();
           // this.showToast(newStatus === 'mastered' ? '已标记为掌握' : '已标记为待复习'); // 请勿删除该注释
         }
@@ -2784,7 +2958,7 @@ class VocabApp {
     });
   }
 
-  // 查看单词
+  /** 打开弹窗查看指定词条（只读模式：禁用输入框、隐藏保存按钮） */
   async viewWord(id) {
     const words = await this.db.getAllWords();
     const word = words.find(w => w.id === id);
@@ -2855,7 +3029,7 @@ class VocabApp {
     this.refreshGoalSliderLockedState();
   }
 
-  // 清除学习进度
+  /** 设置页“清除进度”：确认后清空今日/累计统计与学习进度，把所有词条状态重置为 new，并刷新界面 */
   async clearProgress() {
     if (confirm('确定要清除所有“已掌握”和“待复习”的记录吗？')) {
       // 清除所有学习相关设置
@@ -2907,7 +3081,10 @@ class VocabApp {
           await this.db.updateWord(word);
         }
       }
-      
+
+      // 所有状态已重置，刷新缓存使累计统计归零
+      await this.refreshStatusCounts();
+
       this.refreshGoalSliderLockedState();
 
       this.showToast('所有学习记录已清除');
@@ -2924,7 +3101,8 @@ class VocabApp {
     }
   }
 
-  // ==================== 模态框 ====================
+  // ==================== 模态框（新增/查看单词弹窗） ====================
+  /** 关闭所有弹窗，并把表单恢复为可编辑状态（查看模式会禁用输入框、隐藏保存按钮） */
   closeModals() {
     document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('active'));
     
@@ -2936,7 +3114,12 @@ class VocabApp {
     document.getElementById('saveWordBtn').style.display = '';
   }
 
-  // 保存单词
+  /**
+   * 保存弹窗中的词条（新增或编辑）。
+   * 有隐藏 id 时为编辑：先取出库中完整记录再合并表单字段，
+   * 避免 put 整体覆盖把 status / lastStudied 等学习数据清空；
+   * 无 id 时为新增。保存后按所在页面刷新词库或重建学习队列。
+   */
   async saveWord() {
     try {
       const id = document.getElementById('wordId').value;
@@ -3031,7 +3214,7 @@ class VocabApp {
     return words;
   }
 
-  // Toast 提示
+  /** 屏幕底部弹出一条短暂提示（2.5 秒后自动消失） */
   showToast(message) {
     const toast = document.getElementById('toast');
     toast.textContent = message;
@@ -3041,8 +3224,9 @@ class VocabApp {
 }
 
 // ==================== 启动应用 ====================
+// 等 DOM 解析完成后再创建应用实例（此时所有按钮/弹窗元素都已存在，可以绑定事件）
 document.addEventListener('DOMContentLoaded', () => {
-  window.app = new VocabApp();
-  window.app.init();
+  window.app = new VocabApp();  // 挂到 window 上，方便控制台调试
+  window.app.init();            // 执行初始化流程（数据库 → 设置 → 词典 → 统计 → 渲染）
 });
 

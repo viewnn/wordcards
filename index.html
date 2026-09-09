@@ -193,46 +193,35 @@
             </div>
           </div>
 
-          <!-- 外观设置 -->
+          <!-- 词典管理 -->
           <div class="settings-section">
-            <h3 class="settings-section-title">外观设置</h3>
+            <h3 class="settings-section-title">词典管理</h3>
             <div class="setting-item">
               <div class="setting-info">
-                <h4>卡片背景</h4>
-                <p>学习卡片的背景颜色</p>
+                <h4>词典导入</h4>
+                <p>选择要导入的词典，默认展示为全部</p>
               </div>
-              <div class="color-options">
-                <div class="color-option" data-color="#E8F5E9" style="background: #E8F5E9;"></div>
-                <div class="color-option" data-color="#E3F2FD" style="background: #E3F2FD;"></div>
-                <div class="color-option" data-color="#FFF3E0" style="background: #FFF3E0;"></div>
-                <div class="color-option" data-color="#F3E5F5" style="background: #F3E5F5;"></div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 朗读设置 -->
-          <div class="settings-section">
-            <h3 class="settings-section-title">朗读设置</h3>
-            <div class="setting-item">
-              <div class="setting-info">
-                <h4>语音朗读</h4>
-                <p>开启后，才能开启例句朗读、音标朗读</p>
-              </div>
-              <div class="toggle" id="speechToggle"></div>
+              <select id="dictTypeSelect" class="dict-select">
+                <option value="all">全部</option>
+                <option value="phrase">短语</option>
+                <option value="word" selected>字</option>
+              </select>
             </div>
             <div class="setting-item">
               <div class="setting-info">
-                <h4>例句朗读</h4>
-                <p>显示释义时，2秒钟后朗读例句</p>
+                <h4>重复频率</h4>
+                <p>所选的时间内，单词不会再重复出现</p>
               </div>
-              <div class="toggle" id="soundToggle"></div>
-            </div>
-            <div class="setting-item">
-              <div class="setting-info">
-                <h4>音标朗读</h4>
-                <p>卡片翻转时，自动朗读音标2遍</p>
-              </div>
-              <div class="toggle" id="phoneticReadToggle"></div>
+              <select id="repeatFrequencySelect" class="dict-select">
+                <option value="0" selected>0天</option>
+                <option value="1">1天</option>
+                <option value="2">2天</option>
+                <option value="3">3天</option>
+                <option value="4">4天</option>
+                <option value="5">5天</option>
+                <option value="6">6天</option>
+                <option value="7">7天</option>
+              </select>
             </div>
           </div>
 
@@ -268,35 +257,47 @@
             </div>
           </div>
 
-          <!-- 词典管理 -->
+
+          <!-- 朗读设置 -->
           <div class="settings-section">
-            <h3 class="settings-section-title">词典管理</h3>
+            <h3 class="settings-section-title">朗读设置</h3>
             <div class="setting-item">
               <div class="setting-info">
-                <h4>词典导入</h4>
-                <p>选择要导入的词典，默认展示为全部</p>
+                <h4>语音朗读</h4>
+                <p>开启后，才能开启例句朗读、音标朗读</p>
               </div>
-              <select id="dictTypeSelect" class="dict-select">
-                <option value="all" selected>全部</option>
-                <option value="phrase">短语</option>
-                <option value="word">字</option>
-              </select>
+              <div class="toggle" id="speechToggle"></div>
             </div>
             <div class="setting-item">
               <div class="setting-info">
-                <h4>重复频率</h4>
-                <p>所选的时间内，单词不会再重复出现</p>
+                <h4>例句朗读</h4>
+                <p>显示释义时，2秒钟后朗读例句</p>
               </div>
-              <select id="repeatFrequencySelect" class="dict-select">
-                <option value="0" selected>0天</option>
-                <option value="1">1天</option>
-                <option value="2">2天</option>
-                <option value="3">3天</option>
-                <option value="4">4天</option>
-                <option value="5">5天</option>
-                <option value="6">6天</option>
-                <option value="7">7天</option>
-              </select>
+              <div class="toggle" id="soundToggle"></div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <h4>音标朗读</h4>
+                <p>卡片翻转时，自动朗读音标2遍</p>
+              </div>
+              <div class="toggle" id="phoneticReadToggle"></div>
+            </div>
+          </div>    
+
+          <!-- 外观设置 -->
+          <div class="settings-section">
+            <h3 class="settings-section-title">外观设置</h3>
+            <div class="setting-item">
+              <div class="setting-info">
+                <h4>卡片背景</h4>
+                <p>学习卡片的背景颜色</p>
+              </div>
+              <div class="color-options">
+                <div class="color-option" data-color="#E8F5E9" style="background: #E8F5E9;"></div>
+                <div class="color-option" data-color="#E3F2FD" style="background: #E3F2FD;"></div>
+                <div class="color-option" data-color="#FFF3E0" style="background: #FFF3E0;"></div>
+                <div class="color-option" data-color="#F3E5F5" style="background: #F3E5F5;"></div>
+              </div>
             </div>
           </div>
 
