@@ -74,6 +74,13 @@ html, body {
   color: var(--primary);
 }
 
+.header h6 {
+  font-size: 12px;
+  font-weight: 400;
+  color: #999;
+  margin: 0;
+}
+
 /* ==================== 底部导航 ==================== */
 .bottom-nav {
   display: flex;
@@ -133,12 +140,19 @@ html, body {
 .page {
   display: none;
   flex-direction: column;
-    height: 100%;
+  height: 100%;
 }
 
 .page.active {
   display: flex;
   animation: fadeIn 0.3s ease;
+}
+
+/* 词库页内容可能超过一屏，需要让 .page 随内容变高，
+   才能让 .library-header 的 position: sticky 全程保持吸顶 */
+#libraryPage {
+  height: auto;
+  min-height: 100%;
 }
 
 @keyframes fadeIn {
@@ -713,6 +727,23 @@ html, body {
   z-index: 100;
   width: 100%;
   box-sizing: border-box;
+}
+
+/* 词库范围统计行 */
+.dict-scope-counts {
+  font-size: 12px;
+  color: #999;
+  margin-bottom: 10px;
+  margin-left: 4px;
+  line-height: 1.4;
+}
+.dict-scope-counts .scope-active {
+  color: var(--primary, #4A90D9);
+  font-weight: 500;
+}
+.dict-scope-counts .scope-sep {
+  margin: 0 6px;
+  color: #ddd;
 }
 
 /* 筛选行 */

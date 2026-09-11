@@ -291,6 +291,8 @@ class VocabApp {
       // 保证首次升级时迁移能按现有词条分类拆分历史累计记录
       await this.autoLoadDict();
       await this.loadTodayStats();
+      // 显示上次词库更新时间
+      await this.loadDictUpdateTimeDisplay();
       this.render();
     } catch (error) {
       console.error('App initialization failed:', error);
@@ -303,6 +305,7 @@ class VocabApp {
   async refreshLibraryFiltersAfterDictChange() {
     await this.syncLibraryCategoryFilterToDictType();
     await this.renderCategoryOptions();
+    await this.updateDictTypeSelectLabels();
     if (this.currentPage === 'library') {
       await this.renderLibrary();
     }
@@ -561,6 +564,14 @@ class VocabApp {
         console.log('dict.xlsx 中没有新单词');
       }
 
+      // 词典内容发生变化时记录更新时间并显示在页面顶部
+      if (newWords.length > 0 || updateWords.length > 0) {
+        const now = new Date();
+        const formatted = this.formatDictUpdateTime(now);
+        await this.db.setSetting('dictUpdateTime', now.toISOString());
+        this.displayDictUpdateTime(formatted);
+      }
+
       await this.refreshLibraryFiltersAfterDictChange();
 
       if (this.currentPage === 'learn') {
@@ -815,6 +826,41 @@ class VocabApp {
     this.totalStats.mastered = totalMastered;
     this.totalStats.review = totalReview;
     // todayStats.total 是当日学习队列长度，由 prepareLearnSession 维护，此处不动
+  }
+
+  /**
+   * 更新词库页顶部的范围统计行，显示各分类的词条总数：
+   *   全部（5802） · 字（3836） · 短语（1966），当前词典范围高亮
+   * 词库数据变化时（导入、删除、编辑、词典范围切换、进入词库页）调用。
+   */
+  async updateDictTypeSelectLabels() {
+    const allWords = await this.db.getAllWords();
+    let wordCount = 0, phraseCount = 0;
+    for (const w of allWords) {
+      if (w.dictScope === 'word') wordCount++;
+      else if (w.dictScope === 'phrase') phraseCount++;
+      else if (!w.dictScope) {
+        // 兜底：没有 dictScope 的旧词条粗略归类
+        const t = String(w.word || '').trim();
+        if (/^[\u4e00-\u9fa5]$/.test(t)) wordCount++;
+        else phraseCount++;
+      }
+    }
+    const totalCount = allWords.length;
+
+    const labels = { all: '全部', word: '字', phrase: '短语' };
+    const counts = { all: totalCount, word: wordCount, phrase: phraseCount };
+    const current = this.settings.dictImportType || 'all';
+
+    // 只更新词库页顶部统计行（设置页下拉框保持原样：全部/短语/字）
+    const scopeCountsEl = document.getElementById('dictScopeCounts');
+    if (scopeCountsEl) {
+      const items = ['all', 'word', 'phrase'].map((key) => {
+        const cls = key === current ? 'scope-active' : '';
+        return `<span class="${cls}">${labels[key]}（${counts[key]}）</span>`;
+      });
+      scopeCountsEl.innerHTML = items.join('<span class="scope-sep">·</span>');
+    }
   }
 
   /** 记录某词条的一次学习动作（kind: mastered/review，delta ±1），并按该词条分类归档 */
@@ -1139,7 +1185,7 @@ class VocabApp {
 
     const allLabel = document.getElementById('category-all-label');
     if (allLabel) {
-      allLabel.textContent = `全部 (${categories.length})`;
+      allLabel.textContent = `全部分类 (${categories.length})`;
     }
 
     container.innerHTML = categories
@@ -1974,6 +2020,27 @@ class VocabApp {
     }
   }
 
+  /** 格式化时间为 YYYY-MM-DD HH:mm 格式，如 2026-09-11 23:45 */
+  formatDictUpdateTime(date) {
+    const d = new Date(date);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  /** 显示词库更新时间到页面顶部的 <span id="dictUpdateTime"> */
+  displayDictUpdateTime(formatted) {
+    const el = document.getElementById('dictUpdateTime');
+    if (el) el.textContent = formatted;
+  }
+
+  /** 从数据库读取上次词库更新时间并显示到页面顶部 */
+  async loadDictUpdateTimeDisplay() {
+    const saved = await this.db.getSetting('dictUpdateTime', null);
+    if (saved) {
+      this.displayDictUpdateTime(this.formatDictUpdateTime(saved));
+    }
+  }
+
   /** 把 & < > " 转义成 HTML 实体；所有用户/词典内容拼进 innerHTML 前都要先过它，防止注入 */
   escapeHtml(text) {
     return String(text ?? '')
@@ -2733,6 +2800,9 @@ class VocabApp {
 
   // ==================== 词库页面 ====================
   async renderLibrary() {
+    // 先刷新顶部范围统计行（数量可能因词典范围切换/词条状态变更而变）
+    await this.updateDictTypeSelectLabels();
+
     // 更新筛选按钮状态
     document.querySelectorAll('.filter-tab').forEach(tab => {
       tab.classList.toggle('active', tab.dataset.filter === this.filterStatus);
