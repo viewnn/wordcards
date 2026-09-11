@@ -182,6 +182,26 @@ class VocabDB {
     });
   }
 
+  /** 批量删除词条（在同一个事务内完成）；返回实际删除的条数 */
+  async deleteWordsByIds(ids) {
+    const uniqueIds = [...new Set(ids)].filter((id) => id !== undefined && id !== null);
+    if (uniqueIds.length === 0) return 0;
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['words'], 'readwrite');
+      const store = transaction.objectStore('words');
+      let count = 0;
+
+      uniqueIds.forEach(id => {
+        const request = store.delete(id);
+        request.onsuccess = () => count++;
+      });
+
+      transaction.oncomplete = () => resolve(count);
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+
   // ---------- 设置（settings 表）操作：键值对存取 ----------
   /** 读取某项设置；库里没有该 key 时返回 defaultValue（即“默认值”） */
   async getSetting(key, defaultValue = null) {
@@ -460,6 +480,8 @@ class VocabApp {
       // 区分新单词和需要更新的单词
       const newWords = [];
       const updateWords = [];
+      // 当前词典已成功匹配到的库内记录；未进入此集合的旧记录将从词库移除
+      const matchedExistingIds = new Set();
       // 每个文本本轮已匹配过的词条 id（用于同文本多条记录时逐条对应）
       const usedByText = new Map();
       // 每个“分类+文本”在词典文件中的行数（用于修复此前被整行覆盖的脏数据）
@@ -518,6 +540,7 @@ class VocabApp {
         }
 
         if (existing) {
+          matchedExistingIds.add(existing.id);
           // 需要更新：认领旧词条、字段补全、或词典内容有更新（含此前被跨分类覆盖的脏数据）
           const needFieldBackfill =
             (!existing.jyutping && w.jyutping) ||
@@ -548,6 +571,10 @@ class VocabApp {
         }
       }
 
+      // 以 dict.xlsx 为最终来源：新词典中不存在的旧词条需要删除。
+      // 已匹配词条仍保留原 id 与学习记录，仅删除本次没有对应行的残留数据。
+      const staleWords = existingWords.filter((word) => !matchedExistingIds.has(word.id));
+
       if (updateWords.length > 0) {
         for (const w of updateWords) {
           await this.db.updateWord(w);
@@ -557,15 +584,25 @@ class VocabApp {
 
       if (newWords.length > 0) {
         await this.db.batchAddWords(newWords);
-        this.showToast(`已自动导入 ${newWords.length} 个新单词`);
-      } else if (updateWords.length > 0) {
-        this.showToast(`已更新 ${updateWords.length} 个单词字段`);
+      }
+
+      if (staleWords.length > 0) {
+        await this.db.deleteWordsByIds(staleWords.map((word) => word.id));
+        console.log(`已从词库移除 ${staleWords.length} 个词典中不存在的旧词条`);
+      }
+
+      const changeMessages = [];
+      if (newWords.length > 0) changeMessages.push(`新增 ${newWords.length} 个`);
+      if (updateWords.length > 0) changeMessages.push(`更新 ${updateWords.length} 个`);
+      if (staleWords.length > 0) changeMessages.push(`移除 ${staleWords.length} 个`);
+      if (changeMessages.length > 0) {
+        this.showToast(`词典同步完成：${changeMessages.join('，')}`);
       } else {
         console.log('dict.xlsx 中没有新单词');
       }
 
       // 词典内容发生变化时记录更新时间并显示在页面顶部
-      if (newWords.length > 0 || updateWords.length > 0) {
+      if (newWords.length > 0 || updateWords.length > 0 || staleWords.length > 0) {
         const now = new Date();
         const formatted = this.formatDictUpdateTime(now);
         await this.db.setSetting('dictUpdateTime', now.toISOString());
@@ -638,6 +675,16 @@ class VocabApp {
   /** 注册 Service Worker（sw.js）实现离线缓存；发现新版本时让其立即激活并自动刷新页面 */
   initServiceWorker() {
     if ('serviceWorker' in navigator) {
+      const hadController = Boolean(navigator.serviceWorker.controller);
+      let isRefreshing = false;
+
+      // 只有旧版本被新 Service Worker 替换时才刷新，首次安装不重复刷新。
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadController || isRefreshing) return;
+        isRefreshing = true;
+        window.location.reload();
+      });
+
       // updateViaCache: 'none' —— 不让浏览器缓存 sw.js 本身，
       // 每次注册/刷新都向网络请求最新 sw.js，确保代码改动能立即被检测到
       navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
@@ -654,10 +701,19 @@ class VocabApp {
             }
           });
         });
-      });
-      // 新 SW 接管后自动刷新页面，保证用户看到最新版本
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        window.location.reload();
+
+        // 页面加载和重新回到前台时主动检查更新，正常刷新即可获取最新版本。
+        const checkForUpdate = () => {
+          reg.update().catch(error => {
+            console.warn('Service Worker 更新检查失败:', error);
+          });
+        };
+        checkForUpdate();
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') checkForUpdate();
+        });
+      }).catch(error => {
+        console.error('Service Worker 注册失败:', error);
       });
     }
 
@@ -688,9 +744,9 @@ class VocabApp {
 
   // ==================== 按分类(字/短语)归档的学习统计 ====================
   // 学习记录按词条分类（word=字 / phrase=短语）分开统计：
-  //   scopeToday = 今日事件数   { word:{mastered,review}, phrase:{mastered,review} }
-  //   scopeTotal = 今日之前的事件数（每日跨天时把 scopeToday 并入对应分类）
-  // 展示时：全部 = 字 + 短语之和；字/短语 = 各自分类。口径与原 todayStats/totalStats 一致。
+  //   scopeToday = 今天学习且当前状态为 mastered/review 的词条数
+  //   scopeTotal = 当前词库中所有 mastered/review 的词条数
+  // 展示时：全部 = 字 + 短语之和；字/短语 = 各自分类。
 
   _emptyScopeStats() {
     return {
@@ -841,7 +897,7 @@ class VocabApp {
 
   /**
    * 更新词库页顶部的范围统计行，显示各分类的词条总数：
-   *   全部（5802） · 字（3836） · 短语（1966），当前词典范围高亮
+   *   全部（5794） · 字（3828） · 短语（1966），当前词典范围高亮
    * 词库数据变化时（导入、删除、编辑、词典范围切换、进入词库页）调用。
    */
   async updateDictTypeSelectLabels() {
@@ -884,17 +940,38 @@ class VocabApp {
   }
 
   /**
-   * 从数据库实时统计当前词典范围内各状态的词条数，缓存到 _cachedStatusCounts。
-   * 用于学习页"累计已掌握/待复习"显示——与词库页按状态筛选的结果完全一致。
+   * 从数据库实时统计当前词典范围的学习状态。
+   * 今日只统计今天学习过、且当前状态为 mastered/review 的词条；
+   * 累计统计当前所有 mastered/review 词条，确保词典增删后数字同步变化。
    * 在以下场景调用：词条状态变更、词典范围切换、初始化、清除进度等。
    */
   async refreshStatusCounts() {
     const allWords = await this.db.getAllWords();
     const scoped = allWords.filter((w) => this.isWordInActiveScope(w));
+    const now = new Date();
+    const today = this._emptyScopeStats();
+    const total = this._emptyScopeStats();
+
+    for (const word of scoped) {
+      if (word.status !== 'mastered' && word.status !== 'review') continue;
+
+      const key = this.scopeKeyOfWord(word);
+      total[key][word.status]++;
+
+      const studiedAt = Number(word.lastStudied);
+      if (Number.isFinite(studiedAt) && new Date(studiedAt).toDateString() === now.toDateString()) {
+        today[key][word.status]++;
+      }
+    }
+
+    this._scopeToday = today;
+    this._scopeTotal = total;
     this._cachedStatusCounts = {
-      mastered: scoped.filter((w) => w.status === 'mastered').length,
-      review: scoped.filter((w) => w.status === 'review').length
+      mastered: total.word.mastered + total.phrase.mastered,
+      review: total.word.review + total.phrase.review
     };
+    this.syncActiveStatsMirrors();
+    await this.persistScopeStats();
   }
 
   /** 清空今日与累计统计（数据管理 - 清除记录时调用） */
@@ -1803,16 +1880,22 @@ class VocabApp {
 
     // 尝试加载之前保存的学习进度
     const savedProgress = await this.loadLearnProgress();
+    const allStoredWords = await this.db.getAllWords();
+    const storedWordsById = new Map(allStoredWords.map((word) => [word.id, word]));
+    const restoredTodayWords = savedProgress?.todayWords
+      ? savedProgress.todayWords.map((word) => storedWordsById.get(word.id)).filter(Boolean)
+      : [];
     
-    // 只有在保存的队列长度与当前每日目标匹配时才恢复进度
+    // 只有保存的队列与当前词典完全对应且长度与每日目标匹配时才恢复进度
     const shouldRestoreProgress = savedProgress && 
                                   savedProgress.todayWords && 
+                                  restoredTodayWords.length === savedProgress.todayWords.length &&
                                   savedProgress.todayWords.length === this.settings.dailyGoal &&
                                   this.currentCardIndex === 0;
     
     if (shouldRestoreProgress) {
-      // 恢复之前的学习进度
-      this.todayWords = savedProgress.todayWords;
+      // 恢复之前的学习进度，并使用数据库中的最新词条内容，避免旧快照覆盖词典更新
+      this.todayWords = restoredTodayWords;
       this.currentCardIndex = savedProgress.currentCardIndex;
       
       // 更新统计数据
@@ -1843,7 +1926,7 @@ class VocabApp {
     }
 
     // 只取当前展示分类（全部/字/短语）的词条；另一分类的词条常驻词库，记录不会被清除
-    const allWords = (await this.db.getAllWords()).filter((w) => this.isWordInActiveScope(w));
+    const allWords = allStoredWords.filter((w) => this.isWordInActiveScope(w));
     
     // 根据重复频率筛选单词
     const frequency = this.settings.repeatFrequency;
@@ -2731,7 +2814,7 @@ class VocabApp {
     document.getElementById('progressFill').style.width = `${progress}%`;
     document.getElementById('progressText').textContent = `${this.currentCardIndex}/${this.settings.dailyGoal}`;
 
-    // 今日统计 = 今日学习动作计数（进度指标）
+    // 今日统计 = 今天学习且当前状态为掌握/待复习的词条数
     document.getElementById('statMastered').textContent = this.todayStats.mastered;
     document.getElementById('statReview').textContent = this.todayStats.review;
 
@@ -2981,6 +3064,7 @@ class VocabApp {
         if (word) {
           const oldStatus = word.status;
           word.status = newStatus;
+          word.lastStudied = Date.now();
           await this.db.updateWord(word);
           
           // 更新学习页面的状态数据

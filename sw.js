@@ -1,10 +1,7 @@
-// ==================== 部署更新说明 ====================
-// 每次推送新版本到 GitHub Pages 前，请将下方 CACHE_NAME
-// 的数字加 1（例如 v4 → v5），浏览器会自动检测 SW 更新、
-// 删除旧缓存并加载最新文件。不需要额外操作。
-// ====================================================
-const CACHE_NAME = 'vocab-app-v1.4.2026.09.11.05';
-const DATA_CACHE_NAME = 'vocab-data-v1.4.2026.09.11.05';
+// 固定的运行时缓存名。代码和词典请求会始终先取网络并覆盖缓存，
+// 因此发布新版本时不需要手动修改缓存版本。
+const CACHE_NAME = 'vocab-app-runtime-v2';
+const DATA_CACHE_NAME = 'vocab-data-runtime-v2';
 
 // 使用相对路径，避免部署在子目录时缓存失效
 const urlsToCache = [
@@ -23,7 +20,14 @@ self.addEventListener('install', event => {
     caches.open(CACHE_NAME)
       .then(cache => {
         console.log('Opened cache');
-        return cache.addAll(urlsToCache);
+        return Promise.all(
+          urlsToCache.map(url =>
+            fetch(url, { cache: 'reload' }).then(response => {
+              if (!response.ok) throw new Error(`Failed to cache ${url}`);
+              return cache.put(url, response);
+            })
+          )
+        );
       })
       .then(() => self.skipWaiting())
   );
@@ -35,7 +39,13 @@ self.addEventListener('activate', event => {
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames.map(cacheName => {
-          if (cacheName !== CACHE_NAME && cacheName !== DATA_CACHE_NAME) {
+          const isManagedCache =
+            cacheName.startsWith('vocab-app-') || cacheName.startsWith('vocab-data-');
+          if (
+            isManagedCache &&
+            cacheName !== CACHE_NAME &&
+            cacheName !== DATA_CACHE_NAME
+          ) {
             console.log('Deleting old cache:', cacheName);
             return caches.delete(cacheName);
           }
@@ -49,28 +59,46 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const request = event.request;
   const url = new URL(request.url);
+  const isSameOrigin = url.origin === self.location.origin;
 
-  // 导航请求：网络优先，离线时回退到缓存的 index.html
-  if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request).catch(() => caches.match('./index.html'))
-    );
+  if (request.method !== 'GET' || !isSameOrigin) {
     return;
   }
 
-  // HTML/CSS/JS 等代码文件：网络优先，确保代码改动立即生效；离线时回退缓存
-  const isCodeAsset = /\.(?:html|css|js)(?:$|\?)/.test(url.pathname);
-  if (isCodeAsset) {
+  /** 网络优先：成功后用最新响应覆盖缓存，离线时回退到缓存。 */
+  const networkFirst = (cacheName, fallbackUrl) => {
     event.respondWith(
-      fetch(request).then(networkResponse => {
-        if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
+      fetch(request, { cache: 'no-cache' })
+        .then(networkResponse => {
+          if (networkResponse && networkResponse.status === 200) {
+            const responseToCache = networkResponse.clone();
+            caches.open(cacheName).then(cache => cache.put(request, responseToCache));
+          }
           return networkResponse;
-        }
-        const responseToCache = networkResponse.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(request, responseToCache));
-        return networkResponse;
-      }).catch(() => caches.match(request))
+        })
+        .catch(async () => {
+          const cachedResponse = await caches.match(request);
+          if (cachedResponse) return cachedResponse;
+          if (fallbackUrl) {
+            const fallbackResponse = await caches.match(fallbackUrl);
+            if (fallbackResponse) return fallbackResponse;
+          }
+          return Response.error();
+        })
     );
+  };
+
+  // 导航请求：网络优先，离线时回退到缓存的 index.html
+  if (request.mode === 'navigate') {
+    networkFirst(CACHE_NAME, './index.html');
+    return;
+  }
+
+  // HTML/CSS/JS 与词典：网络优先，普通刷新即可拿到最新版本
+  const isCodeAsset = /\.(?:html|css|js)(?:$|\?)/.test(url.pathname);
+  const isDictionary = /\/dict\.xlsx$/i.test(url.pathname);
+  if (isCodeAsset || isDictionary) {
+    networkFirst(isDictionary ? DATA_CACHE_NAME : CACHE_NAME);
     return;
   }
 
