@@ -60,7 +60,7 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
+  padding: 14px 20px;
   background: var(--bg-card);
   /* box-shadow: var(--shadow-sm); */
   border-bottom: 1px solid #E8F5E9;
@@ -267,9 +267,9 @@ html, body {
 
 .flashcard {
   width: 100%;
-  /* 高度在 260px ~ 360px 间自适应：随卡片区域空间伸缩，
+  /* 高度在 320px ~ 360px 间自适应：随卡片区域空间伸缩，
      并为下方操作按钮预留约 96px 空间 */
-  height: clamp(260px, calc(100% - 96px), 360px);
+  height: clamp(320px, calc(100% - 96px), 360px);
   background: var(--bg-card);
   border-radius: var(--radius-lg);
   display: flex;

@@ -39,6 +39,26 @@
  * 页面加载完成后（DOMContentLoaded）创建 VocabApp 实例并调用 init() 启动。
  */
 
+// ==================== 卡片滑动过场动画参数 ====================
+/** 卡片滑动过场的缓动曲线：起步快、收尾缓，观感干脆 */
+const CARD_SWIPE_EASE = 'cubic-bezier(0.25, 0.8, 0.35, 1)';
+/** 滑出阶段速度：每滑过一个卡片宽度所需毫秒数，越小越快 */
+const PLAY_SPEED_MS_PER_CARD_WIDTH = 900;
+/** 滑出阶段时长上限（拖动距离很小时也不会太慢） */
+const CARD_EXIT_MAX_MS = 140;
+/** 新卡滑入中央所需毫秒数 */
+const CARD_ENTRY_MS = 140;
+/** 触发切卡的滑动距离阈值（px） */
+const CARD_SWIPE_THRESHOLD = 80;
+/** .card-stack 左右内边距（px），取不到布局时的兜底值 */
+const CARD_STACK_GUTTER_PX = 8;
+/** 滑出终点在“整张离屏”基础上再越界的像素数，留出取整/圆角余量 */
+const CARD_CLEAR_MARGIN_PX = 8;
+/** 换卡落点在滑出终点基础上再越界的像素数，确保换内容瞬间卡片本体不可见 */
+const CARD_PARK_MARGIN_PX = 30;
+/** 新卡入场起点在滑出终点基础上再越界的像素数，0 = 正好接在旧卡离场的位置继续滑入 */
+const CARD_FINISH_MARGIN_PX = 0;
+
 // ==================== IndexedDB 数据库操作（数据层） ====================
 /**
  * 数据层类：对 IndexedDB 的 Promise 化封装。
@@ -1733,7 +1753,9 @@ class VocabApp {
     card.addEventListener('touchend', () => {
       if (!isDragging) return;
       isDragging = false;
-      card.style.transition = 'transform 0.3s ease';
+      // 手指松开的位移占卡片宽度比例：传给 _sequenceCard，让它从卡片当前位置
+      // 无缝接着滑出（同时决定了滑出时长），而不是先跳回某个固定关键帧
+      const releaseRatio = currentX / self._getCardWidth();
       
       // 判断是否为点击（短时间内的触摸）
       const touchDuration = Date.now() - touchStartTime;
@@ -1742,27 +1764,24 @@ class VocabApp {
         // 触摸翻面后仍会触发合成 click，避免与 handleCardClick 重复翻面
         self._suppressNextCardClickFlip = true;
         self.flipCard();
-      } else if (currentX > 80) {
+      } else if (currentX > CARD_SWIPE_THRESHOLD) {
         // 向右滑动（从左往右）- 跳过、下一个单词
-        card.style.transform = 'translateX(150%) rotate(15deg)';
+        // 卡片位置继续沿用拖动时写入的 transform，由 _sequenceCard 接管滑出动画，
+        // 避免插入一个“瞬间跳到画外”的关键帧造成卡顿/空白
         setTimeout(() => {
-          card.style.transition = 'none';
-          card.style.transform = '';
-          self.skipCard();
-        }, 300);
-      } else if (currentX < -80) {
+          self.skipCard(releaseRatio);
+        }, 0);
+      } else if (currentX < -CARD_SWIPE_THRESHOLD) {
         // 向左滑动（从右往左）- 掌握
         // 注意：markMastered 内部只同步推进卡片动画，写库/刷新统计放到后台执行。
         // 切勿改成「await 落库完成后再切卡」，否则卡片会在滑出后的画外位置等待 IO，
         // 产生左滑特有的卡顿闪烁（右滑「跳过」为纯内存操作，故此前无此问题）。
-        card.style.transform = 'translateX(-150%) rotate(-15deg)';
         setTimeout(() => {
-          card.style.transition = 'none';
-          card.style.transform = '';
-          self.markMastered();
-        }, 300);
+          self.markMastered(releaseRatio);
+        }, 0);
       } else {
         // 回到原位
+        card.style.transition = `transform ${CARD_ENTRY_MS}ms ${CARD_SWIPE_EASE}`;
         card.style.transform = '';
       }
       currentX = 0;
@@ -2576,8 +2595,8 @@ class VocabApp {
     this.showToast(word.favorite ? '已添加收藏' : '已取消收藏');
   }
 
-  // 标记为困难
-  markDifficult() {
+  /** 标记为困难；releaseOffset 含义同 skipCard（按钮触发时为 0） */
+  markDifficult(releaseOffset = 0) {
     if (this._cardAnimating) return;
     if (this.currentCardIndex >= this.todayWords.length) return;
 
@@ -2587,14 +2606,18 @@ class VocabApp {
 
     // 切卡动画与落库解耦：先同步推进卡片（与「跳过」一致立即开始滑出/滑入动画），
     // 再把写库、写统计、刷新累计统计放到后台执行，避免 IO 期间卡片停在画外造成卡顿
-    this._sequenceCard('right');
+    this._sequenceCard('right', releaseOffset);
     this._persistStudyAction(word, 'review').catch((err) => {
       console.error('保存「需复习」状态失败:', err);
     });
   }
 
-  // 跳过卡片
-  skipCard() {
+  /**
+   * 跳过卡片。
+   * releaseOffset：滑动松手时卡片位移占卡片宽度的比例（按钮触发时为 0），
+   * 用于让过场动画从卡片当前位置无缝接续。
+   */
+  skipCard(releaseOffset = 0) {
     if (this._cardAnimating) return;
     if (this.currentCardIndex >= this.todayWords.length) return;
 
@@ -2604,7 +2627,7 @@ class VocabApp {
     this.todayWords.push(skipped);
 
     // 复用与「已掌握」相同的过场动画，保证左右滑动观感一致
-    this._sequenceCard('right');
+    this._sequenceCard('right', releaseOffset);
 
     // 持久化学习时间：否则"跳过"的单词在下次会话仍被视为从未学过，
     // 导致重复频率筛选（如 2 天内不再出现）失效。
@@ -2614,8 +2637,8 @@ class VocabApp {
     });
   }
 
-  // 标记为已掌握
-  markMastered() {
+  /** 标记为已掌握；releaseOffset 含义同 skipCard */
+  markMastered(releaseOffset = 0) {
     if (this._cardAnimating) return;
     if (this.currentCardIndex >= this.todayWords.length) return;
 
@@ -2625,7 +2648,7 @@ class VocabApp {
 
     // 同 markDifficult：先同步切卡，落库在后台进行。
     // 这样左滑（已掌握）与右滑（跳过）的动画时序完全一致，不再出现中途闪烁。
-    this._sequenceCard('left');
+    this._sequenceCard('left', releaseOffset);
     this._persistStudyAction(word, 'mastered').catch((err) => {
       console.error('保存「已掌握」状态失败:', err);
     });
@@ -2651,12 +2674,20 @@ class VocabApp {
    * 方向一致的“旧卡滑出 → 新卡滑入”过场：fromDirection 指示滑出方向
    * （left 左滑=已掌握 / right 右滑=跳过）。
    *
-   * 本方法完全同步、发起后立即返回，动画由 setTimeout 自行推进，
-   * 因此调用方可以在触发动画后立刻去做写库等异步工作，两者互不阻塞。
-   * （此前「已掌握」是先 await 完所有落库再切卡，卡片会在画外停留等待 IO，
-   *   表现为左滑时的卡顿闪烁，与右滑「跳过」的顺畅形成差异。）
+   * 时序设计（目的是既快又不出现空白）：
+   *   1. 滑出阶段只把卡片带到“刚好整张离屏”的位置，不空跑；
+   *   2. 换内容发生在卡片已离屏之后、新卡露出之前的那一瞬间，且在画外完成，
+   *      因此画面里始终有卡片，不会出现短暂的空白；
+   *   3. 新卡的入场起点就接在旧卡离屏的位置上，所以两段动画在视觉上是一条
+   *      连续的滑动轨迹（旧卡滑出 → 新卡从同一侧继续滑到中央）。
+   *
+   * releaseOffset 为松手时卡片位移占卡片宽度的比例（按钮/未拖动时为 0）：
+   * 拖动越远，剩余滑出路程越短、滑出越快，避免出现忽快忽慢或空等。
+   *
+   * 本方法完全同步、发起后立即返回，动画由定时器自行推进，因此调用方可以在
+   * 触发动画后立刻去做写库等异步工作，两者互不阻塞。
    */
-  _sequenceCard(fromDirection = 'right') {
+  _sequenceCard(fromDirection = 'right', releaseOffset = 0) {
     // 防抖：过场动画进行中忽略重复触发，避免索引与动画错位
     if (this._cardAnimating) return;
     this.currentCardIndex++;
@@ -2668,34 +2699,80 @@ class VocabApp {
     }
 
     const card = document.getElementById('flashcard');
-    const exitX = fromDirection === 'left' ? '-150%' : '150%';
-    const exitRotate = fromDirection === 'left' ? '-15deg' : '15deg';
-    const entryX = fromDirection === 'left' ? '150%' : '-150%';
-    const entryRotate = fromDirection === 'left' ? '15deg' : '-15deg';
+    const sign = fromDirection === 'left' ? -1 : 1;
+
+    // 卡片宽度与左右留白（.card-stack 有 8px 内边距）：用于算出“刚好整张移出可视区”的精确距离
+    const cardWidth = this._getCardWidth();
+    const startPx = releaseOffset * cardWidth;
+    const clearPx = cardWidth + CARD_CLEAR_MARGIN_PX - this._getCardGutterPx();
+
+    // 关键帧位移（px，正=向右滑出，负=向左滑出）：
+    //   startPx   松手时卡片所在位置（按钮触发时为 0=居中）
+    //   clearPx   卡片“刚好整张离开可视区”的位置，滑出动画只跑到这里为止
+    //   parkPx    换卡落点：再往画外多走一点，确保换内容瞬间卡片本体不可见
+    //   finishPx  新卡入场起点，接在旧卡离屏处，视觉上轨迹连续
+    const parkPx = clearPx + CARD_PARK_MARGIN_PX;
+    const finishPx = clearPx + CARD_FINISH_MARGIN_PX;
+
+    // 滑出时长按剩余可见路程换算：拖得越远，剩下的路越短、滑得越快
+    const visibleTravelPx = Math.abs(sign * clearPx - startPx);
+    const exitMs = Math.round(
+      Math.min(PLAY_SPEED_MS_PER_CARD_WIDTH * (visibleTravelPx / cardWidth), CARD_EXIT_MAX_MS)
+    );
 
     this._cardAnimating = true;
-    card.style.transition = 'transform 0.3s ease';
-    card.style.transform = `translateX(${exitX}) rotate(${exitRotate})`;
+    card.style.transition = `transform ${exitMs}ms ${CARD_SWIPE_EASE}`;
+    card.style.transform = this._cardTransform(sign * clearPx, cardWidth);
 
-    // 滑出阶段：与左右滑动各自 0.3s 的滑出时长保持一致
     setTimeout(() => {
-      // 卡片已完全移出可视区，此刻可以无闪烁地换成下一张并摆到入场位
+      // 此刻旧卡整张已离开可视区：关掉过渡，在看不见的位置换内容并挪到入场起点。
+      // （强制一次样式刷新，确保这个“硬”位置被浏览器采纳，否则紧接着重新启用
+      //   过渡时可能被合并掉而失去补间起点）
       card.style.transition = 'none';
-      card.style.transform = `translateX(${entryX}) rotate(${entryRotate})`;
+      card.style.transform = this._cardTransform(sign * parkPx, cardWidth);
+      void card.offsetWidth;
+      card.style.transform = this._cardTransform(sign * finishPx, cardWidth);
       this.showCard(this.currentCardIndex);
-      // 等一帧让入场位置生效后再启用过渡，避免与滑出动画粘连
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          card.style.transition = 'transform 0.3s ease';
-          card.style.transform = '';
-          this._cardAnimating = false;
-          this.schedulePhoneticReadAfterCardSwitch();
-        });
-      });
-    }, 300);
+
+      // 下一帧立即启用过渡并归位：没有额外等待，新卡紧接着滑入
+      const slideIn = () => {
+        card.style.transition = `transform ${CARD_ENTRY_MS}ms ${CARD_SWIPE_EASE}`;
+        card.style.transform = '';
+      };
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(slideIn);
+      } else {
+        setTimeout(slideIn, 16);
+      }
+      this._cardAnimating = false;
+      this.schedulePhoneticReadAfterCardSwitch();
+    }, exitMs);
 
     this.updateProgress();
     this.refreshGoalSliderLockedState();
+  }
+
+  /** 生成卡片平移+旋转的 transform 字符串；translatePx 为位移像素（正=向右滑出） */
+  _cardTransform(translatePx, cardWidth) {
+    const rotateDeg = cardWidth > 0 ? (translatePx / cardWidth) * 10 : 0;
+    return `translateX(${Math.round(translatePx)}px) rotate(${rotateDeg}deg)`;
+  }
+
+  /** 取卡片宽度（px），用于把触摸位移换算成像素；拿不到时退回视口宽度的 85% */
+  _getCardWidth() {
+    const card = document.getElementById('flashcard');
+    const w = card ? card.getBoundingClientRect().width : 0;
+    if (w > 0) return w;
+    return (window.innerWidth || 360) * 0.85;
+  }
+
+  /** 卡片左右留白（px）：用于计算“刚好整张移出可视区”的位置 */
+  _getCardGutterPx() {
+    const stack = document.querySelector('.card-stack');
+    if (!stack) return CARD_STACK_GUTTER_PX;
+    const rect = stack.getBoundingClientRect();
+    // 词卡在 card-stack 内左右各留 padding，卡片宽度之外的这部分就是画外余量
+    return Math.max(0, (rect.width - this._getCardWidth()) / 2) || CARD_STACK_GUTTER_PX;
   }
 
   /** 取消尚未触发的“自动朗读音标”定时器（切页/重建队列时调用，避免对着旧卡片朗读） */
