@@ -274,6 +274,8 @@ class VocabApp {
     this._scopeTotal = this._emptyScopeStats();
     /** 触摸翻面后浏览器会合成 click，需忽略下一次点击避免立刻翻回正面 */
     this._suppressNextCardClickFlip = false;
+    /** 卡片“滑出→滑入”过场动画是否进行中；用于防止动画期间重复触发导致索引与动画错位 */
+    this._cardAnimating = false;
     this._phoneticReadTimer = null;
 /** 词库列表当前展示的词条 id → 对象，避免点击喇叭时 await IndexedDB 导致用户手势失效而无法发声 */
     this._librarySpeakWordsById = new Map();
@@ -1750,6 +1752,9 @@ class VocabApp {
         }, 300);
       } else if (currentX < -80) {
         // 向左滑动（从右往左）- 掌握
+        // 注意：markMastered 内部只同步推进卡片动画，写库/刷新统计放到后台执行。
+        // 切勿改成「await 落库完成后再切卡」，否则卡片会在滑出后的画外位置等待 IO，
+        // 产生左滑特有的卡顿闪烁（右滑「跳过」为纯内存操作，故此前无此问题）。
         card.style.transform = 'translateX(-150%) rotate(-15deg)';
         setTimeout(() => {
           card.style.transition = 'none';
@@ -2572,87 +2577,123 @@ class VocabApp {
   }
 
   // 标记为困难
-  async markDifficult() {
+  markDifficult() {
+    if (this._cardAnimating) return;
     if (this.currentCardIndex >= this.todayWords.length) return;
-    
+
     const word = this.todayWords[this.currentCardIndex];
     word.status = 'review';
     word.lastStudied = Date.now(); // 记录学习时间
-    await this.db.updateWord(word);
-    // 按词条分类（字/短语）归档今日统计
-    await this.bumpScopeStats(word, 'review', 1);
-    
-    // 保存学习进度
-    await this.saveLearnProgress();
 
-    // 刷新累计统计缓存（状态已变更，确保与词库页一致）
-    await this.refreshStatusCounts();
-
-    //this.showToast('已标记为需复习');// 请勿删除该注释
-      this.nextCard('right');
+    // 切卡动画与落库解耦：先同步推进卡片（与「跳过」一致立即开始滑出/滑入动画），
+    // 再把写库、写统计、刷新累计统计放到后台执行，避免 IO 期间卡片停在画外造成卡顿
+    this._sequenceCard('right');
+    this._persistStudyAction(word, 'review').catch((err) => {
+      console.error('保存「需复习」状态失败:', err);
+    });
   }
 
   // 跳过卡片
   skipCard() {
-    // 将当前卡片移到队列末尾
+    if (this._cardAnimating) return;
+    if (this.currentCardIndex >= this.todayWords.length) return;
+
+    // 将当前卡片移到队列末尾（纯内存操作，立即完成，保证下一张内容可同步渲染）
     const skipped = this.todayWords.splice(this.currentCardIndex, 1)[0];
     skipped.lastStudied = Date.now(); // 记录学习时间
-    // 持久化学习时间：否则"跳过"的单词在下次会话仍被视为从未学过，
-    // 导致重复频率筛选（如 2 天内不再出现）失效
-    this.db.updateWord(skipped).catch((err) => console.error('保存跳过学习时间失败:', err));
     this.todayWords.push(skipped);
-    this.showCard(this.currentCardIndex);
-    this.schedulePhoneticReadAfterCardSwitch();
+
+    // 复用与「已掌握」相同的过场动画，保证左右滑动观感一致
+    this._sequenceCard('right');
+
+    // 持久化学习时间：否则"跳过"的单词在下次会话仍被视为从未学过，
+    // 导致重复频率筛选（如 2 天内不再出现）失效。
+    // 落库放到动画开始之后，与滑动动画解耦，避免阻塞过场。
+    Promise.resolve(this.db.updateWord(skipped)).catch((err) => {
+      console.error('保存跳过学习时间失败:', err);
+    });
   }
 
   // 标记为已掌握
-  async markMastered() {
+  markMastered() {
+    if (this._cardAnimating) return;
     if (this.currentCardIndex >= this.todayWords.length) return;
-    
+
     const word = this.todayWords[this.currentCardIndex];
     word.status = 'mastered';
     word.lastStudied = Date.now(); // 记录学习时间
-    await this.db.updateWord(word);
-    // 按词条分类（字/短语）归档今日统计
-    await this.bumpScopeStats(word, 'mastered', 1);
-    
-    // 保存学习进度
-    await this.saveLearnProgress();
 
-    // 刷新累计统计缓存（状态已变更，确保与词库页一致）
-    await this.refreshStatusCounts();
-
-    // this.showToast('太棒了！已掌握'); // 请勿删除该注释
-    this.nextCard('left');
+    // 同 markDifficult：先同步切卡，落库在后台进行。
+    // 这样左滑（已掌握）与右滑（跳过）的动画时序完全一致，不再出现中途闪烁。
+    this._sequenceCard('left');
+    this._persistStudyAction(word, 'mastered').catch((err) => {
+      console.error('保存「已掌握」状态失败:', err);
+    });
   }
 
   /**
-   * 前进到下一张卡片（掌握/陌生操作后调用）。
-   * fromDirection 指示滑出方向（left 左滑/right 右滑），用于做方向一致的
-   * “旧卡滑出 → 新卡滑入”动画；已经是最后一张时显示完成页。
+   * 持久化一次学习动作（掌握 mastered / 需复习 review）。
+   * 写词条状态 → 归档今日分类统计 → 保存学习进度 → 刷新累计统计缓存。
+   * 注意：本方法不参与任何动画时序，仅供后台调用，异常由调用方捕获。
    */
-  nextCard(fromDirection = 'right') {
+  async _persistStudyAction(word, kind) {
+    if (!word) return;
+    await this.db.updateWord(word);
+    // 按词条分类（字/短语）归档今日统计
+    await this.bumpScopeStats(word, kind, 1);
+    // 保存学习进度
+    await this.saveLearnProgress();
+    // 刷新累计统计缓存（状态已变更，确保与词库页一致）
+    await this.refreshStatusCounts();
+  }
+
+  /**
+   * 方向一致的“旧卡滑出 → 新卡滑入”过场：fromDirection 指示滑出方向
+   * （left 左滑=已掌握 / right 右滑=跳过）。
+   *
+   * 本方法完全同步、发起后立即返回，动画由 setTimeout 自行推进，
+   * 因此调用方可以在触发动画后立刻去做写库等异步工作，两者互不阻塞。
+   * （此前「已掌握」是先 await 完所有落库再切卡，卡片会在画外停留等待 IO，
+   *   表现为左滑时的卡顿闪烁，与右滑「跳过」的顺畅形成差异。）
+   */
+  _sequenceCard(fromDirection = 'right') {
+    // 防抖：过场动画进行中忽略重复触发，避免索引与动画错位
+    if (this._cardAnimating) return;
     this.currentCardIndex++;
     if (this.currentCardIndex >= this.todayWords.length) {
       this.showComplete();
-    } else {
-      const card = document.getElementById('flashcard');
-      const exitX = fromDirection === 'left' ? '-150%' : '150%';
-      const exitRotate = fromDirection === 'left' ? '-15deg' : '15deg';
-      const entryX = fromDirection === 'left' ? '150%' : '-150%';
-      const entryRotate = fromDirection === 'left' ? '15deg' : '-15deg';
-      card.style.transform = `translateX(${exitX}) rotate(${exitRotate})`;
-      setTimeout(() => {
-        card.style.transition = 'none';
-        card.style.transform = `translateX(${entryX}) rotate(${entryRotate})`;
-        this.showCard(this.currentCardIndex);
-        setTimeout(() => {
+      this.updateProgress();
+      this.refreshGoalSliderLockedState();
+      return;
+    }
+
+    const card = document.getElementById('flashcard');
+    const exitX = fromDirection === 'left' ? '-150%' : '150%';
+    const exitRotate = fromDirection === 'left' ? '-15deg' : '15deg';
+    const entryX = fromDirection === 'left' ? '150%' : '-150%';
+    const entryRotate = fromDirection === 'left' ? '15deg' : '-15deg';
+
+    this._cardAnimating = true;
+    card.style.transition = 'transform 0.3s ease';
+    card.style.transform = `translateX(${exitX}) rotate(${exitRotate})`;
+
+    // 滑出阶段：与左右滑动各自 0.3s 的滑出时长保持一致
+    setTimeout(() => {
+      // 卡片已完全移出可视区，此刻可以无闪烁地换成下一张并摆到入场位
+      card.style.transition = 'none';
+      card.style.transform = `translateX(${entryX}) rotate(${entryRotate})`;
+      this.showCard(this.currentCardIndex);
+      // 等一帧让入场位置生效后再启用过渡，避免与滑出动画粘连
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
           card.style.transition = 'transform 0.3s ease';
           card.style.transform = '';
+          this._cardAnimating = false;
           this.schedulePhoneticReadAfterCardSwitch();
-        }, 20);
-      }, 150);
-    }
+        });
+      });
+    }, 300);
+
     this.updateProgress();
     this.refreshGoalSliderLockedState();
   }
