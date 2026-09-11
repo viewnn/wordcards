@@ -638,7 +638,9 @@ class VocabApp {
   /** 注册 Service Worker（sw.js）实现离线缓存；发现新版本时让其立即激活并自动刷新页面 */
   initServiceWorker() {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js').then(reg => {
+      // updateViaCache: 'none' —— 不让浏览器缓存 sw.js 本身，
+      // 每次注册/刷新都向网络请求最新 sw.js，确保代码改动能立即被检测到
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
         // 检测到新 SW 安装后，通知它立即激活
         const updateSW = (worker) => {
           worker.postMessage({ type: 'SKIP_WAITING' });
@@ -656,6 +658,15 @@ class VocabApp {
       // 新 SW 接管后自动刷新页面，保证用户看到最新版本
       navigator.serviceWorker.addEventListener('controllerchange', () => {
         window.location.reload();
+      });
+    }
+
+    // 请求持久化存储，降低浏览器自动清理 IndexedDB 的概率
+    if (navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist().then(persisted => {
+        if (persisted) {
+          console.log('[Storage] 持久化存储已启用，学习记录不易被清除');
+        }
       });
     }
   }
@@ -2924,6 +2935,9 @@ class VocabApp {
     }
     
     container.innerHTML = html;
+
+    // 渲染完成后同步喇叭按钮的可用状态（语音开关关闭时置灰）
+    this.refreshSpeechDependentToggles();
 
     // 绑定编辑和删除事件
     container.querySelectorAll('.library-speak-btn').forEach((btn) => {
