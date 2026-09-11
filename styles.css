@@ -168,7 +168,11 @@ html, body {
   /* 用 min-height 代替固定 height：高度不足时容器可撑开，
      由 .page-content 出滚动条，而不是卡片溢出遮挡下方按钮 */
   min-height: 100%;
-  padding: 8px 8px 72px;
+  /* 底部不留多余留白：卡片下方就是 .card-actions（三个操作按钮），
+     按钮自身已带内边距，此前额外的 72px 会顶出一条空白带，
+     把卡片挤矮、并在按钮与底部导航之间留下大空隙。
+     只保留 8px 与左右一致的基础内边距 */
+  padding: 8px;
   box-sizing: border-box;
   background: white;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
@@ -250,9 +254,10 @@ html, body {
 .card-stack {
   width: 100%;
   height: auto;
+  /* flex: 1 让卡片区域吃掉进度条/统计/按钮之外的全部剩余高度 */
   flex: 1;
   /* 卡片+按钮组不小于其内容高度：空间不足时容器撑开、页面出滚动条，
-     避免卡片溢出遮挡下方操作按钮（260 卡片 + 80 按钮 + 12 上下内边距） */
+     避免卡片溢出遮挡下方操作按钮（300 卡片 + 52 按钮区 ≥ 352） */
   min-height: 352px;
   position: relative;
   perspective: 1000px;
@@ -267,9 +272,12 @@ html, body {
 
 .flashcard {
   width: 100%;
-  /* 高度在 320px ~ 360px 间自适应：随卡片区域空间伸缩，
-     并为下方操作按钮预留约 96px 空间 */
-  height: clamp(320px, calc(100% - 96px), 360px);
+  /* 高度随可用空间伸缩：短屏压到 300px 仍可阅读，长屏最多长到 520px，
+     把卡片区域下方的余量吃满，避免按钮与底部导航之间出现大片空白 */
+  height: clamp(300px, calc(100% - 96px), 480px);
+  /* 卡片高度由上面的 clamp 决定，不允许被压缩，
+     否则短屏上会先挤卡片、再出现按钮下方的空白 */
+  flex-shrink: 0;
   background: var(--bg-card);
   border-radius: var(--radius-lg);
   display: flex;
@@ -1486,7 +1494,10 @@ html, body {
 /* ==================== 响应�?==================== */
 @media (max-width: 380px) {
   .flashcard {
-    height: 380px;
+    /* 不要写死高度：写死会在窄屏设备上顶掉上面的自适应计算，
+       让卡片比可用空间更高，把按钮往上挤、下方露出一条空白带。
+       这里只把上限调低一点，仍随可用空间伸缩 */
+    height: clamp(280px, calc(100% - 96px), 460px);
     padding: 24px;
   }
   
