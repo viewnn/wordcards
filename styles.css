@@ -169,10 +169,10 @@ html, body {
      由 .page-content 出滚动条，而不是卡片溢出遮挡下方按钮 */
   min-height: 100%;
   /* 底部不留多余留白：卡片下方就是 .card-actions（三个操作按钮），
-     按钮自身已带内边距，此前额外的 72px 会顶出一条空白带，
+     按钮自身已带内边距，此前额外的 72px(36px) 会顶出一条空白带，
      把卡片挤矮、并在按钮与底部导航之间留下大空隙。
      只保留 8px 与左右一致的基础内边距 */
-  padding: 8px;
+  padding: 8px 8px 36px;
   box-sizing: border-box;
   background: white;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
@@ -278,7 +278,7 @@ html, body {
   /* 卡片高度由上面的 clamp 决定，不允许被压缩，
      否则短屏上会先挤卡片、再出现按钮下方的空白 */
   /* 防止被压缩：flex-shrink: 0; */
-  /* flex-shrink: 0; */
+  flex-shrink: 0; 
   background: var(--bg-card);
   border-radius: var(--radius-lg);
   display: flex;
