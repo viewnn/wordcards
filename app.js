@@ -288,6 +288,14 @@ class VocabApp {
     };
     this.searchQuery = '';            // 词库页搜索框内容（已转小写）
     this.filterStatus = 'all';        // 词库页状态筛选：all/new/review/mastered/favorite
+    /**
+     * 词库页是否只显示“今天学过的那些”词条。
+     * 仅当用户从学习卡上方的「今日已掌握 / 今日待复习」点进来时为 true，
+     * 直接切到词库页或手动切换选项卡都会复位为 false（累计口径）。
+     */
+    this._libraryTodayOnly = false;
+    /** _libraryTodayOnly 为 true 时限定只显示该状态（mastered / review） */
+    this._libraryTodayKind = null;
     /** 按分类(字/短语)归档的今日统计：{ word:{mastered,review}, phrase:{mastered,review} } */
     this._scopeToday = this._emptyScopeStats();
     /** 按分类(字/短语)归档的今日之前累计统计（每日跨天时并入） */
@@ -952,48 +960,51 @@ class VocabApp {
     }
   }
 
-  /** 记录某词条的一次学习动作（kind: mastered/review，delta ±1），并按该词条分类归档 */
-  async bumpScopeStats(word, kind, delta) {
-    if (!word) return;
-    const key = this.scopeKeyOfWord(word);
-    this._scopeToday[key][kind] = Math.max(0, (Number(this._scopeToday[key][kind]) || 0) + delta);
-    this.syncActiveStatsMirrors();
-    await this.persistScopeStats();
-  }
-
   /**
    * 从数据库实时统计当前词典范围的学习状态。
-   * 今日只统计今天学习过、且当前状态为 mastered/review 的词条；
-   * 累计统计当前所有 mastered/review 词条，确保词典增删后数字同步变化。
-   * 在以下场景调用：词条状态变更、词典范围切换、初始化、清除进度等。
+   * 今日统计“今天学习过、且当前状态为 mastered/review”的词条，
+   * 累计统计当前所有 mastered/review 词条。
+   *
+   * 这是学习统计的唯一口径：词条状态一变就整体重算，而不是在旧数字上做加减。
+   * 否则把同一张卡先点「掌握」再点「陌生」时，掌握数不会因为状态改变而回退，
+   * 两个数字会同时虚增（今日已掌握/累计已掌握各多 1，今日待复习/累计待复习各多 1）。
+   *
+   * 用 in-flight 队列串行化：连续操作时避免并发读库拿到旧状态，
+   * 且在飞期间新来的请求排在上一次之后，保证最终数字对应最新状态。
    */
-  async refreshStatusCounts() {
-    const allWords = await this.db.getAllWords();
-    const scoped = allWords.filter((w) => this.isWordInActiveScope(w));
-    const now = new Date();
-    const today = this._emptyScopeStats();
-    const total = this._emptyScopeStats();
+  refreshStatusCounts() {
+    const run = async () => {
+      const allWords = await this.db.getAllWords();
+      const scoped = allWords.filter((w) => this.isWordInActiveScope(w));
+      const now = new Date();
+      const today = this._emptyScopeStats();
+      const total = this._emptyScopeStats();
 
-    for (const word of scoped) {
-      if (word.status !== 'mastered' && word.status !== 'review') continue;
+      for (const word of scoped) {
+        if (word.status !== 'mastered' && word.status !== 'review') continue;
 
-      const key = this.scopeKeyOfWord(word);
-      total[key][word.status]++;
+        const key = this.scopeKeyOfWord(word);
+        total[key][word.status]++;
 
-      const studiedAt = Number(word.lastStudied);
-      if (Number.isFinite(studiedAt) && new Date(studiedAt).toDateString() === now.toDateString()) {
-        today[key][word.status]++;
+        const studiedAt = Number(word.lastStudied);
+        if (Number.isFinite(studiedAt) && new Date(studiedAt).toDateString() === now.toDateString()) {
+          today[key][word.status]++;
+        }
       }
-    }
 
-    this._scopeToday = today;
-    this._scopeTotal = total;
-    this._cachedStatusCounts = {
-      mastered: total.word.mastered + total.phrase.mastered,
-      review: total.word.review + total.phrase.review
+      this._scopeToday = today;
+      this._scopeTotal = total;
+      this._cachedStatusCounts = {
+        mastered: total.word.mastered + total.phrase.mastered,
+        review: total.word.review + total.phrase.review
+      };
+      this.syncActiveStatsMirrors();
+      this.updateProgress();
+      await this.persistScopeStats();
     };
-    this.syncActiveStatsMirrors();
-    await this.persistScopeStats();
+
+    this._statusCountsChain = (this._statusCountsChain || Promise.resolve()).then(run, run);
+    return this._statusCountsChain;
   }
 
   /** 清空今日与累计统计（数据管理 - 清除记录时调用） */
@@ -1209,6 +1220,8 @@ class VocabApp {
         document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
         this.filterStatus = tab.dataset.filter;
+        // 手动切换选项卡 = 看累计口径，清除“今日已掌握/今日待复习”带过来的今日筛选
+        this.resetLibraryTodayFilter();
         this.resetPageNum();
         this.renderLibrary();
       });
@@ -1272,23 +1285,42 @@ class VocabApp {
 
   /**
    * 分类下拉框触发按钮的文字：
-   * 默认按当前词典范围显示（全部 / 字 / 短语）；
-   * 仅当用户精确勾选了某一个分类时才显示该分类名。
+   * - 默认显示当前词典范围（全部 / 字 / 短语）+ 当前选项卡的词条数量，如「字（27）」；
+   * - 仅当用户精确勾选了某一个分类时才显示该分类名 + 数量。
+   *
+   * 数量用与 renderLibrary 完全相同的筛选条件（applyLibraryFilters）现算，
+   * 因此「标签上的数字」永远等于「列表里的条目数」，切换选项卡/开关今日筛选、
+   * 切换词典范围或分类勾选后都会同步。
    */
-  updateCategoryLabel() {
+  async updateCategoryLabel() {
     const label = document.getElementById('categoryLabel');
     if (!label) return;
+
     const boxes = document.querySelectorAll('#categoryOptions input[type="checkbox"]');
     const checkedBoxes = document.querySelectorAll('#categoryOptions input[type="checkbox"]:checked');
+
+    let name;
     if (boxes.length > 0 && checkedBoxes.length === 1) {
-      label.textContent = checkedBoxes[0].dataset.category;
+      name = checkedBoxes[0].dataset.category;
     } else {
-      label.textContent = this.getDictScopeLabel();
+      name = this.getDictScopeLabel();
     }
+
+    // 先按已知结果刷新，避免等待读库期间数字停留在上一次选项卡的值
+    const known = typeof this._libraryTabCount === 'number' ? this._libraryTabCount : null;
+    label.textContent = known === null ? name : `${name}（${known}）`;
+
+    const allWords = await this.db.getAllWords();
+    const fresh = this.applyLibraryFilters(allWords).length;
+    this._libraryTabCount = fresh;
+    label.textContent = `${name}（${fresh}）`;
   }
   
   // 渲染分类选项（仅当前展示分类内的词条；词典短语/字不设单独勾选项）
   async renderCategoryOptions() {
+    // 进入词库页时先清掉上一次的计数，避免下拉按钮短暂显示过期数字；
+    // 真正的数量由随后的 renderLibrary / updateCategoryLabel 现算并写入
+    this._libraryTabCount = null;
     const words = (await this.db.getAllWords()).filter((w) => this.isWordInActiveScope(w));
     const categories = [...new Set(words.map((w) => w.category || '未分类'))];
     const container = document.getElementById('categoryOptions');
@@ -1855,6 +1887,11 @@ class VocabApp {
       this.renderLibrary();
     } else if (page === 'settings') {
       this.renderSettings();
+    }
+
+    // 离开词库页即结束“只看今天学过”的筛选，避免下次直接进词库时列表仍是今日口径
+    if (page !== 'library') {
+      this.resetLibraryTodayFilter();
     }
   }
 
@@ -2607,7 +2644,7 @@ class VocabApp {
     // 切卡动画与落库解耦：先同步推进卡片（与「跳过」一致立即开始滑出/滑入动画），
     // 再把写库、写统计、刷新累计统计放到后台执行，避免 IO 期间卡片停在画外造成卡顿
     this._sequenceCard('right', releaseOffset);
-    this._persistStudyAction(word, 'review').catch((err) => {
+    this._persistStudyAction(word).catch((err) => {
       console.error('保存「需复习」状态失败:', err);
     });
   }
@@ -2649,24 +2686,28 @@ class VocabApp {
     // 同 markDifficult：先同步切卡，落库在后台进行。
     // 这样左滑（已掌握）与右滑（跳过）的动画时序完全一致，不再出现中途闪烁。
     this._sequenceCard('left', releaseOffset);
-    this._persistStudyAction(word, 'mastered').catch((err) => {
+    this._persistStudyAction(word).catch((err) => {
       console.error('保存「已掌握」状态失败:', err);
     });
   }
 
   /**
-   * 持久化一次学习动作（掌握 mastered / 需复习 review）。
-   * 写词条状态 → 归档今日分类统计 → 保存学习进度 → 刷新累计统计缓存。
+   * 持久化一次学习动作（掌握 mastered / 需复习 review）：
+   * 写词条状态 → 保存学习进度 → 按最新状态重算今日/累计统计。
+   *
+   * 统计不能用「在旧数字上 +1」的方式累加：同一张卡今天先点掌握、再改点陌生时，
+   * 掌握数不会因为状态被改掉而回退，两个数字就会同时虚增。
+   * 这里统一交给 refreshStatusCounts() 依据词条的最终状态整体重算，保证与
+   * 「今日=今天学过且当前状态为掌握/待复习」「累计=当前所有掌握/待复习」的口径一致。
+   *
    * 注意：本方法不参与任何动画时序，仅供后台调用，异常由调用方捕获。
    */
-  async _persistStudyAction(word, kind) {
+  async _persistStudyAction(word) {
     if (!word) return;
     await this.db.updateWord(word);
-    // 按词条分类（字/短语）归档今日统计
-    await this.bumpScopeStats(word, kind, 1);
     // 保存学习进度
     await this.saveLearnProgress();
-    // 刷新累计统计缓存（状态已变更，确保与词库页一致）
+    // 按最新词条状态重算今日/累计统计（含学习页与词库页显示）
     await this.refreshStatusCounts();
   }
 
@@ -2964,24 +3005,38 @@ class VocabApp {
     }
   }
   
-  // 处理统计数字点击
+  /**
+   * 从学习卡上方的「今日已掌握 / 今日待复习」跳到词库页：
+   * 这两个数字是“今日”口径，因此同时打开“只看今天学过的”筛选，
+   * 让列表条数与数字对得上；从词库菜单直接进来时不会带上这个筛选（累计口径）。
+   */
   handleStatClick(filter) {
     const count = filter === 'mastered' ? this.todayStats.mastered : this.todayStats.review;
     if (count >= 1) {
       this.filterStatus = filter;
+      this._libraryTodayOnly = true;
+      this._libraryTodayKind = filter;
       this.switchPage('library');
     }
   }
 
-  // 累计统计点击处理（用缓存的真实状态计数判断，与词库页一致）
+  /** 「累计已掌握 / 累计待复习」是累计口径，跳转后按状态筛选全部，不加“今日”条件 */
   handleTotalStatClick(filter) {
     const count = filter === 'mastered'
       ? this._cachedStatusCounts.mastered
       : this._cachedStatusCounts.review;
     if (count >= 1) {
       this.filterStatus = filter;
+      this._libraryTodayOnly = false;
+      this._libraryTodayKind = null;
       this.switchPage('library');
     }
+  }
+
+  /** 关闭“只看今天学过的”筛选（离开词库页、或手动切换选项卡时调用） */
+  resetLibraryTodayFilter() {
+    this._libraryTodayOnly = false;
+    this._libraryTodayKind = null;
   }
 
   // 显示完成页面
@@ -3011,6 +3066,55 @@ class VocabApp {
   }
 
   // ==================== 词库页面 ====================
+
+  /**
+   * 按当前条件筛选词库列表：词典范围 → 状态选项卡 → 分类多选 → 搜索词。
+   * 与分类下拉按钮上的数量、以及 renderLibrary 实际渲染的列表共用同一套条件，
+   * 保证「标签上的数字」和「列表里的条目」永远一致。
+   *
+   * 当 _libraryTodayOnly 为 true（用户从学习卡的「今日已掌握/今日待复习」点进来）时，
+   * 额外只保留 lastStudied 是今天的词条，这样列表条数与该数字对得上。
+   */
+  applyLibraryFilters(allWords) {
+    let words = allWords.filter((w) => this.isWordInActiveScope(w));
+
+    // 状态选项卡
+    const status = this._libraryTodayOnly ? (this._libraryTodayKind || this.filterStatus) : this.filterStatus;
+    if (status === 'favorite') {
+      words = words.filter((w) => w.favorite);
+    } else if (status !== 'all') {
+      words = words.filter((w) => w.status === status);
+    }
+
+    // “只看今天学过”的（仅今日已掌握/今日待复习入口会打开）
+    if (this._libraryTodayOnly) {
+      const todayKey = new Date().toDateString();
+      words = words.filter((w) => {
+        const t = Number(w.lastStudied);
+        return Number.isFinite(t) && new Date(t).toDateString() === todayKey;
+      });
+    }
+
+    // 分类多选
+    if (this.selectedCategories && this.selectedCategories.length > 0) {
+      words = words.filter((w) => this.selectedCategories.includes(w.category || '未分类'));
+    }
+
+    // 搜索（支持单词、释义、粤拼、粤语字、粤语例句搜索）
+    if (this.searchQuery) {
+      const q = this.searchQuery;
+      words = words.filter((w) => {
+        const mean = (w.definition || w.meaning || '').toLowerCase();
+        const phon = (w.phonetic || w.jyutping || '').toLowerCase();
+        const canto = (w.cantonese || '').toLowerCase();
+        const cantoEx = (w.cantoneseExample || w.example || '').toLowerCase();
+        return w.word.toLowerCase().includes(q) || mean.includes(q) || phon.includes(q) || canto.includes(q) || cantoEx.includes(q);
+      });
+    }
+
+    return words;
+  }
+
   async renderLibrary() {
     // 先刷新顶部范围统计行（数量可能因词典范围切换/词条状态变更而变）
     await this.updateDictTypeSelectLabels();
@@ -3019,36 +3123,15 @@ class VocabApp {
     document.querySelectorAll('.filter-tab').forEach(tab => {
       tab.classList.toggle('active', tab.dataset.filter === this.filterStatus);
     });
-    
-    // 仅展示当前分类（全部/字/短语）的词条
-    let words = (await this.db.getAllWords()).filter((w) => this.isWordInActiveScope(w));
-    
-    // 应用状态筛选（包括收藏筛选）
-    if (this.filterStatus !== 'all') {
-      if (this.filterStatus === 'favorite') {
-        words = words.filter(w => w.favorite);
-      } else {
-        words = words.filter(w => w.status === this.filterStatus);
-      }
-    }
-    
-    // 应用分类筛选
-    if (this.selectedCategories && this.selectedCategories.length > 0) {
-      words = words.filter((w) => this.selectedCategories.includes(w.category || '未分类'));
-    }
-    
-    // 应用搜索（支持单词、释义、粤拼、粤语字、粤语例句搜索）
-    if (this.searchQuery) {
-      const q = this.searchQuery;
-      words = words.filter(w => {
-        const mean = (w.definition || w.meaning || '').toLowerCase();
-        const phon = (w.phonetic || w.jyutping || '').toLowerCase();
-        const canto = (w.cantonese || '').toLowerCase();
-        const cantoEx = (w.cantoneseExample || w.example || '').toLowerCase();
-        return w.word.toLowerCase().includes(q) || mean.includes(q) || phon.includes(q) || canto.includes(q) || cantoEx.includes(q);
-      });
-    }
-    
+
+    // 当前选项卡下的词条（范围/状态/今日/分类/搜索条件完全一致 → 列表条数即标签数字）
+    const allWords = await this.db.getAllWords();
+    const words = this.applyLibraryFilters(allWords);
+
+    // 分类下拉按钮上显示当前选项卡的词条数量，如「字（27）」
+    this._libraryTabCount = words.length;
+    this.updateCategoryLabel();
+
     const container = document.getElementById('libraryWords');
     
     if (words.length === 0) {
@@ -3180,7 +3263,6 @@ class VocabApp {
         const words = await this.db.getAllWords();
         const word = words.find(w => w.id === id);
         if (word) {
-          const oldStatus = word.status;
           word.status = newStatus;
           word.lastStudied = Date.now();
           await this.db.updateWord(word);
@@ -3191,17 +3273,8 @@ class VocabApp {
             if (todayWordIndex !== -1) {
               this.todayWords[todayWordIndex].status = newStatus;
               
-              // 更新统计数据（按词条分类归档今日统计，口径与学习页按钮一致）
-              if (oldStatus === 'review' && newStatus === 'mastered') {
-                await this.bumpScopeStats(word, 'mastered', 1);
-                await this.bumpScopeStats(word, 'review', -1);
-              } else if (oldStatus === 'mastered' && newStatus === 'review') {
-                await this.bumpScopeStats(word, 'mastered', -1);
-                await this.bumpScopeStats(word, 'review', 1);
-              } else if (oldStatus === 'new' && newStatus === 'review') {
-                // 新词标记为陌生，与学习页"陌生"按钮的统计口径一致
-                await this.bumpScopeStats(word, 'review', 1);
-              }
+              // 统计不在此处按 delta 增减：词条状态已变更，统一交给下方
+              // refreshStatusCounts() 依据最终状态整体重算，避免来回切换状态时数字虚增
               
               // 更新学习会话快照（以便切换回学习页面时能看到更新后的数据）
               if (this._learnSessionSnapshot) {
