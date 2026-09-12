@@ -128,7 +128,7 @@ html, body {
   font-weight: 500;
 }
 
-/* ==================== 页面内容�?==================== */
+/* ==================== 页面内容==================== */
 .page-content {
   flex: 1;
   overflow-y: auto;
@@ -169,10 +169,10 @@ html, body {
      由 .page-content 出滚动条，而不是卡片溢出遮挡下方按钮 */
   min-height: 100%;
   /* 底部不留多余留白：卡片下方就是 .card-actions（三个操作按钮），
-     按钮自身已带内边距，此前额外的 72px(36px) 会顶出一条空白带，
+     按钮自身已带内边距，此前额外的 72px会顶出一条空白带，
      把卡片挤矮、并在按钮与底部导航之间留下大空隙。
      只保留 8px 与左右一致的基础内边距 */
-  padding: 8px;
+  padding: 8px 8px 72px;
   box-sizing: border-box;
   background: white;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
@@ -1498,7 +1498,7 @@ html, body {
     /* 不要写死高度：之前1.3版本写死的高度height:380px，写死会在窄屏设备上顶掉上面的自适应计算，
        让卡片比可用空间更高，把按钮往上挤、下方露出一条空白带。
        这里只把上限调低一点，仍随可用空间伸缩 */
-    height: 380px;
+    height: clamp(280px, calc(100% - 96px), 380px);
     padding: 24px;
   }
   
