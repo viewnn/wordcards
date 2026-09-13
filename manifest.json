@@ -1,6 +1,6 @@
 {
-  "name": "单词卡",
-  "short_name": "单词卡",
+  "name": "wordcards",
+  "short_name": "wordcards",
   "description": "一款简洁高效的背单词应用，随时随地学习新词汇",
   "start_url": "./index.html",
   "display": "standalone",

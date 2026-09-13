@@ -322,8 +322,9 @@ html, body {
 }
 
 .flashcard .phonetic {
-  font-size: var(--font-size-md);
-  color: var(--text-light);
+  font-size: 18px;
+  /* color: var(--text-light); */
+  color: var(--text-primary);
   /* margin-bottom: 24px; */
 }
 
@@ -335,12 +336,13 @@ html, body {
   /* margin-bottom: 16px; */
 }
 
-.meaning {
-  padding: 0px 10px;
+.meaning,.phonetic {
+  padding: 10px 10px;
 }
 .flashcard .example {
-  font-size: var(--font-size-sm);
-  color: var(--text-light);
+  font-size: 18px;
+  /* color: var(--text-light); */
+  color: var(--text-secondary);
   /* font-style: italic; */
   line-height: 1.5;
   max-width: 280px;
@@ -527,8 +529,9 @@ html, body {
 }
 
 .flashcard .cantonese-example {
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
+  font-size: 18px;
+  /* color: var(--text-secondary); */
+  color: var(--text-secondary);  
   margin-top: 12px;
   font-style: italic;
 }
@@ -579,7 +582,7 @@ html, body {
 }
 
 .flashcard-back .example {
-  color: rgba(255,255,255,0.8);
+  color: white;
 }
 
 .flashcard.flipped .flashcard-inner {
