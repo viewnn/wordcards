@@ -20,7 +20,7 @@
  *     - 词库页：搜索、状态筛选（全部/新词/待复习/已掌握/收藏）、
  *               分类多选下拉、按分类分组渲染(renderLibrary)
  *     - 设置页：每日目标、学习模式（随机/顺序）、语音朗读、音效、
- *               卡片背景色、音标渐显、重复频率、词典范围等
+ *               音标渐显、重复频率、词典范围等
  *     - 语音：使用浏览器自带的 Web Speech API（speechSynthesis），
  *             按词条语种（英语 / 普通话 / 粤语）挑选合适的系统音色朗读
  *
@@ -261,7 +261,6 @@ class VocabApp {
     // 全部用户设置；启动时由 loadSettings() 从数据库读取覆盖默认值
     this.settings = {
       dailyGoal: 100,                 // 每日目标（每天学习多少张卡片）
-      cardBgColor: '#E8F5E9',         // 卡片背景色
       fontSize: 'medium',             // 字号（预留）
       soundEnabled: false,            // 翻到释义面后自动朗读例句/释义
       speechEnabled: false,           // 总开关：语音朗读（关闭后喇叭按钮不可用）
@@ -760,7 +759,6 @@ class VocabApp {
   /** 从数据库读取全部设置项覆盖默认值；getSetting 第二参数即“用户从未设置时”的默认值 */
   async loadSettings() {
     this.settings.dailyGoal = await this.db.getSetting('dailyGoal', 100);
-    this.settings.cardBgColor = await this.db.getSetting('cardBgColor', '#E8F5E9');
     this.settings.speechEnabled = await this.db.getSetting('speechEnabled', false);
     this.settings.soundEnabled = await this.db.getSetting('soundEnabled', false);
     this.settings.phoneticAutoRead = await this.db.getSetting('phoneticAutoRead', false);
@@ -1465,7 +1463,7 @@ class VocabApp {
   }
 
   /**
-   * 设置页事件绑定：每日目标滑块、学习模式、卡片背景色、
+   * 设置页事件绑定：每日目标滑块、学习模式、
    * 语音朗读总开关 / 例句自动朗读 / 音标自动朗读（后两者依赖总开关）、
    * 卡片释义优先、分类显示、音标渐显时长、重复频率、清除进度、词典范围切换。
    * 每个开关改动后都会立即写入数据库（setSetting），并按需刷新当前界面。
@@ -1531,22 +1529,6 @@ class VocabApp {
       // 立即按当前模式重建当日队列（含随机打散），不依赖进度是否为 0
       await self.prepareLearnSession();
       self.showToast(self.settings.learnMode === 'random' ? '已切换为随机模式' : '已切换为顺序模式');
-    }
-
-    // 卡片背景色
-    document.querySelectorAll('.color-option').forEach(option => {
-      option.addEventListener('click', handleColorClick);
-      option.addEventListener('touchstart', handleColorClick);
-    });
-    
-    async function handleColorClick(e) {
-      e.preventDefault();
-      const option = e.currentTarget;
-      document.querySelectorAll('.color-option').forEach(o => o.classList.remove('active'));
-      option.classList.add('active');
-      self.settings.cardBgColor = option.dataset.color;
-      await self.db.setSetting('cardBgColor', self.settings.cardBgColor);
-      self.applySettings();
     }
 
     // 音效开关
@@ -1715,13 +1697,8 @@ class VocabApp {
     updateGoalSliderState();
   }
 
-  /** 把当前设置应用到界面：卡片背景色、语音相关控件可用状态、字号等 */
+  /** 把当前设置应用到界面：语音相关控件可用状态、字号等 */
   applySettings() {
-    const flashcard = document.getElementById('flashcard');
-    if (flashcard) {
-      flashcard.style.background = this.settings.cardBgColor;
-    }
-
     this.refreshSpeechDependentToggles();
 
     const fontSizes = { small: '14px', medium: '16px', large: '20px' };
@@ -2087,9 +2064,11 @@ class VocabApp {
         <button class="favorite-btn ${word.favorite ? 'active' : ''}" id="favoriteBtn">
           <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
         </button>
-        <div class="word">${word.word}</div>
-        <div class="phonetic" id="phoneticText">${cantonesePhoneticFirst ? (word.jyutping || word.phonetic || '') : (word.phonetic || word.jyutping || '')}</div>
-        ${isCantonese && word.cantonese ? `<div class="cantonese-word">${word.cantonese}</div>` : ''}
+        <div class="card-content">
+          <div class="word">${word.word}</div>
+          <div class="phonetic" id="phoneticText">${cantonesePhoneticFirst ? (word.jyutping || word.phonetic || '') : (word.phonetic || word.jyutping || '')}</div>
+          ${isCantonese && word.cantonese ? `<div class="cantonese-word">${word.cantonese}</div>` : ''}
+        </div>
         <div class="tap-hint">点击查看释义</div>
       </div>
       <div class="flashcard-back">
@@ -2101,9 +2080,11 @@ class VocabApp {
         <button class="favorite-btn ${word.favorite ? 'active' : ''}" id="favoriteBtnBack">
           <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
         </button>
-        <div class="meaning">${word.definition || word.meaning}</div>
-        <div class="example">${word.example ? `"${word.example}"` : ''}</div>
-        ${isCantonese && word.cantoneseExample ? `<div class="cantonese-example">"${word.cantoneseExample}"</div>` : ''}
+        <div class="card-content">
+          <div class="meaning">${word.definition || word.meaning}</div>
+          <div class="example">${word.example ? `"${word.example}"` : ''}</div>
+          ${isCantonese && word.cantoneseExample ? `<div class="cantonese-example">"${word.cantoneseExample}"</div>` : ''}
+        </div>
         <div class="tap-hint tap-hint-back">点击查看词汇</div>
       </div>
     `;
@@ -3348,10 +3329,6 @@ class VocabApp {
     // 学习模式
     document.querySelectorAll('.mode-option').forEach(opt => {
       opt.classList.toggle('active', opt.dataset.mode === this.settings.learnMode);
-    });
-    
-    document.querySelectorAll('.color-option').forEach(opt => {
-      opt.classList.toggle('active', opt.dataset.color === this.settings.cardBgColor);
     });
     
     document.getElementById('soundToggle').classList.toggle('active', this.settings.soundEnabled);

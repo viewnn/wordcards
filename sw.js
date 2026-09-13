@@ -1,7 +1,7 @@
 // 固定的运行时缓存名。代码和词典请求会始终先取网络并覆盖缓存，
 // 因此发布新版本时不需要手动修改缓存版本。
-const CACHE_NAME = 'vocab-app-runtime-v2';
-const DATA_CACHE_NAME = 'vocab-data-runtime-v2';
+const CACHE_NAME = 'vocab-app-runtime-v1.5';
+const DATA_CACHE_NAME = 'vocab-data-runtime-v1.5';
 
 // 使用相对路径，避免部署在子目录时缓存失效
 const urlsToCache = [

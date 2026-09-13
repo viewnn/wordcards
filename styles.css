@@ -2,17 +2,22 @@
 :root {
   --primary: #4A90D9;
   --primary-color: #4A90D9;
-  --border-color: #dfe6e9;
+  --border-color: #E1DCCF;
   --primary-dark: #3A7BC8;
   --secondary: #6C5CE7;
-  --success: #00B894;
-  --warning: #FDCB6E;
-  --danger: #E17055;
-  --bg-primary: #F8FAFC;
-  --bg-card: #FFFFFF;
-  --text-primary: #2D3436;
-  --text-secondary: #636E72;
-  --text-light: #B2BEC3;
+  --success: #5A9E6F;
+  --warning: #E0A458;
+  --danger: #C96A50;
+  /* 护眼基调：暖调米黄“纸感”，整体压低亮度差与蓝光，长时间看更放松 */
+  --bg-primary: #F1EEE7;
+  --bg-card: #FBFAF6;
+  /* 学习卡面：米黄纸感（替代刺眼的纯亮绿/纯白），比页面底色略亮以拉开层次 */
+  --card-bg: #F6F2E7;
+  /* 正文用偏暖的柔褐灰，不做纯黑、也不做高反差；
+     实测对 #F2EDE1 卡面约 8.3:1，清晰但明显比纯黑白柔和 */
+  --text-primary: #4A4438;
+  --text-secondary: #6B6355;
+  --text-light: #8F8878;
   --shadow-sm: 0 0 2px rgba(0,0,0,0.2);
   --shadow-md: 0 4px 16px rgba(0,0,0,0.12);
   --shadow-lg: 0 8px 32px rgba(0,0,0,0.16);
@@ -63,7 +68,7 @@ html, body {
   padding: 14px 20px;
   background: var(--bg-card);
   /* box-shadow: var(--shadow-sm); */
-  border-bottom: 1px solid #E8F5E9;
+  border-bottom: 1px solid var(--border-color);
   position: relative;
   z-index: 100;
 }
@@ -77,7 +82,7 @@ html, body {
 .dict-update-time {
   font-size: 14px;
   font-weight: 400;
-  color: #999;
+  color: var(--text-light);
   margin: 0;
 }
 
@@ -87,7 +92,7 @@ html, body {
   background: var(--bg-card);
   padding: 8px 0;
   padding-bottom: max(8px, env(safe-area-inset-bottom));
-  border-top: 1px solid #E8F5E9;
+  border-top: 1px solid var(--border-color);
   position: relative;
   z-index: 100;
   /* box-shadow: 0 -2px 10px rgba(0,0,0,0.05); */
@@ -134,7 +139,7 @@ html, body {
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  background: white;
+  background: var(--bg-card);
 }
 
 .page {
@@ -174,7 +179,7 @@ html, body {
      只保留 8px 与左右一致的基础内边距 */
   padding: 8px 8px 72px;
   box-sizing: border-box;
-  background: white;
+  background: var(--bg-card);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
@@ -188,7 +193,7 @@ html, body {
 .progress-track {
   flex: 1;
   height: 6px;
-  background: var(--text-light);
+  background: #8f88785c;
   border-radius: 3px;
   overflow: hidden;
 }
@@ -228,7 +233,7 @@ html, body {
   color: var(--text-secondary);
   margin-bottom: 10px;
   padding:6px 10px;
-  background: #fef0f0;
+  background: #F6EDE2;
   border-radius: 6px;
 
 }
@@ -241,7 +246,7 @@ html, body {
 }
 
 .stat-value-sum {
-  color: #FF9800;
+  color: #C08A2E;
 }
 
 .stat-label {
@@ -279,7 +284,9 @@ html, body {
      否则短屏上会先挤卡片、再出现按钮下方的空白 */
   /* 防止被压缩：flex-shrink: 0; */
   /* flex-shrink: 0;  */
-  background: var(--bg-card);
+  /* 卡面：米黄纸感 + 极淡描边，与同色系背景拉开层次但不刺眼 */
+  background: var(--card-bg);
+  border: 1px solid #E7DFCC;
   border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
@@ -303,6 +310,7 @@ html, body {
   width: 100%;
   height: 100%;
   position: relative;
+  /* 正反两面都以 inset:0 绝对定位铺满本层，这里的 flex 只服务于初始静态标记 */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -312,6 +320,22 @@ html, body {
   -webkit-transform-style: preserve-3d;
   transition: transform 0.45s cubic-bezier(.2,.8,.2,1);
   -webkit-transition: -webkit-transform 0.45s cubic-bezier(.2,.8,.2,1);
+}
+
+/* 正反面共用的“卡片正文”盒子：撑满除角标/提示之外的整块卡面。
+   正文不再垂直居中，而是靠上留出固定内边距（两面数值完全一致），
+   因此既整体上移、又保证翻转前后文字落在同一水平位置。 */
+.card-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* 靠上排布：配合下面的 padding-top 控制正文起始位置 */
+  justify-content: flex-start;
+  padding-top: 42px;
+  text-align: center;
 }
 
 .flashcard .word {
@@ -497,7 +521,7 @@ html, body {
 
 .flashcard .tap-hint {
   position: absolute;
-  bottom: 10px;
+  bottom: 12px;
   font-size: var(--font-size-xs);
   color: var(--text-light);
 }
@@ -544,9 +568,10 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
+  /* 正文上移由内部 .card-content 的 padding-top 控制，两面数值一致 → 翻转不错位 */
   justify-content: flex-start;
   text-align: center;
-  padding-top: 64px;
+  padding: 20px;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   border-radius: var(--radius-lg);
@@ -562,10 +587,12 @@ html, body {
   align-items: center;
   justify-content: flex-start;
   text-align: center;
-  padding-top: 64px;
+  /* 与正面使用同一套内边距，保证翻面后文字落在相同位置 */
+  padding: 20px;
   transform: rotateY(180deg);
   -webkit-transform: rotateY(180deg);
-  background: linear-gradient(135deg, #4A90D9 0%, #6C5CE7 100%);
+  /* 护眼：去饱和的柔和暖蓝紫，替代高饱和亮蓝紫 */
+  background: linear-gradient(135deg, #5C86C4 0%, #7A72C8 100%);
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   border-radius: var(--radius-lg);
@@ -577,12 +604,13 @@ html, body {
 }
 
 .flashcard-back .meaning {
-  color: white;
+  /* 米白而非纯白，配柔和蓝紫底降低强反差带来的刺眼感 */
+  color: #F4F6F1;
   font-size: var(--font-size-xl);
 }
 
 .flashcard-back .example {
-  color: white;
+  color: #E7ECE3;
 }
 
 .flashcard.flipped .flashcard-inner {
@@ -602,7 +630,7 @@ html, body {
   padding: 12px 8px calc(8px + env(safe-area-inset-bottom));
   margin: 0 -8px;
   flex-shrink: 0;
-  background: white;
+  background: var(--bg-card);
 }
 
 .action-btn {
@@ -632,7 +660,7 @@ html, body {
 }
 
 .action-btn.difficult {
-  background: #FFF3E0;
+  background: #F3E6D6;
 }
 
 .action-btn.difficult svg {
@@ -640,15 +668,15 @@ html, body {
 }
 
 .action-btn.skip {
-  background: #e3f2fd;
+  background: #E7EBEA;
 }
 
 .action-btn.skip svg {
-  fill: var(--text-light);
+  fill: var(--text-secondary);
 }
 
 .action-btn.mastered {
-  background: #E8F5E9;
+  background: #E3EBDD;
 }
 
 .action-btn.mastered svg {
@@ -732,7 +760,7 @@ html, body {
 /* ==================== 词库页面 ==================== */
 .library-header {
   padding: 16px 20px;
-  background: white;
+  background: var(--bg-card);
   box-shadow: var(--shadow-sm);
   position: sticky;
   top: 0;
@@ -806,7 +834,7 @@ html, body {
   top: calc(100% + 8px);
   left: 0;
   right: 0;
-  background: white;
+  background: var(--bg-card);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-md);
   padding: 8px;
@@ -923,12 +951,12 @@ html, body {
 .library-container {
   padding: 20px;
   padding-bottom: calc(80px + env(safe-area-inset-bottom));
-  background: white;
+  background: var(--bg-card);
 }
 
 .category-section {
   margin-bottom: 24px;
-  background: white;
+  background: var(--bg-card);
   /* padding: 2px; */
   border-radius: var(--radius-md);
 }
@@ -1001,17 +1029,17 @@ html, body {
 }
 
 .status-badge.mastered {
-  background: #E8F5E9;
+  background: #E3EBDD;
   color: var(--success);
 }
 
 .status-badge.review {
-  background: #FFF3E0;
+  background: #F3E6D6;
   color: var(--danger);
 }
 
 .status-badge.new {
-  background: #E3F2FD;
+  background: #E4E9F0;
   color: var(--primary);
 }
 
@@ -1026,21 +1054,21 @@ html, body {
 }
 
 .status-switch.to-review {
-  background: #FFF3E0;
+  background: #F3E6D6;
   color: var(--danger);
 }
 
 .status-switch.to-review:hover {
-  background: #FFE0B2;
+  background: #EBD8C2;
 }
 
 .status-switch.to-mastered {
-  background: #E8F5E9;
+  background: #E3EBDD;
   color: var(--success);
 }
 
 .status-switch.to-mastered:hover {
-  background: #C8E6C9;
+  background: #D3E0C9;
 }
 
 .word-actions {
@@ -1081,8 +1109,8 @@ html, body {
   border-radius: 12px;
   font-size: var(--font-size-xs);
   font-weight: 500;
-  background: #FFF8E1;
-  color: #FF9800;
+  background: #F7EEDA;
+  color: #C08A2E;
 }
 
 /* ==================== 空状�?==================== */
@@ -1274,7 +1302,7 @@ html, body {
 .settings-container {
   padding: 20px;
   padding-bottom: calc(80px + env(safe-area-inset-bottom));
-  background: white;
+  background: var(--bg-card);
   min-height: calc(100%);
 }
 
@@ -1361,27 +1389,6 @@ html, body {
 
 .toggle.active::after {
   left: 22px;
-}
-
-/* 颜色选择�?*/
-.color-options {
-  display: flex;
-  gap: 12px;
-  flex-wrap: nowrap;
-}
-
-.color-option {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  cursor: pointer;
-  border: 3px solid transparent;
-  transition: all 0.2s;
-}
-
-.color-option.active {
-  border-color: var(--text-primary);
-  transform: scale(1.1);
 }
 
 /* 词典管理下拉*/
