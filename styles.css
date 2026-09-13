@@ -286,7 +286,7 @@ html, body {
   /* flex-shrink: 0;  */
   /* 卡面：米黄纸感 + 极淡描边，与同色系背景拉开层次但不刺眼 */
   background: var(--card-bg);
-  border: 1px solid #E7DFCC;
+  border: 0px solid #E7DFCC;
   border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
