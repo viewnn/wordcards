@@ -309,6 +309,7 @@ select {
   padding: 16px;
   cursor: grab;
   user-select: none;
+  -webkit-user-select: none;
   /* box-shadow: var(--shadow-md); */
   transition: transform 0.3s, box-shadow 0.3s;
   touch-action: pan-y;
@@ -384,6 +385,22 @@ select {
   /* font-style: italic; */
   line-height: 1.5;
   max-width: 280px;
+}
+
+/* 卡片正文允许长按/拖选复制：只放开文字节点，卡片上的按钮、角标、提示仍保持不可选，
+   这样“长按选字/复制”不会与单击翻面互相干扰（正反两面都生效）。 */
+.flashcard .word,
+.flashcard .phonetic,
+.flashcard .cantonese-word,
+.flashcard .meaning,
+.flashcard .example,
+.flashcard .cantonese-example {
+  user-select: text;
+  -webkit-user-select: text;
+  /* iOS 需要保留 callout，长按才会弹出「拷贝」菜单 */
+  -webkit-touch-callout: default;
+  /* 文字区域用文本光标，提示这里可以选中 */
+  cursor: text;
 }
 
 /* 语言角标：顶部水平居中，紧贴面上内边�?*/
@@ -630,6 +647,19 @@ select {
 .flashcard.flipped .flashcard-inner {
   transform: rotateY(180deg);
   -webkit-transform: rotateY(180deg);
+}
+
+/* 背朝自己的那一面既不接收指针事件，也不参与原生文字选中。
+   原因：Chrome 的命中测试按元素“自身”变换做背面剔除（绘制用的却是叠加后的朝向），
+   翻到背面后 .flashcard-back 自身带着 rotateY(180deg) 会被整层剔除，而看不见的
+   .flashcard-front 反而会被命中——在背面拖选/双击会选中正面那段看不见的文字并把它
+   复制出来。这里把不可见的一面彻底排除，长按取词则由 JS 按坐标自行判定（不依赖命中
+   测试）。点击翻面本身由 .flashcard 统一处理，不受影响。 */
+.flashcard:not(.flipped) .flashcard-back,
+.flashcard.flipped .flashcard-front {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* 翻面后彻底隐藏正面语言角标（背面不设角标；避免 Mobile Safari 等透视合成叠层穿透或镜像�?*/

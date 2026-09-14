@@ -50,6 +50,21 @@ const CARD_EXIT_MAX_MS = 140;
 const CARD_ENTRY_MS = 140;
 /** 触发切卡的滑动距离阈值（px） */
 const CARD_SWIPE_THRESHOLD = 80;
+/** 鼠标单击翻面的延迟（ms）：给双击选词留出取消窗口，避免翻面把选中词换成另一面的文字 */
+const CARD_CLICK_FLIP_DELAY_MS = 150;
+/** 鼠标按住不动多久视为“长按取词”（ms） */
+const CARD_MOUSE_LONG_PRESS_MS = 600;
+/** 触屏按住多久先把翻面/滑动让给系统取词（ms），略早于浏览器原生长按菜单 */
+const CARD_TOUCH_LONG_PRESS_MS = 450;
+/** 鼠标按下后位移超过该像素数即视为“拖选文字”，本次点击不再翻面 */
+const CARD_TEXT_MOVE_TOLERANCE_PX = 8;
+/** 卡片上可长按选中复制的文字块（正反两面共用，配合当前可见面筛选） */
+const CARD_TEXT_TILE_SELECTOR =
+  '.word, .phonetic, .cantonese-word, .meaning, .example, .cantonese-example';
+/** 英文/数字等“词字符”：长按取词时按这类字符的连续段扩成整词 */
+const CARD_WORD_CHAR_RE = /[0-9A-Za-z\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF'’_-]/;
+/** 中日韩字符：长按取词时按连续段扩成整词（单字也能选中自身） */
+const CARD_CJK_CHAR_RE = /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uAC00-\uD7AF]/;
 /** .card-stack 左右内边距（px），取不到布局时的兜底值 */
 const CARD_STACK_GUTTER_PX = 8;
 /** 滑出终点在“整张离屏”基础上再越界的像素数，留出取整/圆角余量 */
@@ -301,6 +316,16 @@ class VocabApp {
     this._scopeTotal = this._emptyScopeStats();
     /** 触摸翻面后浏览器会合成 click，需忽略下一次点击避免立刻翻回正面 */
     this._suppressNextCardClickFlip = false;
+    /** 鼠标单击翻面的延迟定时器：为双击选词/拖选留出取消窗口 */
+    this._cardFlipTimer = null;
+    /** 本次鼠标按压是否发生了位移（拖选文字），用于抑制这次点击的翻面 */
+    this._cardPointerMoved = false;
+    /** 本次按压已长按取词，用于抑制松手时（合成）的翻面 */
+    this._cardLongPressFired = false;
+    /** 鼠标长按取到的文字：mouseup（带用户手势）时才真正写剪贴板 */
+    this._cardLongPressText = '';
+    /** 触屏长按取词进行中：滑动与翻面全部让位给系统选中文字 */
+    this._cardTouchLongPress = false;
     /** 卡片“滑出→滑入”过场动画是否进行中；用于防止动画期间重复触发导致索引与动画错位 */
     this._cardAnimating = false;
     this._phoneticReadTimer = null;
@@ -1097,20 +1122,46 @@ class VocabApp {
     // 卡片点击翻转（仅非触摸设备）
     const flashcard = document.getElementById('flashcard');
     flashcard.addEventListener('click', handleCardClick);
-    
+
     function handleCardClick(e) {
       if (self._suppressNextCardClickFlip) {
         self._suppressNextCardClickFlip = false;
         return;
       }
-      if (
-        !e.target.closest('.speak-btn') &&
-        !e.target.closest('.favorite-btn') &&
-        !e.target.closest('.language-badge')
-      ) {
-        self.flipCard();
+      if (self._isCardControl(e.target)) return;
+
+      // 双击的第二下：不再排翻面，把这次双击让给浏览器选中该词
+      if (e.detail > 1) {
+        self._cancelPendingCardFlip();
+        return;
       }
+
+      // 拖动选字 / 长按取词之后的收尾点击：保留选中，不翻面
+      if (self._cardPointerMoved || self._cardLongPressFired) {
+        self._cardPointerMoved = false;
+        self._cardLongPressFired = false;
+        return;
+      }
+
+      // 已选中文字时：这次点击只用于取消选中，不翻面（避免“选完想取消却翻了卡”）
+      if (self._hasTextSelection()) {
+        window.getSelection().removeAllRanges();
+        return;
+      }
+
+      // 单击翻面延迟执行：期间若发生双击选词，则取消翻面
+      self._cancelPendingCardFlip();
+      self._cardFlipTimer = setTimeout(() => {
+        self._cardFlipTimer = null;
+        self.flipCard();
+      }, CARD_CLICK_FLIP_DELAY_MS);
     }
+
+    // 双击选词：取消待执行的翻面，保留浏览器选中的词（正反两面都适用）
+    flashcard.addEventListener('dblclick', (e) => {
+      self._cancelPendingCardFlip();
+      if (self._isCardControl(e.target)) e.preventDefault();
+    });
     
     // 发音 / 收藏：移动端会先 touchstart 再合成 click；document 默认 passive 导致 preventDefault 无效，
     // 会连续触发两次。用 passive:false + 短时间忽略紧随其后的 click。
@@ -1166,6 +1217,9 @@ class VocabApp {
     
     // 卡片滑动
     this.initCardSwipe();
+
+    // 卡片文字长按/拖选复制（与滑动、翻面互斥）
+    this.initCardTextSelection();
     
     // 操作按钮
     const btnDifficult = document.getElementById('btnDifficult');
@@ -1708,6 +1762,7 @@ class VocabApp {
   /**
    * 初始化学习卡片的触摸手势（移动端）：
    * - 短按（<500ms 且未移动）：翻转卡片；
+   * - 长按（≥450ms 且未移动）：让位给系统取词复制，松手不翻面；
    * - 向左滑超过 80px：标记“已掌握”；
    * - 向右滑超过 80px：跳过当前词（移到队尾）；
    * - 其余情况：卡片回弹原位。
@@ -1719,8 +1774,18 @@ class VocabApp {
     let isDragging = false;
     let isClick = true;
     let touchStartTime = 0;
+    let longPressTimer = null;
+    /** 背部长按取到的文字：touchend（带用户手势）时才真正写剪贴板 */
+    let longPressCopyText = '';
 
     const self = this;
+
+    const clearLongPressTimer = () => {
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    };
 
     card.addEventListener('touchstart', (e) => {
       // 检查是否点击了收藏按钮或发音按钮
@@ -1733,18 +1798,48 @@ class VocabApp {
         isDragging = false;
         return;
       }
-      
+
+      // 已有选中文字：这一次触摸只用于取消选中（长按/拖选后的常见收尾动作），
+      // 既不翻面也不滑动，同时吞掉随后合成的 click
+      if (self._hasTextSelection()) {
+        window.getSelection().removeAllRanges();
+        self._suppressNextCardClickFlip = true;
+        isDragging = false;
+        return;
+      }
+
       startX = e.touches[0].clientX;
       startY = e.touches[0].clientY;
       currentX = 0;
       isDragging = true;
       isClick = true;
+      self._cardTouchLongPress = false;
       touchStartTime = Date.now();
       card.style.transition = 'none';
+
+      // 长按：不再接管手势，让系统取词（CSS 已放开 user-select），松手也不翻面
+      clearLongPressTimer();
+      longPressTimer = setTimeout(() => {
+        longPressTimer = null;
+        self._cardTouchLongPress = true;
+        isClick = false;
+        // 背面只能由 JS 取词：翻面后浏览器的命中测试拿不到背面文字（详见
+        // _selectCardWordAt 的注释），系统长按在背面取不到词。正面保留系统原生
+        // 长按（选区手柄与系统「拷贝」菜单更符合系统习惯），这里不做干预。
+        if (card.classList.contains('flipped')) {
+          const text = self._selectCardWordAt(startX, startY);
+          // 写剪贴板推迟到 touchend（带用户手势的时机），见下面的 touchend
+          if (text) longPressCopyText = text;
+        }
+      }, CARD_TOUCH_LONG_PRESS_MS);
     });
 
     card.addEventListener('touchmove', (e) => {
       if (!isDragging) return;
+      // 长按取词中 / 正在拖选文字：必须放手，既不能 preventDefault 也不能平移卡片，
+      // 否则会打断系统选区与选区手柄的拖动
+      if (self._cardTouchLongPress || self._hasTextSelection()) return;
+
       currentX = e.touches[0].clientX - startX;
       const currentY = e.touches[0].clientY - startY;
       
@@ -1760,6 +1855,10 @@ class VocabApp {
     });
 
     card.addEventListener('touchend', () => {
+      clearLongPressTimer();
+      const wasLongPress = self._cardTouchLongPress;
+      self._cardTouchLongPress = false;
+
       if (!isDragging) return;
       isDragging = false;
       // 手指松开的位移占卡片宽度比例：传给 _sequenceCard，让它从卡片当前位置
@@ -1769,7 +1868,23 @@ class VocabApp {
       // 判断是否为点击（短时间内的触摸）
       const touchDuration = Date.now() - touchStartTime;
       
-      if (isClick && touchDuration < 500) {
+      if (wasLongPress) {
+        // 长按取词：卡片全程未移动，仅还原过渡并吞掉随后合成的 click，保留选中文字
+        card.style.transition = `transform ${CARD_ENTRY_MS}ms ${CARD_SWIPE_EASE}`;
+        card.style.transform = '';
+        self._suppressNextCardClickFlip = true;
+        // 手指抬起时才有用户手势，此时写剪贴板才不会被浏览器拒绝
+        if (longPressCopyText) {
+          const text = longPressCopyText;
+          longPressCopyText = '';
+          self._copyCardText(text);
+        } else if (!self._hasTextSelection()) {
+          // 正面按设计交给系统原生长按取词；若系统没有给出选区（部分浏览器/WebView
+          // 不支持长按选字），这里兜底由 JS 取词并复制，保证手机上长按一定能复制
+          const text = self._selectCardWordAt(startX, startY);
+          if (text) self._copyCardText(text);
+        }
+      } else if (isClick && touchDuration < 500 && !self._hasTextSelection()) {
         // 触摸翻面后仍会触发合成 click，避免与 handleCardClick 重复翻面
         self._suppressNextCardClickFlip = true;
         self.flipCard();
@@ -1795,6 +1910,247 @@ class VocabApp {
       }
       currentX = 0;
     });
+
+    // 触摸被系统中断（来电、通知、取词手势等）：复位状态并把卡片弹回原位
+    card.addEventListener('touchcancel', () => {
+      clearLongPressTimer();
+      self._cardTouchLongPress = false;
+      longPressCopyText = '';
+      if (!isDragging) return;
+      isDragging = false;
+      card.style.transition = `transform ${CARD_ENTRY_MS}ms ${CARD_SWIPE_EASE}`;
+      card.style.transform = '';
+      currentX = 0;
+    });
+  }
+
+  /**
+   * 卡片文字长按复制（桌面鼠标 + 移动端触屏，正反两面都生效）：
+   * - 鼠标：按住不动 600ms 选中指针下的整个词并复制（单字也能选中自身），
+   *   按住拖动则由浏览器原生拖选；这两种情况都会取消这次「单击翻面」；
+   * - 触屏：正面保留系统原生长按取词（选区菜单最符合系统习惯）；背面因为浏览器的
+   *   命中测试取不到背面文字（见 _selectCardWordAt 注释），改由 JS 按坐标选中并复制；
+   * - 取词全程按坐标 + DOM Range 计算，不依赖浏览器命中测试，所以翻面后同样有效。
+   */
+  initCardTextSelection() {
+    const card = document.getElementById('flashcard');
+    if (!card) return;
+
+    const self = this;
+    let pressTimer = null;
+    let pressX = 0;
+    let pressY = 0;
+
+    const clearPressTimer = () => {
+      if (pressTimer) {
+        clearTimeout(pressTimer);
+        pressTimer = null;
+      }
+    };
+
+    card.addEventListener('mousedown', (e) => {
+      if (e.button !== 0 || self._isCardControl(e.target)) return;
+      pressX = e.clientX;
+      pressY = e.clientY;
+      self._cardPointerMoved = false;
+      self._cardLongPressFired = false;
+      self._cardLongPressText = '';
+      clearPressTimer();
+      pressTimer = setTimeout(() => {
+        pressTimer = null;
+        // 按住不动：先选中指针下的词并取消这次点击的翻面；真正的写剪贴板放到
+        // mouseup（那才是带有用户手势的时机，异步剪贴板 API 才不会被拒）
+        const text = self._selectCardWordAt(pressX, pressY);
+        if (text) {
+          self._cardLongPressFired = true;
+          self._cardLongPressText = text;
+          self._cancelPendingCardFlip();
+        }
+      }, CARD_MOUSE_LONG_PRESS_MS);
+    });
+
+    card.addEventListener('mousemove', (e) => {
+      if (!pressTimer && !self._cardLongPressFired) return;
+      if (
+        Math.abs(e.clientX - pressX) > CARD_TEXT_MOVE_TOLERANCE_PX ||
+        Math.abs(e.clientY - pressY) > CARD_TEXT_MOVE_TOLERANCE_PX
+      ) {
+        // 变成拖选：本次点击不翻面，选区交给浏览器维护
+        clearPressTimer();
+        self._cardPointerMoved = true;
+      }
+    });
+
+    card.addEventListener('mouseup', () => {
+      clearPressTimer();
+      if (self._cardLongPressText) {
+        const text = self._cardLongPressText;
+        self._cardLongPressText = '';
+        self._copyCardText(text);
+      }
+    });
+    card.addEventListener('mouseleave', clearPressTimer);
+  }
+
+  /** 当前朝上的一面（正面 / 背面） */
+  _visibleCardFace() {
+    const card = document.getElementById('flashcard');
+    if (!card) return null;
+    return card.querySelector(
+      card.classList.contains('flipped') ? '.flashcard-back' : '.flashcard-front'
+    );
+  }
+
+  /** 元素里的第一个文字节点（卡片的每个文字块都是单文本节点） */
+  _firstTextNode(el) {
+    if (!el) return null;
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+    return walker.nextNode();
+  }
+
+  /**
+   * 在 (x, y) 处选中一个词，返回选中的文字（没选中任何东西时返回 ''）。
+   *
+   * 全程按坐标 + DOM Range 计算，刻意不用 document.elementFromPoint /
+   * caretRangeFromPoint：卡片翻面靠 3D 旋转 + backface-visibility，而 Chrome 的
+   * 命中测试是按元素「自身」变换做背面剔除的（绘制用的却是叠加后的朝向），翻到背面后
+   * 这些接口取到的是看不见的正面文字（已实测）。按“当前可见面内、包含该点的最小
+   * 文字块 + Range 逐字量宽”来定位，翻面后同样准确。
+   */
+  _selectCardWordAt(x, y) {
+    const face = this._visibleCardFace();
+    if (!face) return '';
+
+    // 1) 取包含该点的最小文字块（词条 / 音标 / 释义 / 例句）
+    let tile = null;
+    let tileArea = Infinity;
+    face.querySelectorAll(CARD_TEXT_TILE_SELECTOR).forEach((el) => {
+      if (!String(el.textContent || '').trim()) return;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return;
+      const pad = 2; // 正好压在行间/边缘时也判为命中
+      if (x < r.left - pad || x > r.right + pad || y < r.top - pad || y > r.bottom + pad) return;
+      const area = r.width * r.height;
+      if (area < tileArea) {
+        tileArea = area;
+        tile = el;
+      }
+    });
+    if (!tile) return '';
+
+    const sel = window.getSelection();
+    if (!sel) return '';
+
+    // 2) 块内定位到具体字符，再向两侧扩成整词；定位失败就退化为整块选中
+    const node = this._firstTextNode(tile);
+    const text = node ? (node.nodeValue || '') : '';
+    const range = document.createRange();
+    const index = text ? this._caretIndexInTile(node, text, x, y) : -1;
+    const word = index >= 0 ? this._expandWordRange(text, index) : null;
+    if (word) {
+      range.setStart(node, word[0]);
+      range.setEnd(node, word[1]);
+    } else {
+      range.selectNodeContents(tile);
+    }
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return String(sel).trim();
+  }
+
+  /** 用 Range 逐字量宽，找出离 (x, y) 最近的字符下标；测不到时返回 -1 */
+  _caretIndexInTile(node, text, x, y) {
+    const range = document.createRange();
+    let best = -1;
+    let bestDist = Infinity;
+    for (let i = 0; i < text.length; i++) {
+      range.setStart(node, i);
+      range.setEnd(node, i + 1);
+      const r = range.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) continue; // 换行、零宽字符等量不到
+      const dx = r.left + r.width / 2 - x;
+      const dy = r.top + r.height / 2 - y;
+      const dist = dx * dx + dy * dy;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * 把下标扩成整词，返回 [start, end)；取不到词时返回 null（调用方退化为整块选中）：
+   * 英文/数字等按词字符连续段，中日韩按连续汉字段；落在标点或空格上时取相邻最近的词。
+   */
+  _expandWordRange(text, index) {
+    const isWord = (ch) => CARD_WORD_CHAR_RE.test(ch);
+    const isCjk = (ch) => CARD_CJK_CHAR_RE.test(ch);
+    let kind = isWord(text[index]) ? 'word' : (isCjk(text[index]) ? 'cjk' : null);
+    if (!kind) {
+      let found = false;
+      for (let i = index + 1; i < text.length && !found; i++) {
+        if (isWord(text[i])) { kind = 'word'; index = i; found = true; }
+        else if (isCjk(text[i])) { kind = 'cjk'; index = i; found = true; }
+      }
+      for (let i = index - 1; i >= 0 && !found; i--) {
+        if (isWord(text[i])) { kind = 'word'; index = i; found = true; }
+        else if (isCjk(text[i])) { kind = 'cjk'; index = i; found = true; }
+      }
+      if (!found) return null;
+    }
+    const match = kind === 'word' ? isWord : isCjk;
+    let start = index;
+    let end = index + 1;
+    while (start > 0 && match(text[start - 1])) start--;
+    while (end < text.length && match(text[end])) end++;
+    return [start, end];
+  }
+
+  /** 复制长按选中的文字并给出提示；失败时静默跳过（选区仍在，可手动复制） */
+  async _copyCardText(text, quiet) {
+    if (!text) return false;
+    let ok = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      }
+    } catch (err) {
+      ok = false;
+    }
+    if (!ok && document.execCommand) {
+      // 老浏览器兜底：此时选区就是长按选中的文字
+      try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+    }
+    if (ok && !quiet) {
+      const shown = text.length > 12 ? `${text.slice(0, 12)}…` : text;
+      this.showToast(`已复制：${shown}`);
+    }
+    return ok;
+  }
+
+  /** 当前是否存在非空文字选中（卡片文字复制与翻面/滑动手势的互斥依据） */
+  _hasTextSelection() {
+    const sel = window.getSelection();
+    return !!(sel && !sel.isCollapsed && String(sel).length > 0);
+  }
+
+  /** 卡片上的按钮与角标：点它们不翻面，也不应触发文字选中 */
+  _isCardControl(target) {
+    return !!(target && target.closest && (
+      target.closest('.speak-btn') ||
+      target.closest('.favorite-btn') ||
+      target.closest('.language-badge')
+    ));
+  }
+
+  /** 取消尚未执行的「单击翻面」（双击选词、换卡、长按取词时调用） */
+  _cancelPendingCardFlip() {
+    if (this._cardFlipTimer) {
+      clearTimeout(this._cardFlipTimer);
+      this._cardFlipTimer = null;
+    }
   }
 
   /**
@@ -2026,6 +2382,15 @@ class VocabApp {
     if (index >= this.todayWords.length) {
       return;
     }
+
+    // 换卡：清掉上一张卡残留的文字选中与尚未执行的「单击翻面」，
+    // 避免新卡片带着旧选中态，或在滑入过程中被上一次点击翻转
+    this._cancelPendingCardFlip();
+    this._cardPointerMoved = false;
+    this._cardLongPressFired = false;
+    this._cardLongPressText = '';
+    this._cardTouchLongPress = false;
+    if (this._hasTextSelection()) window.getSelection().removeAllRanges();
     
     const word = this.todayWords[index];
     const card = document.getElementById('flashcard');
@@ -2712,6 +3077,12 @@ class VocabApp {
   _sequenceCard(fromDirection = 'right', releaseOffset = 0) {
     // 防抖：过场动画进行中忽略重复触发，避免索引与动画错位
     if (this._cardAnimating) return;
+    // 切卡时取消待执行的「单击翻面」，避免卡片在滑出过程中被上一次点击翻转
+    this._cancelPendingCardFlip();
+    this._cardPointerMoved = false;
+    this._cardLongPressFired = false;
+    this._cardLongPressText = '';
+    this._cardTouchLongPress = false;
     this.currentCardIndex++;
     if (this.currentCardIndex >= this.todayWords.length) {
       this.showComplete();
