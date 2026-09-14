@@ -47,6 +47,20 @@ html, body {
   overflow: hidden;
 }
 
+/**
+ * 表单控件默认不继承页面字体：UA 样式表会直接给 button/input/textarea/select 赋一个 font 简写，
+ * 于是上面 html, body 的字体链传不进控件内部。各浏览器默认值还不一致——Blink 给 <textarea> 用
+ * monospace、给 <input>/<button>/<select> 用系统小控件字体（Windows 上 Arial），
+ * 结果就是弹窗里「例句」与其他字段、按钮文字与页面文字字体各不相同。
+ * 这里统一改成继承，让所有控件跟随页面字体。
+ */
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+
 /* ==================== 页面容器 ==================== */
 .app-container {
   width: 100%;
