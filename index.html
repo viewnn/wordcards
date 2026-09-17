@@ -15,7 +15,10 @@
   <title>wordcards</title>
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="cloud-sync.css">
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- Supabase JS SDK（云同步用）。若访问不畅，可换成 supabase-config.js 里注释的其它 CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <link rel="icon" type="image/png" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
@@ -23,8 +26,16 @@
   <div class="app-container">
     <!-- 头部 -->
     <header class="header">
-      <!-- <h1>📚 单词卡</h1> -->
-      <h1>📚 </h1>
+      <!-- 左侧：标题图标 + 云同步状态徽标（徽标由 JS 更新为 未启用/未登录/已同步/同步中/离线 等，点击跳到设置页） -->
+      <div class="header-left">
+        <h1>📚 </h1>
+        <button class="cloud-badge" id="cloudBadge" type="button" data-state="disabled"
+                title="云同步未启用，点击查看开启方法">
+          <span class="cloud-dot"></span>
+          <span id="cloudBadgeText">未启用</span>
+        </button>
+      </div>
+      <!-- 右侧：词典更新时间 -->
       <h5 class="dict-update-time">更新时间：<span id="dictUpdateTime"></span></h5>
     </header>
 
@@ -291,6 +302,77 @@
             </div>
           </div>    
 
+          <!-- 账号与同步 -->
+          <div class="settings-section" id="cloudSection">
+            <h3 class="settings-section-title cloud-title">
+              <span>账号与同步</span>
+              <span class="cloud-state-tag" id="cloudStateTag">未启用</span>
+            </h3>
+
+            <!-- 情况一：还没在 supabase-config.js 里填地址和 key（默认显示，JS 起来后按真实状态切换） -->
+            <div class="cloud-config-missing" id="cloudConfigMissing">
+              <p class="cloud-setup-title" id="cloudConfigMissingText">云同步还没有启用</p>
+              <p class="cloud-setup-desc">启用后，手机和电脑登录同一个邮箱即可共用学习进度、收藏和设置。</p>
+              <ol class="cloud-setup-steps">
+                <li>在 <a href="https://supabase.com" target="_blank" rel="noopener noreferrer">supabase.com</a>
+                    注册并新建一个免费项目</li>
+                <li>进项目的 <strong>SQL Editor</strong>，执行本目录下的 <code>supabase/schema.sql</code></li>
+                <li>把项目的 <strong>Project URL</strong> 和 <strong>anon key</strong> 填进
+                    <code>supabase-config.js</code> 的 <code>url</code> 与 <code>anonKey</code></li>
+              </ol>
+              <p class="cloud-setup-note">填好后刷新页面，这里就会出现「登录 / 注册」入口。</p>
+            </div>
+
+            <!-- 情况二：已配置但未登录 -->
+            <div id="cloudSignedOut" style="display: none;">
+              <div class="setting-item">
+                <div class="setting-info">
+                  <h4>登录后同步学习记录</h4>
+                  <p>手机与电脑共用一份进度、收藏与设置</p>
+                </div>
+                <button class="cloud-action-btn" id="cloudSignInBtn" type="button">登录</button>
+              </div>
+              <div class="setting-item">
+                <div class="setting-info">
+                  <h4>还没有账号</h4>
+                  <p>用邮箱注册，数据只存在你自己的 Supabase 项目里</p>
+                </div>
+                <button class="cloud-action-btn is-ghost" id="cloudSignUpBtn" type="button">注册</button>
+              </div>
+            </div>
+
+            <!-- 情况三：已登录 -->
+            <div id="cloudSignedIn" style="display: none;">
+              <div class="setting-item">
+                <div class="setting-info cloud-status-line">
+                  <h4 class="cloud-user-email" id="cloudUserEmail">—</h4>
+                  <p id="cloudLastSyncText">尚未同步过</p>
+                </div>
+                <button class="cloud-action-btn" id="cloudSyncNowBtn" type="button">同步</button>
+              </div>
+              <div class="setting-item">
+                <div class="setting-info">
+                  <h4>同步状态</h4>
+                  <p id="cloudSyncStatusText">等待同步</p>
+                </div>
+              </div>
+              <div class="setting-item">
+                <div class="setting-info">
+                  <h4>自动同步</h4>
+                  <p>学习后约 3 秒自动上传；停留在本页时每分钟自动检查更新</p>
+                </div>
+                <div class="toggle active" id="cloudAutoSyncToggle"></div>
+              </div>
+              <div class="setting-item">
+                <div class="setting-info">
+                  <h4>退出登录</h4>
+                  <p>本机学习记录会保留，重新登录可继续同步</p>
+                </div>
+                <button class="cloud-action-btn is-ghost" id="cloudSignOutBtn" type="button">退出</button>
+              </div>
+            </div>
+          </div>
+
           <!-- 数据管理 -->
           <div class="settings-section">
             <h3 class="settings-section-title">数据管理</h3>
@@ -299,7 +381,8 @@
                 <h4>重置记录</h4>
                 <p>重置学习记录，并不会删除单词数据</p>
               </div>
-              <button class="btn-secondary attention" id="clearProgressBtn" style="padding: 8px 21px 8px 21px; font-size: 13px">清除</button>
+              <!-- 尺寸与「账号与同步」里的按钮、以及「单词顺序」的顺序/随机按钮保持一致 -->
+              <button class="btn-secondary attention" id="clearProgressBtn" style="padding: 8px 21px; font-size: 13px">清除</button>
             </div>
           </div>
         </div>
@@ -365,9 +448,77 @@
     </div>
   </div>
 
+  <!-- 登录 / 注册弹窗 -->
+  <div class="modal-overlay cloud-auth-modal" id="cloudAuthModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="cloudAuthTitle">登录账号</h2>
+        <button class="modal-close" id="cloudAuthClose" type="button" aria-label="关闭">
+          <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="cloud-error" id="cloudAuthError"></div>
+        <form id="cloudAuthForm" novalidate>
+          <div class="cloud-auth-group">
+            <label class="cloud-auth-label" for="cloudAuthEmail">邮箱</label>
+            <input type="email" class="form-input" id="cloudAuthEmail" name="email"
+                   autocomplete="email" inputmode="email" placeholder="you@example.com">
+          </div>
+          <div class="cloud-auth-group">
+            <label class="cloud-auth-label" for="cloudAuthPassword">密码</label>
+            <input type="password" class="form-input" id="cloudAuthPassword" name="password"
+                   autocomplete="current-password" placeholder="至少 6 位">
+          </div>
+          <div class="cloud-auth-links">
+            <button class="cloud-link" id="cloudAuthSwitch" type="button">还没有账号？去注册</button>
+            <button class="cloud-link" id="cloudAuthForgot" type="button">忘记密码？</button>
+          </div>
+          <p class="cloud-hint" id="cloudAuthHint">
+            登录后手机与电脑共用同一份学习记录。数据保存在你自己的 Supabase 项目里，仅你本人可见。
+          </p>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-primary" id="cloudAuthSubmit" type="button">登录</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 找回密码弹窗 -->
+  <div class="modal-overlay cloud-auth-modal" id="cloudResetModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title">找回密码</h2>
+        <button class="modal-close" id="cloudResetClose" type="button" aria-label="关闭">
+          <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="cloud-error" id="cloudResetError"></div>
+        <form id="cloudResetForm" novalidate>
+          <div class="cloud-auth-group">
+            <label class="cloud-auth-label" for="cloudResetEmail">注册时使用的邮箱</label>
+            <input type="email" class="form-input" id="cloudResetEmail" name="email"
+                   autocomplete="email" inputmode="email" placeholder="you@example.com">
+          </div>
+          <p class="cloud-hint">
+            我们会给你发一封重置密码的邮件，点开邮件里的链接即可设置新密码。
+          </p>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-primary" id="cloudResetSubmit" type="button">发送重置邮件</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast -->
   <div class="toast" id="toast"></div>
 
+  <!-- 云同步：先读配置，再加载同步模块，最后才是应用主逻辑 -->
+  <script src="supabase-config.js"></script>
+  <script src="cloud-sync.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

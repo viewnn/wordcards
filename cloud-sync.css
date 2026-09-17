@@ -1,0 +1,275 @@
+/* ============================================================
+ * WordCards 云同步界面样式 —— cloud-sync.css
+ * ============================================================
+ * 只负责「账号与同步」相关的界面元素，复用 styles.css 里的
+ * CSS 变量与模态框/设置项类名，保证视觉与原有页面完全一致。
+ * ============================================================ */
+
+/* ==================== 头部：同步状态徽标 ==================== */
+/* 徽标放在标题图标右侧（靠左），更新时间单独靠右 */
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cloud-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.cloud-badge:active {
+  transform: scale(0.97);
+}
+
+.cloud-badge .cloud-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-light);
+  flex: 0 0 auto;
+}
+
+.cloud-badge[data-state='synced'] .cloud-dot {
+  background: var(--success);
+}
+
+.cloud-badge[data-state='syncing'] .cloud-dot {
+  background: var(--primary);
+  animation: cloudPulse 1s ease-in-out infinite;
+}
+
+.cloud-badge[data-state='idle'] .cloud-dot {
+  background: var(--warning);
+}
+
+.cloud-badge[data-state='offline'] .cloud-dot,
+.cloud-badge[data-state='error'] .cloud-dot {
+  background: var(--danger);
+}
+
+/* 未配置 / 未登录：灰色空心感，和「已同步」区分开 */
+.cloud-badge[data-state='disabled'] .cloud-dot,
+.cloud-badge[data-state='signed-out'] .cloud-dot {
+  background: transparent;
+  border: 1.5px solid var(--text-light);
+}
+
+/* ==================== 设置页：账号与同步区块 ==================== */
+/* 区块标题左侧文字 + 右侧状态角标 */
+.cloud-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cloud-state-tag {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-primary);
+  color: var(--text-light);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+.cloud-state-tag.is-on {
+  background: rgba(90, 158, 111, 0.16);
+  color: var(--success);
+}
+
+/* 同步中：圆点呼吸动画 */
+@keyframes cloudPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+/* 未配置时的「如何开启」引导：默认可见，不依赖 JS */
+.cloud-config-missing {
+  padding: 4px 20px 18px;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.cloud-config-missing code {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-primary);
+  font-size: 12px;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.cloud-setup-title {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.cloud-setup-desc {
+  margin-bottom: 12px;
+}
+
+.cloud-setup-steps {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.cloud-setup-steps li {
+  padding-left: 2px;
+}
+
+.cloud-setup-steps strong {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.cloud-config-missing a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.cloud-setup-note {
+  padding-top: 12px;
+  border-top: 1px solid var(--bg-primary);
+  color: var(--text-light);
+}
+
+/*
+ * 设置页右侧的操作按钮（登录 / 注册 / 同步 / 退出）。
+ * 尺寸刻意与「数据管理 → 清除」按钮完全一致：
+ *   padding 8px 21px、font-size 13px、font-weight 400、border-radius 8px。
+ * 四个按钮文案都是两个字，因此宽度也完全一致，右边缘整齐对齐。
+ */
+.setting-item .cloud-action-btn {
+  flex: 0 0 auto;
+  padding: 8px 21px;
+  border: none;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: normal;
+  text-align: center;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+/* 次要操作（注册 / 退出）：浅底，与「清除」同底色 */
+.setting-item .cloud-action-btn.is-ghost {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.setting-item .cloud-action-btn:active {
+  opacity: 0.85;
+}
+
+.setting-item .cloud-action-btn[disabled] {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.cloud-user-email {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.cloud-status-line {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* ==================== 登录 / 注册弹窗 ==================== */
+.cloud-auth-modal .modal-body {
+  padding-top: 16px;
+}
+
+.cloud-auth-group {
+  margin-bottom: 16px;
+}
+
+.cloud-auth-label {
+  display: block;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.cloud-error {
+  display: none;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(201, 106, 80, 0.12);
+  color: var(--danger);
+  font-size: var(--font-size-xs);
+  line-height: 1.6;
+}
+
+.cloud-auth-links {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.cloud-link {
+  border: none;
+  background: none;
+  padding: 6px 0;
+  color: var(--primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  text-align: left;
+}
+
+.cloud-link:active {
+  opacity: 0.7;
+}
+
+.cloud-hint {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--bg-primary);
+  font-size: var(--font-size-xs);
+  color: var(--text-light);
+  line-height: 1.7;
+}
+
+/* 小屏：顶端时间与徽标挤在一起时，只留圆点 */
+@media (max-width: 360px) {
+  .cloud-badge #cloudBadgeText {
+    display: none;
+  }
+  .cloud-badge {
+    padding: 5px 7px;
+  }
+}

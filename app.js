@@ -37,6 +37,14 @@
  *
  * 底部导航在三个页面间切换：learn（学习）/ library（词库）/ settings（设置）。
  * 页面加载完成后（DOMContentLoaded）创建 VocabApp 实例并调用 init() 启动。
+ *
+ * 【云同步（可选）】多端同步由独立模块 cloud-sync.js 提供，本文件只保留 4 个
+ * 可选钩子（都写成 window.CloudSync?.xxx?.()，未加载该模块时等于不存在）：
+ *   - VocabDB.updateWord()      → stampWord()        写库前盖变更时间戳并记入上传队列
+ *   - VocabDB.setSetting()      → onSettingWritten() 设置/今日会话写完后触发上传调度
+ *   - VocabApp.init() 末尾      → attach(this)       启动同步、恢复登录态、首次合并
+ *   - VocabApp.clearProgress()  → onProgressCleared() 把「清除记录」广播到其它设备
+ * 设计细节见 docs/supabase-sync.md。
  */
 
 // ==================== 卡片滑动过场动画参数 ====================
@@ -167,6 +175,12 @@ class VocabDB {
 
   /** 按 id 整体覆盖更新一条词条（put：有则更新、无则新增） */
   async updateWord(word) {
+    // 【云同步钩子 1】写库之前先让 CloudSync 给词条盖上变更时间戳（syncUpdatedAt），
+    // 并记入待上传队列。时间戳必须跟着词条一起落库，否则刷新页面后
+    // 就无法判断「本地改动」和「云端改动」谁更新。
+    // 未登录 / 未配置 Supabase 时 CloudSync.stampWord 立即返回，行为与改造前完全一致。
+    window.CloudSync?.stampWord?.(word);
+
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(['words'], 'readwrite');
       const store = transaction.objectStore('words');
@@ -255,7 +269,13 @@ class VocabDB {
       const transaction = this.db.transaction(['settings'], 'readwrite');
       const store = transaction.objectStore('settings');
       const request = store.put({ key, value });
-      request.onsuccess = () => resolve();
+      request.onsuccess = () => {
+        resolve();
+        // 【云同步钩子 2】设置写完后通知 CloudSync。
+        // 只有参与同步的设置项和 learnProgress（今日学习会话）会触发上传，
+        // 其余 key（统计快照、词典更新时间、同步元数据等）会被它忽略。
+        window.CloudSync?.onSettingWritten?.(key, value);
+      };
       request.onerror = () => reject(request.error);
     });
   }
@@ -368,6 +388,10 @@ class VocabApp {
       // 显示上次词库更新时间
       await this.loadDictUpdateTimeDisplay();
       this.render();
+
+      // 【云同步钩子 3】启动云同步（登录态恢复、首次合并、注册网络/前台监听）。
+      // 未配置 Supabase 或未加载 SDK 时，内部直接跳过，不影响任何本地功能。
+      window.CloudSync?.attach?.(this);
     } catch (error) {
       console.error('App initialization failed:', error);
       this.showToast('应用初始化失败，正在尝试修复...');
@@ -3736,7 +3760,8 @@ class VocabApp {
 
   /** 设置页“清除进度”：确认后清空今日/累计统计与学习进度，把所有词条状态重置为 new，并刷新界面 */
   async clearProgress() {
-    if (confirm('确定要清除所有“已掌握”和“待复习”的记录吗？')) {
+    const cloudHint = window.CloudSync?.isActive?.() ? '（已登录，云端记录也会一起清除）' : '';
+    if (confirm(`确定要清除所有“已掌握”和“待复习”的记录吗？${cloudHint}`)) {
       // 清除所有学习相关设置
       await this.db.setSetting('lastStudyDate', null);
       await this.db.setSetting('todayCount', 0);
@@ -3802,6 +3827,14 @@ class VocabApp {
       // 如果当前在词库页面，刷新列表
       if (this.currentPage === 'library') {
         await this.renderLibrary();
+      }
+
+      // 【云同步钩子 4】把「清除记录」这件事也同步出去：
+      // 生成一个只增不减的重置时间戳，其它设备同步时据此把本地记录同样清零。
+      try {
+        await window.CloudSync?.onProgressCleared?.();
+      } catch (error) {
+        console.warn('云同步清除记录失败（不影响本地清除）:', error);
       }
     }
   }

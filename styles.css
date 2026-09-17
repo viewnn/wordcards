@@ -1,4 +1,4 @@
-﻿/* ==================== 全局样式 ==================== */
+/* ==================== 全局样式 ==================== */
 :root {
   --primary: #4A90D9;
   --primary-color: #4A90D9;
@@ -1472,11 +1472,13 @@ select {
 }
 
 .mode-option {
-  padding: 8px 20px;
+  /* 尺寸与设置页「清除」按钮保持一致：padding 8px 21px + 13px 字号 */
+  padding: 8px 21px;
   background: var(--bg-primary);
   border: none;
   border-radius: 8px;
-  font-size: var(--font-size-sm);
+  font-size: 13px;
+  font-weight: 400;
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.2s;

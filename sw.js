@@ -8,7 +8,10 @@ const urlsToCache = [
   './',
   './index.html',
   './styles.css',
+  './cloud-sync.css',
   './app.js',
+  './cloud-sync.js',
+  './supabase-config.js',
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png'
