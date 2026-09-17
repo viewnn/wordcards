@@ -335,7 +335,7 @@
               <div class="setting-item">
                 <div class="setting-info">
                   <h4>还没有账号</h4>
-                  <p>用邮箱注册，数据只存在你自己的 Supabase 项目里</p>
+                  <p>注册数据只存在你自己的Supabase项目里</p>
                 </div>
                 <button class="cloud-action-btn is-ghost" id="cloudSignUpBtn" type="button">注册</button>
               </div>
@@ -343,6 +343,12 @@
 
             <!-- 情况三：已登录 -->
             <div id="cloudSignedIn" style="display: none;">
+              <div class="setting-item">
+                <div class="setting-info">
+                  <h4>同步状态</h4>
+                  <p id="cloudSyncStatusText">等待同步</p>
+                </div>
+              </div>
               <div class="setting-item">
                 <div class="setting-info cloud-status-line">
                   <h4 class="cloud-user-email" id="cloudUserEmail">—</h4>
@@ -352,21 +358,15 @@
               </div>
               <div class="setting-item">
                 <div class="setting-info">
-                  <h4>同步状态</h4>
-                  <p id="cloudSyncStatusText">等待同步</p>
-                </div>
-              </div>
-              <div class="setting-item">
-                <div class="setting-info">
                   <h4>自动同步</h4>
-                  <p>学习后约 3 秒自动上传；停留在本页时每分钟自动检查更新</p>
+                  <p>学习后约 3 秒自动上传</p>
                 </div>
                 <div class="toggle active" id="cloudAutoSyncToggle"></div>
               </div>
               <div class="setting-item">
                 <div class="setting-info">
                   <h4>退出登录</h4>
-                  <p>本机学习记录会保留，重新登录可继续同步</p>
+                  <p>学习记录会保留，重新登录可继续同步</p>
                 </div>
                 <button class="cloud-action-btn is-ghost" id="cloudSignOutBtn" type="button">退出</button>
               </div>
