@@ -1002,20 +1002,8 @@ select {
   background: var(--bg-card);
 }
 
-.category-section {
-  margin-bottom: 24px;
-  background: var(--bg-card);
-  /* padding: 2px; */
-  border-radius: var(--radius-md);
-}
-
-.category-title {
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-  margin-bottom: 12px;
-  font-weight: 500;
-}
-
+/* 词库列表原先按分类分组渲染，每组带一个「分类名 (数量)」小标题；
+   现在小标题已取消、数量移到分类下拉选项里，整份列表共用一个 .word-list */
 .word-list {
   display: flex;
   flex-direction: column;

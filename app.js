@@ -1405,7 +1405,16 @@ class VocabApp {
     // 真正的数量由随后的 renderLibrary / updateCategoryLabel 现算并写入
     this._libraryTabCount = null;
     const words = (await this.db.getAllWords()).filter((w) => this.isWordInActiveScope(w));
-    const categories = [...new Set(words.map((w) => w.category || '未分类'))];
+
+    // 统计每个分类在当前词典范围内的词条数。
+    // 之前这个数字显示在词库列表每个分类的小标题上（aa (12)），
+    // 现在小标题取消了，数量挪到下拉选项里显示成「aa（12）」。
+    const countByCategory = new Map();
+    for (const w of words) {
+      const cat = w.category || '未分类';
+      countByCategory.set(cat, (countByCategory.get(cat) || 0) + 1);
+    }
+    const categories = [...countByCategory.keys()];
     const container = document.getElementById('categoryOptions');
 
     const allLabel = document.getElementById('category-all-label');
@@ -1418,7 +1427,7 @@ class VocabApp {
         (cat) => `
       <label class="dropdown-item">
         <input type="checkbox" data-category="${this.escapeHtml(cat)}">
-        <span>${this.escapeHtml(cat)}</span>
+        <span>${this.escapeHtml(cat)}（${countByCategory.get(cat) || 0}）</span>
       </label>
     `
       )
@@ -3539,24 +3548,37 @@ class VocabApp {
 
     this._librarySpeakWordsById = new Map(words.map((w) => [w.id, w]));
 
-    // 按分类分组
-    const grouped = {};
-    words.forEach(word => {
-      const cat = word.category || '未分类';
-      if (!grouped[cat]) grouped[cat] = [];
-      grouped[cat].push(word);
-    });
-    
-    const categories = Object.keys(grouped);
+    // ---- 决定列表顺序 ----
+    // 「待复习 / 已掌握 / 收藏」按最近学习时间倒序，最近学过的排最上面；
+    // 「全部 / 新词」保持原来「同分类的词连续排列」的顺序，不改变用户熟悉的样子。
+    const effectiveStatus = this._libraryTodayOnly
+      ? (this._libraryTodayKind || this.filterStatus)
+      : this.filterStatus;
+    const TIME_SORTED_TABS = ['review', 'mastered', 'favorite'];
 
-    let html = '';
-    for (const category of categories) {
-      const categoryWords = grouped[category];
-      html += `
-        <div class="category-section">
-          <h3 class="category-title">${category} (${categoryWords.length})</h3>
-          <div class="word-list">
-            ${categoryWords.map(word => `
+    let orderedWords;
+    if (TIME_SORTED_TABS.includes(effectiveStatus)) {
+      orderedWords = words.slice().sort((a, b) => {
+        const ta = Number(a.lastStudied) || 0;
+        const tb = Number(b.lastStudied) || 0;
+        if (tb !== ta) return tb - ta;                      // 最近学过的在前
+        return (Number(a.id) || 0) - (Number(b.id) || 0);   // 时间相同按 id 稳定排序
+      });
+    } else {
+      const grouped = new Map();
+      words.forEach((word) => {
+        const cat = word.category || '未分类';
+        if (!grouped.has(cat)) grouped.set(cat, []);
+        grouped.get(cat).push(word);
+      });
+      orderedWords = [];
+      grouped.forEach((list) => { orderedWords.push(...list); });
+    }
+    
+    // 每个分类的小标题（原来的「aa (12)」）已取消，数量改到分类下拉选项里显示
+    const html = `
+      <div class="word-list">
+        ${orderedWords.map(word => `
                 <div class="word-item" data-id="${word.id}">
                   <div class="word-info">
                     <h3>${word.word}${word.favorite ? ' ' : ''}</h3>
@@ -3598,11 +3620,9 @@ class VocabApp {
                   `}
                   </div>
                 </div>
-            `).join('')}
-          </div>
-        </div>
-      `;
-    }
+        `).join('')}
+      </div>
+    `;
     
     container.innerHTML = html;
 
