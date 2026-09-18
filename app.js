@@ -689,9 +689,16 @@ class VocabApp {
 
       await this.refreshLibraryFiltersAfterDictChange();
 
-      if (this.currentPage === 'learn') {
-        await this.prepareLearnSession();
-      }
+      // 【注意】这里不要再调用 prepareLearnSession()。
+      //
+      // init() 里紧接着就会执行 render()，而 render() 内部同样会调用
+      // prepareLearnSession()。连着调用两次会导致「刷新/切后台回来进度清零」：
+      //   第一次会从 settings.learnProgress 恢复进度，并把 currentCardIndex
+      //     设成保存下来的非 0 值（比如 15）；
+      //   第二次进来时，恢复条件里的 `this.currentCardIndex === 0` 已经不成立，
+      //     于是代码走到「重新抽词」分支，把刚恢复的队列整个换掉、下标归零，
+      //     用户看到的就是「又从头开始背」。
+      // 词典更新后的队列重建，交给 render() 里那一次即可。
     } catch (error) {
       console.error('自动加载 dict.xlsx 失败:', error);
       // 忽略错误，不影响应用启动
@@ -3039,7 +3046,12 @@ class VocabApp {
     // 持久化学习时间：否则"跳过"的单词在下次会话仍被视为从未学过，
     // 导致重复频率筛选（如 2 天内不再出现）失效。
     // 落库放到动画开始之后，与滑动动画解耦，避免阻塞过场。
-    Promise.resolve(this.db.updateWord(skipped)).catch((err) => {
+    Promise.resolve(this.db.updateWord(skipped))
+      // "跳过"会把这张卡挪到队列末尾，也就是改变了今日队列本身。
+      // 不同步保存一次进度的话，跳过几张后切后台/刷新，恢复出来的还是
+      // 跳过之前的队列顺序与下标，等于跳过白做了。
+      .then(() => this.saveLearnProgress())
+      .catch((err) => {
       console.error('保存跳过学习时间失败:', err);
     });
   }
