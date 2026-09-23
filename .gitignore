@@ -2,9 +2,12 @@
 .idea/
 .vscode/
 .DS_Store
-.docs/
-.supabase/
-.start_server8080.bat
+# 以下路径必须与磁盘上的真实名字完全一致。
+# 原先误写成 .docs/ .supabase/ .start_server8080.bat（多了一个前导点），
+# 规则从未匹配到任何文件，导致这些内容被反复提交上去。
+docs/
+supabase/
+start_server8080.bat
 Thumbs.db
 ~$*.xlsx
 *.tmp
