@@ -665,33 +665,31 @@
   };
 
   /**
-   * 【钩子 3】用户点了「清除记录」（app.js 的 clearProgress 末尾）。
-   * 生产一个只增不减的重置时间戳，其它设备同步时据此把本地记录清零。
+   * 【钩子 3】用户点了设置页的「清除」（app.js 的 clearProgress 末尾）。
+   * scopeKeys：本次清除的词典范围，['word'] / ['phrase'] / ['word','phrase']。
+   *
+   * 旧实现是广播一个只增不减的全局重置时间戳（user_state.progress_reset_at），
+   * 其它设备收到后会把**所有**范围的记录一起清零；而「清除」现在是按词典范围
+   * 生效的，所以改为让这批刚被重置为 new 的词条走普通上行同步：
+   * 云端按 dict_key 逐条覆盖成 new，字/短语各自独立，也不需要改数据库结构。
    */
-  CloudSyncEngine.prototype.onProgressCleared = async function () {
+  CloudSyncEngine.prototype.onProgressCleared = async function (scopeKeys) {
     if (!this.isActive()) return;
 
-    // clearProgress 会逐条把词条状态重置为 new，期间攒下的待上传队列已无意义
-    if (this._pushTimer) {
-      clearTimeout(this._pushTimer);
-      this._pushTimer = null;
-    }
-    this.dirty.clear();
-
-    var resetAt = Date.now();
-    this.meta.progressResetAt = resetAt;
-    await this.saveMeta();
+    var labels = { word: '字', phrase: '短语' };
+    var scopeLabel = Array.isArray(scopeKeys) && scopeKeys.length === 1
+      ? labels[scopeKeys[0]] || '当前范围'
+      : '全部';
 
     try {
-      // 注意参数名必须是 camelCase 的 progressResetAt，
-      // pushUserState 内部才会映射成 RPC 的 p_progress_reset_at
-      await this.pushUserState({ progressResetAt: resetAt });
-      // 顺手清理云端过期的历史行（失败也不影响正确性）
-      this.client.rpc('delete_progress_before', { p_before: resetAt }).then(function () {}, function () {});
-      this.setStatus('synced', '已清除云端记录');
+      // 这些词条在 clearProgress 里刚被 updateWord 重置为 new（已进入 dirty 队列），
+      // 这里立即上行而不等防抖，保证其它设备下一次拉取拿到的就是清除后的状态。
+      // 不能像旧实现那样 clear() 掉队列，否则这批 new 就传不出去了。
+      await this.flushDirty();
+      this.setStatus('synced', '已清除「' + scopeLabel + '」的云端记录');
     } catch (error) {
-      console.warn('[cloud-sync] 重置信号上行失败，将在下次同步重试:', error);
-      this.setStatus('error', '重置信号上传失败，稍后会自动重试');
+      console.warn('[cloud-sync] 清除记录上行失败，将在下次同步重试:', error);
+      this.setStatus('error', '清除记录上传失败，稍后会自动重试');
     }
   };
 
@@ -980,6 +978,16 @@
 
     this.meta.progressResetAt = resetAt;
     await this.saveMeta();
+
+    // 词条状态已被清零，今日累计张数也要一起归零，否则进度条会停在旧数字上
+    if (typeof this.app.resetTodayDoneCount === 'function') {
+      try {
+        await this.app.resetTodayDoneCount();
+      } catch (error) {
+        console.warn('[cloud-sync] 重置今日进度计数失败:', error);
+      }
+    }
+
     console.info('[cloud-sync] 已应用云端重置信号，清零', touched.length, '条记录');
     return touched.length;
   };
@@ -1115,6 +1123,18 @@
 
     this.meta.lastPushedSessionJson = stableStringify(session);
     await this.saveMeta();
+
+    // 换设备接着背：云端会话只带「队列下标」，本地进度条按累计张数算，
+    // 因此把累计数补到不低于该下标，进度条才与卡片位置对得上
+    var localDone = toNumber(this.app.todayDoneCount, 0);
+    if (index > localDone && typeof this.app.saveTodayDoneCount === 'function') {
+      this.app.todayDoneCount = index;
+      try {
+        await this.app.saveTodayDoneCount();
+      } catch (error) {
+        console.warn('[cloud-sync] 对齐今日进度计数失败:', error);
+      }
+    }
 
     // 让学习页按同步过来的队列重建（prepareLearnSession 会读取刚写入的 learnProgress）
     if (this.app.currentPage === 'learn') {

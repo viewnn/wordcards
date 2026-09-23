@@ -41,7 +41,7 @@
 | 词条学习状态（`status` / `favorite` / `lastStudied` / `reviewCount`） | ✅ | 核心数据，跨设备同步的主体 |
 | 用户设置（每日目标、学习模式、重复频率、词典范围、音标渐显、各类开关） | ✅ | 10 个键，见 `cloud-sync.js` 的 `SYNCED_SETTING_KEYS` |
 | 今日学习会话（今日队列 + 当前卡片下标） | ✅ | 换设备后能接着上次的地方背 |
-| 「清除记录」动作 | ✅ | 用只增不减的重置时间戳广播给其它设备 |
+| 「清除记录」动作 | ✅ | 按当前词典范围（字/短语/全部）清除：把该范围词条重置为 `new` 后走普通上行同步 |
 | 词库本身（`dict.xlsx` 的 5794 个词条） | ❌ | 静态数据，每台设备本地导入即可，没必要占云端空间和流量 |
 | 今日/累计统计数字 | ❌ | 完全可以从词条状态实时算出来，同步它反而会引入不一致 |
 | 收藏以外的界面偏好、词典更新时间 | ❌ | 本机信息 |
@@ -75,7 +75,7 @@
 | `settings_updated_at` | bigint | 设置的客户端逻辑时间戳（LWW） |
 | `session` | jsonb | 今日会话 `{ date, currentCardIndex, goal, savedAt, dictKeys[] }` |
 | `session_updated_at` | bigint | 会话的客户端逻辑时间戳（LWW） |
-| `progress_reset_at` | bigint | 「清除记录」时间戳，**只增不减** |
+| `progress_reset_at` | bigint | 旧版「清除记录」的全局重置时间戳，**只增不减**。现在清除按词典范围生效，已不再写入；保留该列只为兼容旧版本设备 |
 
 ### 2.3 为什么用 `dict_key` 而不是词条 id
 
@@ -105,8 +105,8 @@ PostgREST 的 `upsert` 不支持带条件的 `do update`，而「时间戳大的
 | 函数 | 作用 |
 | --- | --- |
 | `push_progress(p_rows jsonb)` | 批量上行；`on conflict ... where excluded.client_updated_at > 已有值`；**回传**这些词条在云端的最终状态，客户端据此纠正本地 |
-| `push_user_state(...)` | 上行设置 / 会话 / 重置信号，各自按时间戳 LWW，重置信号取 `greatest` 只增不减 |
-| `delete_progress_before(p_before)` | 可选：清理重置时间点之前的历史行，让库保持干净（不影响正确性） |
+| `push_user_state(...)` | 上行设置 / 会话 / 重置信号，各自按时间戳 LWW，重置信号取 `greatest` 只增不减（重置信号现在只用于兼容旧版本设备） |
+| `delete_progress_before(p_before)` | 可选：清理重置时间点之前的历史行，让库保持干净（不影响正确性；不再由「清除」触发） |
 
 三个函数都是 `security invoker`，RLS 照常生效。
 
@@ -167,12 +167,19 @@ PostgREST 的 `upsert` 不支持带条件的 `do update`，而「时间戳大的
 
 ### 3.4 「清除记录」如何跨设备生效
 
-不用墓碑行，用**只增不减的重置时间戳**：
+「清除」是**按词典范围**（字 / 短语 / 全部）生效的，所以不用广播全局重置信号，
+而是把被清除的那批词条当成普通改动上行：
 
-1. 设备 A 点清除 → 本地清零 + 写 `user_state.progress_reset_at = T`
-2. 设备 B 同步时发现云端 `T` 比本地记录的大 → 把**变更时间早于 T** 的词条清零
-3. 设备 B 在 T 之后新学的词条（时间戳更大）不会被误清
-4. 拉取时 `client_updated_at <= T` 的云端行一律丢弃
+1. 设备 A 点清除 → 只把**当前范围**的词条状态重置为 `new`（并清掉 `last_studied`）
+2. 这些词条经 `stampWord()` 拿到新的 `client_updated_at`，随普通上行队列推到云端
+3. 云端 `push_progress` 按 `dict_key` 逐条覆盖成 `new`，**其它范围的行完全不动**
+4. 设备 B 拉取增量时，按 LWW 应用这些行，于是只有对应范围被清零
+
+> 早期版本走的是**只增不减的重置时间戳**（`user_state.progress_reset_at`）：
+> 设备 A 点清除后写一个大时间戳，设备 B 同步时把「变更时间早于 T」的词条全部清零。
+> 这个机制会把字和短语一起清掉，与「按范围清除」冲突，因此清除动作已不再写它；
+> 代码里的 `applyRemoteReset()` 仍然保留，用于兼容旧版本设备发出的重置信号
+> （`push_user_state` / `delete_progress_before` 两个 RPC 同理，保留但不再由清除触发）。
 
 ---
 
@@ -282,7 +289,7 @@ Supabase 的跨域请求和 IndexedDB 都需要正常的 origin。
 | `VocabDB.updateWord()` | `CloudSync.stampWord(word)` | 写库前盖时间戳 + 记入待上传队列。放在 `updateWord` 这一层，一处改动覆盖了掌握/陌生/跳过/收藏/编辑等**所有**词条写入路径 |
 | `VocabDB.setSetting()` | `CloudSync.onSettingWritten(key, value)` | 设置和今日会话写完后触发上传调度 |
 | `VocabApp.init()` 末尾 | `CloudSync.attach(this)` | 启动云同步：恢复登录态、首次合并、注册网络/前台监听 |
-| `VocabApp.clearProgress()` 末尾 | `CloudSync.onProgressCleared()` | 把「清除记录」广播给其它设备 |
+| `VocabApp.clearProgress()` 末尾 | `CloudSync.onProgressCleared(scopeKeys)` | 把「按词典范围清除」同步出去：让刚被重置为 `new` 的词条立即上行，其它范围不受影响 |
 
 因为都用了可选链 `?.`，**未加载 `cloud-sync.js` 时这些调用等于不存在**，
 应用仍能独立运行。
@@ -387,7 +394,9 @@ window.SUPABASE_CONFIG = {
 所以也会上云。
 
 **Q：清除记录后，另一台设备上的记录会怎样？**
-跟着清零。这是设计如此 —— 重置信号只增不减地广播给所有设备。
+跟着清零，而且只清**同一个词典范围**。清除是把该范围词条重置为 `new` 后当普通改动上传的，
+另一台设备拉取时逐条覆盖，所以「清除字」不会影响另一台的「短语」记录。
+（旧版本用全局重置时间戳广播，会把字和短语一起清掉，已不再使用。）
 
 **Q：能不能同步词库本身（换词典不用重新导入）？**
 当前设计故意不同步：`dict.xlsx` 是静态数据，每台设备本地导入即可，

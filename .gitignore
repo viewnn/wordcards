@@ -1,0 +1,14 @@
+# 忽略编辑器 / 系统 / 临时文件
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+~$*.xlsx
+*.tmp
+.tmp-*/
+
+# 本地私有配置（如果以后想把 Supabase 配置放到这里，请注意它是公开可见的：
+# 前端文件里的 anon key 本来就无法隐藏，真正要保护的是 service_role key，
+# 那个 key 绝不能出现在任何会被提交、被浏览器下载的文件里）
+.env
+.env.local

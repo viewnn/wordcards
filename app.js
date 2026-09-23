@@ -43,7 +43,7 @@
  *   - VocabDB.updateWord()      → stampWord()        写库前盖变更时间戳并记入上传队列
  *   - VocabDB.setSetting()      → onSettingWritten() 设置/今日会话写完后触发上传调度
  *   - VocabApp.init() 末尾      → attach(this)       启动同步、恢复登录态、首次合并
- *   - VocabApp.clearProgress()  → onProgressCleared() 把「清除记录」广播到其它设备
+ *   - VocabApp.clearProgress()  → onProgressCleared(scopeKeys) 把「按范围清除」同步到其它设备
  * 设计细节见 docs/supabase-sync.md。
  */
 
@@ -292,6 +292,14 @@ class VocabApp {
     this.currentPage = 'learn';       // 当前所在页面：learn 学习 / library 词库 / settings 设置
     this.currentCardIndex = 0;        // 今日学习队列中，当前卡片的下标
     this.todayWords = [];             // 今日学习队列（词条对象数组）
+    /**
+     * 今日累计已完成的张数（进度条口径，由 settings 里的 todayDoneCount 持久化）。
+     * 进度条不再按「当前队列下标」算：词条数少于每日目标时（如 20 条短语 / 目标 100），
+     * 点【继续学习】会重抽一轮队列，下标归零但累计数继续往上加，直到达到每日目标才算完成。
+     */
+    this.todayDoneCount = 0;
+    /** 本轮队列的容量上限 = min(每日目标, 当前范围内词条数)；用于判断切页时能否恢复快照 */
+    this._queueCapacity = 0;
     this.isFlipped = false;           // 当前卡片是否处于翻面（释义面朝上）状态
     // 全部用户设置；启动时由 loadSettings() 从数据库读取覆盖默认值
     this.settings = {
@@ -385,6 +393,8 @@ class VocabApp {
       // 保证首次升级时迁移能按现有词条分类拆分历史累计记录
       await this.autoLoadDict();
       await this.loadTodayStats();
+      // 恢复「今日累计完成张数」：进度条按这个数走，跨天自动归零
+      await this.loadTodayDoneCount();
       // 显示上次词库更新时间
       await this.loadDictUpdateTimeDisplay();
       this.render();
@@ -747,6 +757,7 @@ class VocabApp {
       await this.db.init();
       await this.loadSettings();
       await this.loadTodayStats();
+      await this.loadTodayDoneCount();
       this.bindEvents();
       await this.addSampleWords();
       this.render();
@@ -1034,6 +1045,16 @@ class VocabApp {
       const today = this._emptyScopeStats();
       const total = this._emptyScopeStats();
 
+      // 本次只重算「当前词典范围」覆盖的分类，另一个分类沿用已有计数。
+      // 否则每次学习/清除都会把另一个范围（当前是「字」时的「短语」）的统计一起抹成 0，
+      // 而「按范围清除」的要求正是另一个范围完全不受影响。
+      const activeKeys = this.activeScopeKeys();
+      for (const key of ['word', 'phrase']) {
+        if (activeKeys.includes(key)) continue;
+        today[key] = { ...this._scopeToday[key] };
+        total[key] = { ...this._scopeTotal[key] };
+      }
+
       for (const word of scoped) {
         if (word.status !== 'mastered' && word.status !== 'review') continue;
 
@@ -1048,11 +1069,13 @@ class VocabApp {
 
       this._scopeToday = today;
       this._scopeTotal = total;
-      this._cachedStatusCounts = {
-        mastered: total.word.mastered + total.phrase.mastered,
-        review: total.word.review + total.phrase.review
-      };
       this.syncActiveStatsMirrors();
+      // 累计统计 = 当前词典范围内各状态的真实词条数（与词库页筛选结果一致）。
+      // 取镜像值而不是把两个分类相加，否则「沿用」的另一个分类会被算进来
+      this._cachedStatusCounts = {
+        mastered: this.totalStats.mastered,
+        review: this.totalStats.review
+      };
       this.updateProgress();
       await this.persistScopeStats();
     };
@@ -1061,10 +1084,17 @@ class VocabApp {
     return this._statusCountsChain;
   }
 
-  /** 清空今日与累计统计（数据管理 - 清除记录时调用） */
-  async resetScopeStats() {
-    this._scopeToday = this._emptyScopeStats();
-    this._scopeTotal = this._emptyScopeStats();
+  /**
+   * 清空今日与累计统计（设置页「清除」时调用）。
+   * keys 省略 = 两个分类都清；传入 ['word'] / ['phrase'] 时只清对应分类的计数，
+   * 这样按词典范围清除时，另一个范围（例如当前是「字」时的「短语」）的数字原样保留。
+   */
+  async resetScopeStats(keys = ['word', 'phrase']) {
+    for (const key of keys) {
+      if (!this._scopeToday[key] || !this._scopeTotal[key]) continue;
+      this._scopeToday[key] = { mastered: 0, review: 0 };
+      this._scopeTotal[key] = { mastered: 0, review: 0 };
+    }
     await this.persistScopeStats();
     this.syncActiveStatsMirrors();
   }
@@ -1586,6 +1616,8 @@ class VocabApp {
       await self.db.setSetting('dailyGoal', self.settings.dailyGoal);
       // 清除之前保存的学习进度，确保新目标从全新的状态开始
       await self.db.setSetting('learnProgress', null);
+      // 目标变了，累计口径也跟着重来（否则新目标会一上来就显示旧目标的进度）
+      await self.resetTodayDoneCount();
       self.showToast('每日目标已更新');
       
       // 立即更新进度条UI
@@ -1774,6 +1806,8 @@ class VocabApp {
         await self.db.setSetting('learnProgress', null);
         self._learnSessionSnapshot = null;
         self.currentCardIndex = 0;
+        // 换了词典范围，进度条的口径也换了，累计数一并归零
+        await self.resetTodayDoneCount();
 
         // 词库页展示范围已变化，同步分类勾选并刷新列表
         await self.syncLibraryCategoryFilterToDictType();
@@ -2206,7 +2240,8 @@ class VocabApp {
       this._learnSessionSnapshot = {
         currentCardIndex: this.currentCardIndex,
         todayWords: JSON.parse(JSON.stringify(this.todayWords)),
-        todayStats: { ...this.todayStats }
+        todayStats: { ...this.todayStats },
+        todayDoneCount: this.todayDoneCount
       };
     }
 
@@ -2226,21 +2261,26 @@ class VocabApp {
 
     if (page === 'learn') {
       const snap = this._learnSessionSnapshot;
-      // 只有当快照中的队列长度与当前每日目标匹配时才恢复快照
+      // 只有当快照中的队列长度与「本轮队列容量」匹配时才恢复快照
+      // （容量 = min(每日目标, 范围内词条数)，词条数少于目标时队列天生短一截）
+      const snapshotCapacity = Number(this._queueCapacity) || this.settings.dailyGoal;
       const shouldRestoreSnapshot = snap && snap.todayWords && snap.todayWords.length > 0 && 
-                                   snap.todayWords.length === this.settings.dailyGoal;
+                                   snap.todayWords.length === snapshotCapacity;
       
       if (shouldRestoreSnapshot) {
         this.todayWords = snap.todayWords;
         this.currentCardIndex = snap.currentCardIndex;
         this.todayStats = { ...snap.todayStats };
+        if (Number.isFinite(Number(snap.todayDoneCount))) {
+          this.todayDoneCount = Math.max(0, Math.floor(Number(snap.todayDoneCount)));
+        }
         // 统计数据以按分类归档的计数为准，避免恢复会话快照时把数字回退到旧值
         this.syncActiveStatsMirrors();
         const emptyState = document.getElementById('learnEmptyState');
         if (emptyState) emptyState.style.display = 'none';
         
-        // 检查是否已经完成所有单词学习
-        if (this.currentCardIndex >= this.todayWords.length) {
+        // 检查是否已经完成所有单词学习（或今日目标已达标：达标后也不再展示卡片）
+        if (this.currentCardIndex >= this.todayWords.length || this.isDailyGoalReached()) {
           // 显示完成页面
           this.showComplete();
         } else {
@@ -2284,6 +2324,40 @@ class VocabApp {
       savedAt: new Date().toISOString()
     };
     await this.db.setSetting('learnProgress', progress);
+    // 累计张数跟着进度一起落库，否则刷新后进度条会从当前队列的下标重新算
+    await this.saveTodayDoneCount();
+  }
+
+  /**
+   * 读取「今日累计完成张数」。不是今天记录的一律从 0 开始，等价于每天重置进度。
+   *
+   * 单独存一个设置项、而不是塞进 learnProgress，是因为点【继续学习】时会清空
+   * learnProgress（强制重抽队列）；如果累计数跟着被清掉，「词条数 < 每日目标」时
+   * 进度就会永远停在词条数上，到不了用户设置的 100。
+   */
+  async loadTodayDoneCount() {
+    const saved = await this.db.getSetting('todayDoneCount', null);
+    const today = new Date().toDateString();
+    if (saved && saved.date === today && Number.isFinite(Number(saved.count))) {
+      this.todayDoneCount = Math.max(0, Math.floor(Number(saved.count)));
+    } else {
+      this.todayDoneCount = 0;
+    }
+    return this.todayDoneCount;
+  }
+
+  /** 写入「今日累计完成张数」（带日期戳，用于跨天判断） */
+  async saveTodayDoneCount() {
+    await this.db.setSetting('todayDoneCount', {
+      date: new Date().toDateString(),
+      count: Math.max(0, Math.floor(Number(this.todayDoneCount) || 0))
+    });
+  }
+
+  /** 今日累计进度归零（改每日目标、切换词典范围、清除记录、达标后开新一轮时调用） */
+  async resetTodayDoneCount() {
+    this.todayDoneCount = 0;
+    await this.saveTodayDoneCount();
   }
 
   // 加载学习进度
@@ -2303,14 +2377,22 @@ class VocabApp {
 
   /**
    * 准备（或恢复）今日学习会话：
-   * 1) 若今天保存过进度且队列长度与每日目标一致 → 恢复进度；
+   * 1) 若今天保存过进度且队列与当前设置匹配 → 恢复进度；
    * 2) 否则取当前词典范围（全部/字/短语）的词条，按“重复频率”过滤掉近期学过的；
-   * 3) 随机模式打散并尽量让相邻卡片分类不同；顺序模式按 新词→待复习 排列；
+   * 3) 随机模式打散并尽量让相邻卡片分类不同；顺序模式按 新词→待复习→已掌握 排列；
    * 4) 截取每日目标数量作为今日队列，渲染第一张卡并更新进度条。
+   *
+   * 特例：范围内的词条全都学过时（累计已掌握 + 累计待复习 = 词条总数），
+   * 「重复频率」会把所有词都挡在静默期内，按频率抽词只能得到空队列。
+   * 这时降级为「复习轮」（_isReviewRound = true）：忽略重复频率，从最久没学过的词
+   * 开始重新组一轮队列，保证【继续学习】永远有卡可背，而不是卡在空状态上。
    */
   async prepareLearnSession() {
     this.cancelScheduledPhoneticRead();
     this._learnSessionSnapshot = null;
+
+    // 本次会话是否为「复习轮」（范围内词条都学过、重复频率把它们全挡住时才会置 true）
+    this._isReviewRound = false;
 
     // 尝试加载之前保存的学习进度
     const savedProgress = await this.loadLearnProgress();
@@ -2319,12 +2401,21 @@ class VocabApp {
     const restoredTodayWords = savedProgress?.todayWords
       ? savedProgress.todayWords.map((word) => storedWordsById.get(word.id)).filter(Boolean)
       : [];
-    
-    // 只有保存的队列与当前词典完全对应且长度与每日目标匹配时才恢复进度
+
+    // 只取当前展示分类（全部/字/短语）的词条；另一分类的词条常驻词库，记录不会被清除
+    const allWords = allStoredWords.filter((w) => this.isWordInActiveScope(w));
+
+    // 本轮队列最多能有多少张：范围内词条比每日目标还少时，队列只能是范围内词条数
+    const queueCapacity = Math.min(this.settings.dailyGoal, allWords.length);
+    this._queueCapacity = queueCapacity;
+
+    // 只有保存的队列能完整对上库里的词条、且长度仍等于当前队列容量时才恢复进度。
+    // 用 queueCapacity 而不是直接比每日目标：否则「词条数 < 每日目标」时队列天生短一截，
+    // 每次刷新/切页都会被判为不匹配而重新抽词，进度被清零。
     const shouldRestoreProgress = savedProgress && 
                                   savedProgress.todayWords && 
                                   restoredTodayWords.length === savedProgress.todayWords.length &&
-                                  savedProgress.todayWords.length === this.settings.dailyGoal &&
+                                  savedProgress.todayWords.length === queueCapacity &&
                                   this.currentCardIndex === 0;
     
     if (shouldRestoreProgress) {
@@ -2340,8 +2431,8 @@ class VocabApp {
         const emptyState = document.getElementById('learnEmptyState');
         if (emptyState) emptyState.style.display = 'none';
         
-        // 检查是否已经完成所有单词学习
-        if (this.currentCardIndex >= this.todayWords.length) {
+        // 检查是否已经完成所有单词学习（或今日目标已达标：达标后也不再展示卡片）
+        if (this.currentCardIndex >= this.todayWords.length || this.isDailyGoalReached()) {
           // 显示完成页面
           this.showComplete();
         } else {
@@ -2359,9 +2450,6 @@ class VocabApp {
       return;
     }
 
-    // 只取当前展示分类（全部/字/短语）的词条；另一分类的词条常驻词库，记录不会被清除
-    const allWords = allStoredWords.filter((w) => this.isWordInActiveScope(w));
-    
     // 根据重复频率筛选单词
     const frequency = this.settings.repeatFrequency;
     const now = Date.now();
@@ -2378,18 +2466,32 @@ class VocabApp {
       });
     }
     
+    // 范围内的词条全都还在「重复频率」的静默期内 —— 也就是
+    // 「累计已掌握 + 累计待复习」已经等于词条总数、再没有没学过的词时：
+    // 按频率抽词会得到空队列，界面显示「还没有可学习的单词」，
+    // 点【继续学习】也永远没反应。这里降级为「复习轮」：忽略重复频率，
+    // 用范围内全部词条重新组一轮队列，保证任何时候都能继续背。
+    this._isReviewRound = frequency > 0 && availableWords.length === 0 && allWords.length > 0;
+    if (this._isReviewRound) {
+      // 复习轮优先照顾遗忘风险最高的词：最久没学过的排最前面
+      availableWords = allWords.slice().sort(
+        (a, b) => (Number(a.lastStudied) || 0) - (Number(b.lastStudied) || 0)
+      );
+    }
+    
     let todayWords;
     if (this.settings.learnMode === 'random') {
       todayWords = this.pickRandomSpreadByCategory(availableWords, this.settings.dailyGoal);
+    } else if (this._isReviewRound) {
+      // 复习轮：availableWords 已按「最久没学」升序，直接取前 N 个，
+      // 不再按 新词→待复习 分组（此时已经没有新词了）
+      todayWords = availableWords.slice(0, this.settings.dailyGoal);
     } else {
       const newWords = availableWords.filter((w) => w.status === 'new');
       const reviewWords = availableWords.filter((w) => w.status === 'review');
-      todayWords = [...newWords, ...reviewWords].slice(0, this.settings.dailyGoal);
-      if (todayWords.length < this.settings.dailyGoal && availableWords.length > 0) {
-        const remaining = availableWords.filter((w) => !todayWords.find((t) => t.id === w.id));
-        const needed = this.settings.dailyGoal - todayWords.length;
-        todayWords = [...todayWords, ...remaining.slice(0, needed)];
-      }
+      // 过了静默期、但已经是「已掌握」的词排最后（与旧版用 remaining 兜底追加的效果一致）
+      const masteredWords = availableWords.filter((w) => w.status !== 'new' && w.status !== 'review');
+      todayWords = [...newWords, ...reviewWords, ...masteredWords].slice(0, this.settings.dailyGoal);
     }
     
     this.todayWords = todayWords;
@@ -2397,14 +2499,22 @@ class VocabApp {
     this.todayStats.total = this.todayWords.length;
     await this.db.setSetting('todayStats', this.todayStats);
     
-    if (this.todayWords.length > 0) {
+    if (this.todayWords.length === 0) {
+      this.showEmptyState();
+    } else if (this.isDailyGoalReached()) {
+      // 今日目标已达标：不再展示卡片（例如刷新页面后进度还在、队列是新的），
+      // 用户点【继续学习】会先重置进度，再开始新一轮
+      this.showComplete();
+    } else {
       this.showCard(this.currentCardIndex);
       document.querySelector('.card-stack').style.display = 'flex';
       document.querySelector('.complete-container').style.display = 'none';
       const emptyState = document.getElementById('learnEmptyState');
       if (emptyState) emptyState.style.display = 'none';
-    } else {
-      this.showEmptyState();
+      if (this._isReviewRound) {
+        // 让用户知道这轮为什么又出现了学过的词，而不是以为筛选/进度出了问题
+        this.showToast('词条都已学过，已开始新一轮学习');
+      }
     }
     
     // 刷新累计统计缓存后再更新进度，确保数字与词库一致
@@ -3129,7 +3239,14 @@ class VocabApp {
     this._cardLongPressText = '';
     this._cardTouchLongPress = false;
     this.currentCardIndex++;
-    if (this.currentCardIndex >= this.todayWords.length) {
+    // 今日累计张数同步 +1（进度条口径）。跳过也算一张，与旧版「下标即进度」的行为一致；
+    // 跨队列时下标会归零，累计数不会，因此进度可以一直累加到每日目标
+    this.todayDoneCount++;
+    // 队列背完、或者今日累计已经达到每日目标，都立刻收卡显示完成页。
+    // 第二个条件不可少：词条数不整除每日目标时（例如 30 条短语 / 目标 100，
+    // 第四轮学到第 10 张就满 100），队列里还剩着卡片，若不拦住就会继续展示卡片、
+    // 让用户以为「进度已满还能一直学」。
+    if (this.currentCardIndex >= this.todayWords.length || this.isDailyGoalReached()) {
       this.showComplete();
       this.updateProgress();
       this.refreshGoalSliderLockedState();
@@ -3361,18 +3478,33 @@ class VocabApp {
     }
   }
 
-  // 更新进度
+  /**
+   * 更新进度：进度条与数字都按「今日累计完成张数」计，而不是当前队列的下标。
+   *
+   * 这样「词条数 < 每日目标」时（例如 20 条短语 / 目标 100），点【继续学习】重抽一轮
+   * 队列后，进度会从 20 接着往 40、60… 涨，直到达到每日目标才算完成；
+   * 队列末尾可能略微超出目标（比如 95/100 时又把一轮 20 张背完），显示时封顶在目标值。
+   */
   updateProgress() {
-    const progress = this.settings.dailyGoal > 0
-      ? Math.round((this.currentCardIndex / this.settings.dailyGoal) * 100)
-      : 0;
+    const goal = Math.max(0, Number(this.settings.dailyGoal) || 0);
+    const done = Math.max(0, Number(this.todayDoneCount) || 0);
+    const shown = goal > 0 ? Math.min(done, goal) : done;
+    const progress = goal > 0 ? Math.round((shown / goal) * 100) : 0;
 
     document.getElementById('progressFill').style.width = `${progress}%`;
-    document.getElementById('progressText').textContent = `${this.currentCardIndex}/${this.settings.dailyGoal}`;
+    document.getElementById('progressText').textContent = `${shown}/${goal}`;
 
     // 今日统计 = 今天学习且当前状态为掌握/待复习的词条数
     document.getElementById('statMastered').textContent = this.todayStats.mastered;
     document.getElementById('statReview').textContent = this.todayStats.review;
+
+    // 完成页里的「已掌握 / 待复习」是同一个口径，必须跟着一起刷新：
+    // 点最后一张卡时是「先收卡显示完成页、统计才异步重算完」，如果只在 showComplete()
+    // 里写一次，完成页就会永远比上方少一张（例如上方 20、完成页 19）。
+    const completeMastered = document.getElementById('completeMastered');
+    if (completeMastered) completeMastered.textContent = this.todayStats.mastered;
+    const completeReview = document.getElementById('completeReview');
+    if (completeReview) completeReview.textContent = this.todayStats.review;
 
     // 累计统计 = 当前词库中各状态的真实词条数（与词库页筛选结果一致）
     document.getElementById('totalMastered').textContent = this._cachedStatusCounts.mastered;
@@ -3436,30 +3568,74 @@ class VocabApp {
     this._libraryTodayKind = null;
   }
 
+  /**
+   * 今日目标是否已达成。
+   *
+   * 达成之后一律不再展示卡片：词条数不整除每日目标时（例如 30 条短语 / 目标 100，
+   * 第四轮学到第 10 张就满 100），当前队列里还剩着卡片，如果不拦住，用户会看到
+   * 进度条已经 100/100 却还能一直往下背。正确做法是收卡显示完成页，
+   * 等用户点【继续学习】把进度重置为 0，再开始新一轮。
+   */
+  isDailyGoalReached() {
+    const goal = Math.max(0, Number(this.settings.dailyGoal) || 0);
+    return goal > 0 && Math.max(0, Number(this.todayDoneCount) || 0) >= goal;
+  }
+
   // 显示完成页面
   showComplete() {
     document.querySelector('.card-stack').style.display = 'none';
     document.querySelector('.complete-container').style.display = 'flex';
-    
+    // 完成页与空状态互斥：否则「还没有可学习的单词」会和【继续学习】按钮同时出现在屏幕上
+    const emptyState = document.getElementById('learnEmptyState');
+    if (emptyState) emptyState.style.display = 'none';
+
     document.getElementById('completeMastered').textContent = this.todayStats.mastered;
     document.getElementById('completeReview').textContent = this.todayStats.review;
+
+    // 一轮队列背完但今日累计还没到目标时（词条数少于每日目标会一直如此），
+    // 文案要说清「还能接着往下背」，否则用户会以为今天已经结束、进度条却还差一截
+    const goal = Math.max(0, Number(this.settings.dailyGoal) || 0);
+    const shown = goal > 0 ? Math.min(Math.max(0, Number(this.todayDoneCount) || 0), goal) : 0;
+    const subtitle = document.querySelector('.complete-subtitle');
+    if (subtitle) {
+      subtitle.textContent = goal > 0 && shown >= goal
+        ? '今日学习目标已完成'
+        : `本轮已完成（${shown}/${goal}）`;
+    }
   }
 
-  // 显示空状态
+  // 显示空状态（只有当前词典范围里确实一个词条都没有时才会走到这里）
   showEmptyState() {
     document.querySelector('.card-stack').style.display = 'none';
+    const completeContainer = document.querySelector('.complete-container');
+    if (completeContainer) completeContainer.style.display = 'none';
     const emptyState = document.getElementById('learnEmptyState');
     if (emptyState) emptyState.style.display = 'flex';
   }
 
-  // 重新开始学习
-  restartLearn() {
+  /**
+   * 继续学习 / 再来一轮。
+   *
+   * 关键点：只有「今日累计已经达到每日目标」时才把进度归零，否则原样保留累计数。
+   * 因为词条数可能少于每日目标（例如 20 条短语 / 目标 100）：一轮背完 20 张后
+   * 点【继续学习】，应该让进度接着从 20 涨到 40、60…，而不是清空重新从 0 开始。
+   */
+  async restartLearn() {
+    if (this.isDailyGoalReached()) {
+      // 今日目标已达成：这一轮结束，进度归零，开始新的一轮
+      await this.resetTodayDoneCount();
+    }
     // 重置当前卡片索引为0
     this.currentCardIndex = 0;
     // 清除保存的学习进度，确保重新生成队列
-    this.db.setSetting('learnProgress', null);
-    // 重新生成学习队列
-    this.prepareLearnSession();
+    // （必须 await：否则紧接着的 prepareLearnSession 可能读回刚清掉的旧进度，
+    //   表现就是点【继续学习】没有任何反应）
+    // 注意这里不动 todayDoneCount，进度条因此能接着上一轮的数字继续涨
+    await this.db.setSetting('learnProgress', null);
+    // 会话快照一并作废，避免切页时又恢复回旧队列
+    this._learnSessionSnapshot = null;
+    // 重新生成学习队列（范围内词条都学过时会自动进入「复习轮」）
+    await this.prepareLearnSession();
   }
 
   // ==================== 词库页面 ====================
@@ -3790,84 +3966,79 @@ class VocabApp {
     this.refreshGoalSliderLockedState();
   }
 
-  /** 设置页“清除进度”：确认后清空今日/累计统计与学习进度，把所有词条状态重置为 new，并刷新界面 */
+  /**
+   * 设置页「清除」：只清除**当前词典范围**的学习记录。
+   *
+   * 范围由设置里的「词典导入」决定（字 / 短语 / 全部）：
+   *   - 只把该范围内的词条状态重置为「新词」，并把学习时间一并清掉
+   *     （清完立刻就能重新学，不会被「重复频率」挡在静默期里）；
+   *   - 今日/累计统计只清该分类的计数，另一个范围的记录完全不受影响；
+   *   - 词库本身（词条、收藏）不会被删除。
+   */
   async clearProgress() {
+    const scopeKeys = this.activeScopeKeys();
+    const isAll = scopeKeys.length > 1;
+    const scopeLabel = isAll ? '全部（字 + 短语）' : (scopeKeys[0] === 'word' ? '字' : '短语');
+    const keepLabel = isAll ? null : (scopeKeys[0] === 'word' ? '短语' : '字');
     const cloudHint = window.CloudSync?.isActive?.() ? '（已登录，云端记录也会一起清除）' : '';
-    if (confirm(`确定要清除所有“已掌握”和“待复习”的记录吗？${cloudHint}`)) {
-      // 清除所有学习相关设置
-      await this.db.setSetting('lastStudyDate', null);
-      await this.db.setSetting('todayCount', 0);
-      await this.db.setSetting('learnProgress', null);
-      
-      // 清除今日统计和累计统计（含按分类归档的字/短语计数）
-      await this.resetScopeStats();
-      this.todayStats = { mastered: 0, review: 0, total: 0 };
-      this.totalStats = { mastered: 0, review: 0 };
-      await this.db.setSetting('todayStats', this.todayStats);
-      await this.db.setSetting('totalStats', this.totalStats);
-      
-      // 重置学习进度（进度条归零）
-      this.currentCardIndex = 0;
-      this._learnSessionSnapshot = null;
-      
-      // 更新进度条UI
-      if (document.getElementById('progressFill')) {
-        document.getElementById('progressFill').style.width = '0%';
-      }
-      if (document.getElementById('progressText')) {
-        document.getElementById('progressText').textContent = `0/${this.settings.dailyGoal}`;
-      }
-      
-      // 更新统计显示UI
-      if (document.getElementById('statMastered')) {
-        document.getElementById('statMastered').textContent = '0';
-      }
-      if (document.getElementById('statReview')) {
-        document.getElementById('statReview').textContent = '0';
-      }
-      if (document.getElementById('totalMastered')) {
-        document.getElementById('totalMastered').textContent = '0';
-      }
-      if (document.getElementById('totalReview')) {
-        document.getElementById('totalReview').textContent = '0';
-      }
-      
-      // 更新今日单词列表为空
-      this.todayWords = [];
-      
-      // 重置所有单词的状态为 new
-      const allWords = await this.db.getAllWords();
-      for (const word of allWords) {
-        if (word.status !== 'new') {
-          word.status = 'new';
-          await this.db.updateWord(word);
-        }
-      }
+    const keepHint = keepLabel ? `\n「${keepLabel}」的学习记录会保留。` : '';
 
-      // 所有状态已重置，刷新缓存使累计统计归零
-      await this.refreshStatusCounts();
+    const ok = confirm(
+      `确定要清除「${scopeLabel}」范围内的所有“已掌握”和“待复习”记录吗？${keepHint}${cloudHint}`
+    );
+    if (!ok) return;
 
-      this.refreshGoalSliderLockedState();
+    const allWords = await this.db.getAllWords();
+    const scopedWords = allWords.filter((w) => this.isWordInActiveScope(w));
+    this.showToast(`正在清除「${scopeLabel}」的学习记录…`);
 
-      this.showToast('所有学习记录已清除');
-      
-      if (this.currentPage === 'learn') {
-        // 显示空状态
-        this.showEmptyState();
-      }
-      
-      // 如果当前在词库页面，刷新列表
-      if (this.currentPage === 'library') {
-        await this.renderLibrary();
-      }
+    // 1) 只重置当前范围内词条的状态与学习时间（词库本身不动）
+    for (const word of scopedWords) {
+      if (word.status === 'new' && !word.lastStudied) continue; // 本来就没记录，跳过写入
+      word.status = 'new';
+      word.lastStudied = 0;
+      await this.db.updateWord(word);
+    }
 
-      // 【云同步钩子 4】把「清除记录」这件事也同步出去：
-      // 生成一个只增不减的重置时间戳，其它设备同步时据此把本地记录同样清零。
-      try {
-        await window.CloudSync?.onProgressCleared?.();
-      } catch (error) {
-        console.warn('云同步清除记录失败（不影响本地清除）:', error);
-      }
+    // 2) 今日/累计统计：只清当前范围对应的分类
+    await this.resetScopeStats(scopeKeys);
+
+    // 3) 今日学习会话与进度（会话本来就只是当前范围的队列）
+    await this.db.setSetting('lastStudyDate', null);
+    await this.db.setSetting('todayCount', 0);
+    await this.db.setSetting('learnProgress', null);
+    this.todayStats = { mastered: 0, review: 0, total: 0 };
+    this.totalStats = { mastered: 0, review: 0 };
+    await this.db.setSetting('todayStats', this.todayStats);
+    await this.db.setSetting('totalStats', this.totalStats);
+    this.currentCardIndex = 0;
+    this._learnSessionSnapshot = null;
+    this.todayWords = [];
+    await this.resetTodayDoneCount();
+
+    // 4) 统计以数据库重算为准（只影响当前范围），进度条与四个数字一并刷新
+    await this.refreshStatusCounts();
+    this.refreshGoalSliderLockedState();
+
+    this.showToast(`「${scopeLabel}」的学习记录已清除`);
+
+    if (this.currentPage === 'learn') {
+      // 记录已清空，队列要按新状态重建（范围内词条现在都是新词）
+      await this.prepareLearnSession();
+    }
+
+    // 如果当前在词库页面，刷新列表
+    if (this.currentPage === 'library') {
+      await this.renderLibrary();
+    }
+
+    // 【云同步钩子 4】按范围清除也要同步出去。因为不再广播全局重置时间戳
+    // （那会让其它设备把字和短语一起清零），改为让刚被重置为 new 的这批词条
+    // 走普通上行同步，云端按 dict_key 逐条覆盖，其它范围的行完全不动。
+    try {
+      await window.CloudSync?.onProgressCleared?.(scopeKeys);
+    } catch (error) {
+      console.warn('云同步清除记录失败（不影响本地清除）:', error);
     }
   }
 
