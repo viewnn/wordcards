@@ -88,6 +88,7 @@
     'phoneticDelay',
     'cardDefinitionFirst',
     'categoryDisplay',
+    'meaningDisplay',
     'soundEnabled',
     'speechEnabled',
     'phoneticAutoRead'
@@ -97,10 +98,7 @@
   var AUTH_ERROR_MESSAGES = {
     'Invalid login credentials': '邮箱或密码不正确',
     'Email not confirmed': '邮箱还没验证：请先到邮箱点确认链接（也可在 Supabase 控制台关闭 Confirm email）',
-    'User already registered': '这个邮箱已经注册过了，直接切换到「登录」即可',
-    'User already exists': '这个邮箱已经注册过了，直接切换到「登录」即可',
     'Password should be at least 6 characters': '密码至少需要 6 位',
-    'Signups not allowed for this instance': '当前项目已关闭注册，请在 Supabase 控制台开启',
     'Email rate limit exceeded': '邮件发送太频繁，请稍后再试',
     'For security purposes, you can only request this after 60 seconds': '操作太频繁，请 60 秒后再试',
     'Unable to validate email address: invalid format': '邮箱格式不正确',
@@ -318,7 +316,7 @@
     this._pushTimer = null;
     this._syncPromise = null;
     this._attached = false;
-    this._authMode = 'signIn'; // signIn | signUp
+    // 前台只提供登录：账号由管理员在 Supabase 后台创建
     this._unsubscribeAuth = null;
     /** SDK 是否可用：null=还没判断，true=可用，false=CDN 没加载成功 */
     this.sdkReady = null;
@@ -1481,29 +1479,6 @@
     return result.data.user;
   };
 
-  CloudSyncEngine.prototype.signUp = async function (email, password) {
-    if (!this.client) throw new Error('Supabase 客户端尚未就绪，请稍后重试');
-    var result = await withTimeout(
-      this.client.auth.signUp({ email: email, password: password }),
-      AUTH_TIMEOUT_MS,
-      'TIMEOUT'
-    );
-    if (result.error) throw result.error;
-
-    if (result.data.session) {
-      // 项目关闭了邮箱验证：注册即登录
-      this.user = result.data.user;
-      return { needsConfirm: false, user: result.data.user };
-    }
-    // 项目开启了邮箱验证（Supabase 默认）：
-    // 注意此时 data.user 存在但 identities 为空数组，表示邮箱已被注册过
-    var identities = result.data.user && result.data.user.identities;
-    if (Array.isArray(identities) && identities.length === 0) {
-      return { needsConfirm: true, alreadyRegistered: true, user: result.data.user };
-    }
-    return { needsConfirm: true, user: result.data.user };
-  };
-
   CloudSyncEngine.prototype.signOut = async function () {
     if (this._pushTimer) {
       clearTimeout(this._pushTimer);
@@ -1542,10 +1517,7 @@
     var $ = function (id) { return document.getElementById(id); };
 
     var signInBtn = $('cloudSignInBtn');
-    if (signInBtn) signInBtn.addEventListener('click', function () { self.openAuthModal('signIn'); });
-
-    var signUpBtn = $('cloudSignUpBtn');
-    if (signUpBtn) signUpBtn.addEventListener('click', function () { self.openAuthModal('signUp'); });
+    if (signInBtn) signInBtn.addEventListener('click', function () { self.openAuthModal(); });
 
     var syncNowBtn = $('cloudSyncNowBtn');
     if (syncNowBtn) {
@@ -1621,13 +1593,6 @@
       });
     }
 
-    var switchMode = $('cloudAuthSwitch');
-    if (switchMode) {
-      switchMode.addEventListener('click', function () {
-        self.openAuthModal(self._authMode === 'signIn' ? 'signUp' : 'signIn');
-      });
-    }
-
     var forgot = $('cloudAuthForgot');
     if (forgot) {
       forgot.addEventListener('click', function () { self.handleForgotPassword(); });
@@ -1655,21 +1620,19 @@
     }
   };
 
-  CloudSyncEngine.prototype.openAuthModal = function (mode) {
-    this._authMode = mode === 'signUp' ? 'signUp' : 'signIn';
+  /**
+   * 打开登录弹窗。
+   * 前台不再提供注册（账号在 Supabase 后台添加），因此弹窗只有登录一种形态；
+   * 参数仅为兼容旧调用保留，传入什么都不影响。
+   */
+  CloudSyncEngine.prototype.openAuthModal = function () {
     var modal = document.getElementById('cloudAuthModal');
     if (!modal) return;
 
     this.setAuthError('');
-    var isSignUp = this._authMode === 'signUp';
-    document.getElementById('cloudAuthTitle').textContent = isSignUp ? '注册账号' : '登录账号';
-    document.getElementById('cloudAuthSubmit').textContent = isSignUp ? '注册' : '登录';
-    document.getElementById('cloudAuthSwitch').textContent = isSignUp ? '已有账号？去登录' : '还没有账号？去注册';
-    document.getElementById('cloudAuthHint').textContent = isSignUp
-      ? '注册后学习记录会加密上传到你自己的 Supabase 项目，仅你本人可见。'
-      : '登录后手机与电脑共用同一份学习记录。';
-    var forgotRow = document.getElementById('cloudAuthForgot');
-    if (forgotRow) forgotRow.style.display = isSignUp ? 'none' : '';
+    document.getElementById('cloudAuthTitle').textContent = '登录账号';
+    document.getElementById('cloudAuthSubmit').textContent = '登录';
+    document.getElementById('cloudAuthHint').textContent = '登录后手机与电脑共用同一份学习记录。';
 
     modal.classList.add('active');
     var emailInput = document.getElementById('cloudAuthEmail');
@@ -1724,12 +1687,10 @@
     var submit = document.getElementById('cloudAuthSubmit');
     if (!submit) return;
     submit.disabled = busy;
-    submit.textContent = busy
-      ? (this._authMode === 'signUp' ? '注册中…' : '登录中…')
-      : (this._authMode === 'signUp' ? '注册' : '登录');
+    submit.textContent = busy ? '登录中…' : '登录';
   };
 
-  /** 提交登录/注册表单 */
+  /** 提交登录表单 */
   CloudSyncEngine.prototype.submitAuth = async function () {
     var email = (document.getElementById('cloudAuthEmail').value || '').trim();
     var password = document.getElementById('cloudAuthPassword').value || '';
@@ -1747,28 +1708,10 @@
     this.setAuthBusy(true);
 
     try {
-      if (this._authMode === 'signUp') {
-        var outcome = await this.signUp(email, password);
-        if (outcome.needsConfirm) {
-          this.closeAuthModal();
-          if (outcome.alreadyRegistered) {
-            this.app.showToast('这个邮箱已经注册过了，请直接登录');
-            this.setStatus('signed-out', '邮箱已注册，请直接登录（若收不到确认邮件，可在 Supabase 关闭邮箱验证）');
-          } else {
-            this.app.showToast('注册成功，请到邮箱点击确认链接后再登录');
-            this.setStatus('signed-out', '等待邮箱验证');
-          }
-          return;
-        }
-        this.closeAuthModal();
-        this.app.showToast('注册成功，正在同步…');
-        await this.syncAll('sign-up');
-      } else {
-        await this.signIn(email, password);
-        this.closeAuthModal();
-        this.app.showToast('登录成功，正在同步…');
-        await this.syncAll('sign-in');
-      }
+      await this.signIn(email, password);
+      this.closeAuthModal();
+      this.app.showToast('登录成功，正在同步…');
+      await this.syncAll('sign-in');
     } catch (error) {
       this.setAuthError(humanizeError(error));
     } finally {
@@ -1868,9 +1811,6 @@
 
     var emailEl = $('cloudUserEmail');
     if (emailEl) emailEl.textContent = this.user.email || '已登录';
-
-    var statusText = $('cloudSyncStatusText');
-    if (statusText) statusText.textContent = this.statusDetail || '等待同步';
 
     var lastSync = $('cloudLastSyncText');
     if (lastSync) {

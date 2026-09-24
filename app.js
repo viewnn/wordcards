@@ -317,7 +317,9 @@ class VocabApp {
       repeatFrequency: 2,
       /** 词典导入范围：all / phrase / word，与设置页下拉同步 */
       dictImportType: 'all',
-      categoryDisplay: false          // 卡片上方是否显示分类徽标（默认关闭；loadSettings 会从库中读取用户选择）
+      categoryDisplay: false,         // 卡片上方是否显示分类徽标（默认关闭；loadSettings 会从库中读取用户选择）
+      /** 词库列表卡片中，单词下方是否显示释义（默认开启；只影响词库卡片，查看单词弹窗不受影响） */
+      meaningDisplay: true
     };
     this.todayStats = {               // 今日统计（按当前展示范围汇总后的镜像值）
       mastered: 0,                    //   今日“已掌握”次数
@@ -831,6 +833,7 @@ class VocabApp {
     this.settings.phoneticAutoRead = await this.db.getSetting('phoneticAutoRead', false);
     this.settings.cardDefinitionFirst = await this.db.getSetting('cardDefinitionFirst', false);
     this.settings.categoryDisplay = await this.db.getSetting('categoryDisplay', false);
+    this.settings.meaningDisplay = await this.db.getSetting('meaningDisplay', true);
     this.settings.learnMode = await this.db.getSetting('learnMode', 'random');
     this.settings.phoneticDelay = await this.db.getSetting('phoneticDelay', 2);
     this.settings.repeatFrequency = await this.db.getSetting('repeatFrequency', 2);
@@ -1731,6 +1734,13 @@ class VocabApp {
       categoryDisplayToggle.addEventListener('touchstart', handleCategoryDisplayToggle);
     }
 
+    // 显示释义设置（只控制词库列表卡片，查看单词弹窗始终显示释义）
+    const meaningDisplayToggle = document.getElementById('meaningDisplayToggle');
+    if (meaningDisplayToggle) {
+      meaningDisplayToggle.addEventListener('click', handleMeaningDisplayToggle);
+      meaningDisplayToggle.addEventListener('touchstart', handleMeaningDisplayToggle);
+    }
+
     async function handleCardDefinitionFirstToggle(e) {
       e.preventDefault();
       const toggle = document.getElementById('cardDefinitionFirstToggle');
@@ -1755,6 +1765,21 @@ class VocabApp {
         self.cancelScheduledPhoneticRead();
         self.showCard(self.currentCardIndex);
         self.schedulePhoneticReadAfterCardSwitch();
+      }
+    }
+
+    /**
+     * 「显示释义」开关：只决定词库列表卡片里“单词下方那行释义”是否渲染，
+     * 词库卡片点开的「查看单词」弹窗不受影响，学习卡片的翻转逻辑也不受影响。
+     */
+    async function handleMeaningDisplayToggle(e) {
+      e.preventDefault();
+      const toggle = document.getElementById('meaningDisplayToggle');
+      toggle.classList.toggle('active');
+      self.settings.meaningDisplay = toggle.classList.contains('active');
+      await self.db.setSetting('meaningDisplay', self.settings.meaningDisplay);
+      if (self.currentPage === 'library') {
+        await self.renderLibrary();
       }
     }
 
@@ -2312,6 +2337,9 @@ class VocabApp {
   render() {
     this.prepareLearnSession();
     this.applySettings();
+    // 同步设置页控件状态：设置页虽未展示，但开关的初始状态必须与库里读到的设置一致
+    // （例如「显示释义」默认开启，用户关了之后刷新页面，再进设置页应看到关闭态）
+    this.renderSettings();
   }
 
   // 保存学习进度到 IndexedDB
@@ -3589,8 +3617,8 @@ class VocabApp {
     const emptyState = document.getElementById('learnEmptyState');
     if (emptyState) emptyState.style.display = 'none';
 
-    document.getElementById('completeMastered').textContent = this.todayStats.mastered;
-    document.getElementById('completeReview').textContent = this.todayStats.review;
+    // document.getElementById('completeMastered').textContent = this.todayStats.mastered;
+    // document.getElementById('completeReview').textContent = this.todayStats.review;
 
     // 一轮队列背完但今日累计还没到目标时（词条数少于每日目标会一直如此），
     // 文案要说清「还能接着往下背」，否则用户会以为今天已经结束、进度条却还差一截
@@ -3752,13 +3780,16 @@ class VocabApp {
     }
     
     // 每个分类的小标题（原来的「aa (12)」）已取消，数量改到分类下拉选项里显示
+    // 「显示释义」关闭时，卡片上只保留单词本身（单词下方那行释义不渲染）；
+    // 仅影响词库列表卡片，点开卡片的「查看单词」弹窗始终展示释义。
+    const showMeaningInCard = this.settings.meaningDisplay !== false;
     const html = `
       <div class="word-list">
         ${orderedWords.map(word => `
                 <div class="word-item" data-id="${word.id}">
                   <div class="word-info">
                     <h3>${word.word}${word.favorite ? ' ' : ''}</h3>
-                    <p>${word.definition || word.meaning}</p>
+                    ${showMeaningInCard ? `<p>${word.definition || word.meaning}</p>` : ''}
                   </div>
                   <div class="word-status">
                     ${this.filterStatus === 'favorite' ? `
@@ -3952,6 +3983,12 @@ class VocabApp {
     const categoryDisplayToggle = document.getElementById('categoryDisplayToggle');
     if (categoryDisplayToggle) {
       categoryDisplayToggle.classList.toggle('active', this.settings.categoryDisplay);
+    }
+
+    // 显示释义：默认开启，未设置过时按 true 处理
+    const meaningDisplayToggle = document.getElementById('meaningDisplayToggle');
+    if (meaningDisplayToggle) {
+      meaningDisplayToggle.classList.toggle('active', this.settings.meaningDisplay !== false);
     }
 
     const dictTypeEl = document.getElementById('dictTypeSelect');

@@ -128,7 +128,6 @@
           <div class="complete-container" style="display: none;">
             <h2 class="complete-title">太棒了</h2>
             <p class="complete-subtitle">今日学习目标已完成</p>
-            <!-- 注销完成统计：前端页面不显示 -->
             <!-- <div class="complete-stats">
               <div class="complete-stat">
                 <div class="complete-stat-value masters" id="completeMastered">0</div>
@@ -263,9 +262,17 @@
             <div class="setting-item">
               <div class="setting-info">
                 <h4>分类显示</h4>
-                <p>关闭后，卡片上方不再显示分类</p>
+                <p>关闭后，卡片上方将不再显示分类</p>
               </div>
               <div class="toggle" id="categoryDisplayToggle"></div>
+            </div>
+
+            <div class="setting-item">
+              <div class="setting-info">
+                <h4>显示释义</h4>
+                <p>开启后，单词下方会显示释义内容</p>
+              </div>
+              <div class="toggle active" id="meaningDisplayToggle"></div>
             </div>
 			
             <div class="setting-item">
@@ -321,35 +328,22 @@
                 <li>把项目的 <strong>Project URL</strong> 和 <strong>anon key</strong> 填进
                     <code>supabase-config.js</code> 的 <code>url</code> 与 <code>anonKey</code></li>
               </ol>
-              <p class="cloud-setup-note">填好后刷新页面，这里就会出现「登录 / 注册」入口。</p>
+              <p class="cloud-setup-note">填好后刷新页面，这里就会出现「登录」入口；账号在 Supabase 后台添加。</p>
             </div>
 
             <!-- 情况二：已配置但未登录 -->
             <div id="cloudSignedOut" style="display: none;">
               <div class="setting-item">
                 <div class="setting-info">
-                  <h4>登录后同步学习记录</h4>
-                  <p>手机与电脑共用一份进度、收藏与设置</p>
+                  <h4>同步记录</h4>
+                  <p>多台设备间共用一份进度、收藏与设置</p>
                 </div>
                 <button class="cloud-action-btn" id="cloudSignInBtn" type="button">登录</button>
-              </div>
-              <div class="setting-item">
-                <div class="setting-info">
-                  <h4>还没有账号</h4>
-                  <p>注册数据只存在你自己的Supabase项目里</p>
-                </div>
-                <button class="cloud-action-btn is-ghost" id="cloudSignUpBtn" type="button">注册</button>
-              </div>
+              </div>  
             </div>
 
             <!-- 情况三：已登录 -->
             <div id="cloudSignedIn" style="display: none;">
-              <div class="setting-item">
-                <div class="setting-info">
-                  <h4>同步状态</h4>
-                  <p id="cloudSyncStatusText">等待同步</p>
-                </div>
-              </div>
               <div class="setting-item">
                 <div class="setting-info cloud-status-line">
                   <h4 class="cloud-user-email" id="cloudUserEmail">—</h4>
@@ -472,7 +466,6 @@
                    autocomplete="current-password" placeholder="至少 6 位">
           </div>
           <div class="cloud-auth-links">
-            <button class="cloud-link" id="cloudAuthSwitch" type="button">还没有账号？去注册</button>
             <button class="cloud-link" id="cloudAuthForgot" type="button">忘记密码？</button>
           </div>
           <p class="cloud-hint" id="cloudAuthHint">
@@ -499,7 +492,7 @@
         <div class="cloud-error" id="cloudResetError"></div>
         <form id="cloudResetForm" novalidate>
           <div class="cloud-auth-group">
-            <label class="cloud-auth-label" for="cloudResetEmail">注册时使用的邮箱</label>
+            <label class="cloud-auth-label" for="cloudResetEmail">登录时使用的邮箱</label>
             <input type="email" class="form-input" id="cloudResetEmail" name="email"
                    autocomplete="email" inputmode="email" placeholder="you@example.com">
           </div>

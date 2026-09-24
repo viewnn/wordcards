@@ -685,7 +685,7 @@ select {
   flex: 1;
   min-width: 80px;
   /* max-width: 128px; */
-  height: 64px;
+  height: 68px;
   border: none;
   cursor: pointer;
   display: flex;
