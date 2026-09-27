@@ -1632,7 +1632,7 @@
     this.setAuthError('');
     document.getElementById('cloudAuthTitle').textContent = '登录账号';
     document.getElementById('cloudAuthSubmit').textContent = '登录';
-    document.getElementById('cloudAuthHint').textContent = '登录后手机与电脑共用同一份学习记录。';
+    document.getElementById('cloudAuthHint').textContent = '登录后多台设备将共用同一份学习记录。';
 
     modal.classList.add('active');
     var emailInput = document.getElementById('cloudAuthEmail');
