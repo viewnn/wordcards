@@ -1308,6 +1308,32 @@ select {
   font-weight: 500;
 }
 
+/* 「词汇」标签与它后面的语种标签排在同一行（标签由 viewWord 填充） */
+.form-label-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.form-label-row .form-label {
+  margin-bottom: 0;
+}
+
+/* 语种标签：与词库条目的「待复习」状态标签同形，只换配色（淡紫），便于区分 */
+.word-language-tag {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  background: #E8E3F5;
+  color: #5B4BC4;
+}
+
+.word-language-tag[hidden] {
+  display: none;
+}
+
 .form-input,
 .form-textarea,
 .form-select {

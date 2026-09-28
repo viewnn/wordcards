@@ -3943,6 +3943,14 @@ class VocabApp {
     document.getElementById('exampleInput').value = word.example || '';
     document.getElementById('categoryInput').value = word.category || '';
 
+    // 「词汇」后面的语种标签：取词典 language 列原文；该词条没有语种时隐藏标签
+    const languageTag = document.getElementById('wordLanguageTag');
+    if (languageTag) {
+      const language = String(word.language || '').trim();
+      languageTag.textContent = language;
+      languageTag.hidden = !language;
+    }
+
     document.getElementById('addWordModal').classList.add('active');
     document.getElementById('modalTitle').textContent = '查看单词';
     
@@ -4090,6 +4098,13 @@ class VocabApp {
     
     // 显示保存按钮
     document.getElementById('saveWordBtn').style.display = '';
+
+    // 语种标签随词条显示，关闭时一并清空，避免下次打开弹窗残留上一个词条的语种
+    const languageTag = document.getElementById('wordLanguageTag');
+    if (languageTag) {
+      languageTag.textContent = '';
+      languageTag.hidden = true;
+    }
   }
 
   /**
