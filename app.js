@@ -1819,31 +1819,43 @@ class VocabApp {
         // 字（word）与短语（phrase）的词条始终全量常驻词库并保留各自学习记录，
         // 切换范围只是改变“当前学习/展示/统计的分类”，不删除任何词条、不清空任何记录
         self.settings.dictImportType = newType;
-        await self.db.setSetting('dictImportType', newType);
 
-        // 按当前分类重新映射统计数字（全部 = 字 + 短语）
-        self.syncActiveStatsMirrors();
-
-        // 词典范围已变更，重新统计真实状态计数
-        await self.refreshStatusCounts();
-
-        // 学习队列按新范围重建，清除会话缓存，避免返回学习页时恢复旧范围的队列
-        await self.db.setSetting('learnProgress', null);
+        // 先同步丢掉旧范围的会话（快照 / 队列 / 下标）并清空卡片文字，再去做异步的落库与重建。
+        // 否则用户在下面任意一个 await 期间点回「学习」，都会先恢复或看到旧范围（如「字」）的卡片。
         self._learnSessionSnapshot = null;
+        self.todayWords = [];
         self.currentCardIndex = 0;
-        // 换了词典范围，进度条的口径也换了，累计数一并归零
-        await self.resetTodayDoneCount();
+        self.clearCardDisplay();
 
-        // 词库页展示范围已变化，同步分类勾选并刷新列表
-        await self.syncLibraryCategoryFilterToDictType();
-        await self.renderCategoryOptions();
-        if (self.currentPage === 'library') {
-          await self.renderLibrary();
+        try {
+          await self.db.setSetting('dictImportType', newType);
+
+          // 按当前分类重新映射统计数字（全部 = 字 + 短语）
+          self.syncActiveStatsMirrors();
+
+          // 词典范围已变更，重新统计真实状态计数
+          await self.refreshStatusCounts();
+
+          // 学习队列按新范围重建，清除会话缓存，避免返回学习页时恢复旧范围的队列
+          await self.db.setSetting('learnProgress', null);
+          // 换了词典范围，进度条的口径也换了，累计数一并归零
+          await self.resetTodayDoneCount();
+
+          // 词库页展示范围已变化，同步分类勾选并刷新列表
+          await self.syncLibraryCategoryFilterToDictType();
+          await self.renderCategoryOptions();
+          if (self.currentPage === 'library') {
+            await self.renderLibrary();
+          }
+
+          // 按新范围重建今日队列并渲染；currentPage 为学习页时这一步就是用户看到的卡片
+          await self.prepareLearnSession();
+
+          self.showToast('词典已更新');
+        } catch (error) {
+          console.error('[dict] 切换词典范围失败:', error);
+          self.showToast('切换词典范围失败，请重试');
         }
-
-        await self.prepareLearnSession();
-
-        self.showToast('词典已更新');
       });
     }
 
@@ -2266,7 +2278,9 @@ class VocabApp {
         currentCardIndex: this.currentCardIndex,
         todayWords: JSON.parse(JSON.stringify(this.todayWords)),
         todayStats: { ...this.todayStats },
-        todayDoneCount: this.todayDoneCount
+        todayDoneCount: this.todayDoneCount,
+        // 记下快照所属的词典范围：切换「词典导入」后，旧范围的队列不能再被恢复
+        scope: this.settings.dictImportType || 'all'
       };
     }
 
@@ -2285,12 +2299,31 @@ class VocabApp {
     });
 
     if (page === 'learn') {
+      // 兜底：队列里若混入了不属于当前词典范围的词条（刚在设置页切换过「词典导入」，
+      // 或云端同步下来的范围与本地队列不一致），先整队丢弃，避免把旧范围的内容当成有效进度展示
+      if ((this.todayWords || []).some((w) => !this.isWordInActiveScope(w))) {
+        this.todayWords = [];
+        this.currentCardIndex = 0;
+        this._learnSessionSnapshot = null;
+        // 队列要重建，先把旧范围的卡片文字清掉，避免重建期间还显示着它
+        this.clearCardDisplay();
+      }
+
       const snap = this._learnSessionSnapshot;
       // 只有当快照中的队列长度与「本轮队列容量」匹配时才恢复快照
       // （容量 = min(每日目标, 范围内词条数)，词条数少于目标时队列天生短一截）
       const snapshotCapacity = Number(this._queueCapacity) || this.settings.dailyGoal;
+      // 快照还必须属于当前词典范围，否则切范围后回到学习页会继续显示上一个范围（如「字」）的卡片
+      const snapshotMatchesScope = Boolean(
+        snap &&
+        (snap.scope || 'all') === (this.settings.dictImportType || 'all') &&
+        Array.isArray(snap.todayWords) &&
+        snap.todayWords.length > 0 &&
+        snap.todayWords.every((w) => this.isWordInActiveScope(w))
+      );
       const shouldRestoreSnapshot = snap && snap.todayWords && snap.todayWords.length > 0 && 
-                                   snap.todayWords.length === snapshotCapacity;
+                                   snap.todayWords.length === snapshotCapacity &&
+                                   snapshotMatchesScope;
       
       if (shouldRestoreSnapshot) {
         this.todayWords = snap.todayWords;
@@ -2318,7 +2351,10 @@ class VocabApp {
         
         this.updateProgress();
       } else {
-        this.prepareLearnSession();
+        // 重建队列是异步的，这里兜住异常，避免个别统计/渲染失败变成未捕获的 Promise 异常
+        this.prepareLearnSession().catch((error) => {
+          console.error('[learn] 重建今日学习队列失败:', error);
+        });
       }
     } else if (page === 'library') {
       this.renderCategoryOptions();
@@ -2437,14 +2473,26 @@ class VocabApp {
     const queueCapacity = Math.min(this.settings.dailyGoal, allWords.length);
     this._queueCapacity = queueCapacity;
 
-    // 只有保存的队列能完整对上库里的词条、且长度仍等于当前队列容量时才恢复进度。
+    // 恢复出来的队列必须整体属于当前词典范围：切换过「词典导入」（字 ↔ 短语）后，
+    // 库里可能还留着上一个范围的进度，若只比长度就恢复，学习页会继续展示旧范围的内容
+    const restoredAllInActiveScope =
+      restoredTodayWords.length > 0 && restoredTodayWords.every((w) => this.isWordInActiveScope(w));
+
+    // 只有保存的队列能完整对上库里的词条、整体属于当前范围、且长度仍等于当前队列容量时才恢复进度。
     // 用 queueCapacity 而不是直接比每日目标：否则「词条数 < 每日目标」时队列天生短一截，
     // 每次刷新/切页都会被判为不匹配而重新抽词，进度被清零。
     const shouldRestoreProgress = savedProgress && 
                                   savedProgress.todayWords && 
+                                  restoredAllInActiveScope &&
                                   restoredTodayWords.length === savedProgress.todayWords.length &&
                                   savedProgress.todayWords.length === queueCapacity &&
                                   this.currentCardIndex === 0;
+
+    // 保存的进度属于别的词典范围（切换过「词典导入」）或词条已不存在：
+    // 直接丢掉这份进度。否则它会一直留在库里，每次刷新/切页都被读出来再判废一次。
+    if (savedProgress && !shouldRestoreProgress) {
+      await this.db.setSetting('learnProgress', null);
+    }
     
     if (shouldRestoreProgress) {
       // 恢复之前的学习进度，并使用数据库中的最新词条内容，避免旧快照覆盖词典更新
@@ -2549,6 +2597,19 @@ class VocabApp {
     await this.refreshStatusCounts();
     this.updateProgress();
     this.refreshGoalSliderLockedState();
+  }
+
+  /**
+   * 清空学习卡片上的文字。
+   * 切换「词典导入」范围时同步调用：新队列是异步重建的，若不清空，
+   * 用户立刻切回学习页会先看到上一个范围（如「字」）的卡片内容。
+   */
+  clearCardDisplay() {
+    const cardInner = document.querySelector('#flashcard .flashcard-inner');
+    if (!cardInner) return;
+    cardInner.querySelectorAll('.word, .phonetic, .meaning, .example').forEach((el) => {
+      el.textContent = '';
+    });
   }
 
   /**

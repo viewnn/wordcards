@@ -1007,6 +1007,7 @@
     if (!settings || typeof settings !== 'object') return 0;
 
     var applied = 0;
+    var rangeChanged = false;
     this._suppress = true;
     try {
       for (var i = 0; i < SYNCED_SETTING_KEYS.length; i++) {
@@ -1014,6 +1015,7 @@
         if (settings[key] === undefined || settings[key] === null) continue;
         if (this.app.settings[key] === settings[key]) continue;
         this.app.settings[key] = settings[key];
+        if (key === 'dictImportType') rangeChanged = true;
         await this.app.db.setSetting(key, settings[key]);
         applied++;
       }
@@ -1029,6 +1031,23 @@
       } catch (error) {
         console.warn('[cloud-sync] 应用云端设置后刷新界面失败:', error);
       }
+
+      // 云端改过「词典导入」范围：本地今日队列必须按新范围重建，
+      // 否则学习页会继续展示旧范围（如「字」）的卡片
+      if (rangeChanged) {
+        try {
+          this.app._learnSessionSnapshot = null;
+          this.app.todayWords = [];
+          this.app.currentCardIndex = 0;
+          if (typeof this.app.clearCardDisplay === 'function') this.app.clearCardDisplay();
+          await this.app.db.setSetting('learnProgress', null);
+          await this.app.prepareLearnSession();
+          if (this.app.currentPage === 'library') await this.app.renderLibrary();
+        } catch (error) {
+          console.warn('[cloud-sync] 应用云端词典范围后重建学习队列失败:', error);
+        }
+      }
+
       this.meta.lastPushedSettingsJson = stableStringify(this.collectLocalSettings());
       await this.saveMeta();
     }
