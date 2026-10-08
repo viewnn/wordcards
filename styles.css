@@ -368,7 +368,7 @@ select {
 }
 
 .flashcard .meaning {
-  font-size: 18px;
+  font-size: var(--font-size-lg);
   color: var(--text-secondary);
   line-height: 1.6;
   font-weight: 700;
@@ -379,7 +379,7 @@ select {
   padding: 10px 10px;
 }
 .flashcard .example {
-  font-size: 16px;
+  font-size: 18px;
   /* color: var(--text-light); */
   color: var(--text-secondary);
   /* font-style: italic; */
@@ -588,7 +588,7 @@ select {
 }
 
 .flashcard .cantonese-example {
-  font-size: 16px;
+  font-size: 18px;
   /* color: var(--text-secondary); */
   color: var(--text-secondary);  
   margin-top: 12px;
@@ -641,7 +641,7 @@ select {
 .flashcard-back .meaning {
   /* 米白而非纯白，配柔和蓝紫底降低强反差带来的刺眼感 */
   color: #F4F6F1;
-  font-size: 18px;
+  font-size: var(--font-size-xl);
 }
 
 .flashcard-back .example {
@@ -1567,7 +1567,7 @@ select {
 }
 
 /* ==================== 响应式设计 ===================== */
-@media (max-width: 380px) {
+@media (max-width:400px) {
   .flashcard {
     /* 不要写死高度：之前1.3版本写死的高度height:380px，写死会在窄屏设备上顶掉上面的自适应计算，
        让卡片比可用空间更高，把按钮往上挤、下方露出一条空白带。
