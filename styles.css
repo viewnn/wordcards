@@ -188,10 +188,10 @@ select {
      由 .page-content 出滚动条，而不是卡片溢出遮挡下方按钮 */
   min-height: 100%;
   /* 底部不留多余留白：卡片下方就是 .card-actions（三个操作按钮），
-     按钮自身已带内边距，此前额外的 72px会顶出一条空白带，
-     把卡片挤矮、并在按钮与底部导航之间留下大空隙。
-     只保留 8px 与左右一致的基础内边距 */
-  padding: 8px 8px 72px;
+     按钮自身已带内边距（含安全区），此前额外的 72px 会顶出一条空白带，
+     把卡片挤矮、并在按钮与底部导航之间留下大空隙（实测占到 88px）。
+     只保留 8px 与左右一致的基础内边距，省下的 64px 全部让给卡片高度。 */
+  padding: 8px;
   box-sizing: border-box;
   background: var(--bg-card);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
@@ -292,11 +292,11 @@ select {
 .flashcard {
   width: 100%;
   /* 高度随可用空间伸缩：短屏保底 320px（保证单词/释义不被挤），
-     空间充裕时最多长到 420px，把卡片区域下方的余量吃满，
+     空间充裕时最多长到 460px，把卡片区域下方的余量吃满，
      避免按钮与底部导航之间出现大片空白。
      注意：高度只在这里定义一次。写进 @media (max-width:400px) 是无效的——
      宽度 412/430px 的手机匹配不到该断点，改了在那个尺寸上看不到任何变化。 */
-  height: clamp(320px, calc(100% - 96px), 420px);
+  height: clamp(320px, calc(100% - 96px), 460px);
   /* 不允许被 flex 压缩：.card-stack 空间不足时，flex-shrink 会把上面的下限压破
      （小屏手机上曾把 280px 的下限压到 252px，卡片就显得很矮）。
      空间不够时改由 .card-stack 的 min-height 撑开、页面出滚动条 */
@@ -1588,10 +1588,10 @@ select {
    避免卡片过高导致必须滚动才能点到下方三个操作按钮 */
 @media (max-height:520px) {
   .flashcard {
-    height: clamp(220px, calc(100% - 88px), 360px);
+    height: clamp(250px, calc(100% - 96px), 360px);
   }
 
   .card-stack {
-    min-height: 320px;
+    min-height: 358px;
   }
 }
