@@ -300,6 +300,18 @@ class VocabApp {
     this.todayDoneCount = 0;
     /** 本轮队列的容量上限 = min(每日目标, 当前范围内词条数)；用于判断切页时能否恢复快照 */
     this._queueCapacity = 0;
+    /**
+     * 当前词典范围内全部词条的快照（prepareLearnSession 时写入）。
+     * 「跳过」需要同步补一张新词进队列，而补牌又要读全库，所以这里缓存一份，
+     * 补牌时直接从缓存里筛，避免为了同步而放弃动画时序。
+     */
+    this._scopePoolCache = [];
+    /**
+     * 本次会话里被「跳过」的词条 id。
+     * 跳过不写学习记录（不改 status / lastStudied），所以需要这份内存名单来保证
+     * 跳过的词不会立刻被补回队列；新一轮会话开始时清空。
+     */
+    this._skippedWordIds = new Set();
     this.isFlipped = false;           // 当前卡片是否处于翻面（释义面朝上）状态
     // 全部用户设置；启动时由 loadSettings() 从数据库读取覆盖默认值
     this.settings = {
@@ -2454,6 +2466,8 @@ class VocabApp {
   async prepareLearnSession() {
     this.cancelScheduledPhoneticRead();
     this._learnSessionSnapshot = null;
+    // 新一轮会话开始：清掉上一次的「已跳过」内存名单（跳过本身不写学习记录）
+    this._skippedWordIds.clear();
 
     // 本次会话是否为「复习轮」（范围内词条都学过、重复频率把它们全挡住时才会置 true）
     this._isReviewRound = false;
@@ -2468,6 +2482,8 @@ class VocabApp {
 
     // 只取当前展示分类（全部/字/短语）的词条；另一分类的词条常驻词库，记录不会被清除
     const allWords = allStoredWords.filter((w) => this.isWordInActiveScope(w));
+    // 缓存当前范围的词条快照，供「跳过」同步补牌使用（见 pickSkipReplacement）
+    this._scopePoolCache = allWords;
 
     // 本轮队列最多能有多少张：范围内词条比每日目标还少时，队列只能是范围内词条数
     const queueCapacity = Math.min(this.settings.dailyGoal, allWords.length);
@@ -3235,32 +3251,87 @@ class VocabApp {
   }
 
   /**
+   * 为「跳过」挑一张补进队列的新卡。
+   *
+   * 只从当前词典范围里挑「今天还没排进今日队列、也没在今天学过、本次会话也没跳过」的词，
+   * 因此连续跳过会一路走到词库里的新词，而不是把今日队列里那几十张来回循环。
+   * 返回 null 表示当前范围内已经没有可补的新词（调用方退回旧行为）。
+   *
+   * 说明：候选来自 prepareLearnSession 缓存的 _scopePoolCache；本次会话跳过的词
+   * 记录在 _skippedWordIds 里（只在内存，不写进学习记录）。
+   */
+  pickSkipReplacement(skippedWord) {
+    const pool = this._scopePoolCache || [];
+    if (pool.length === 0) return null;
+
+    const now = Date.now();
+    const dayStart = new Date().setHours(0, 0, 0, 0);
+    const frequency = Number(this.settings.repeatFrequency) || 0;
+    const dayMs = 24 * 60 * 60 * 1000;
+
+    // 已在队列里的（含刚补进来的）与刚跳过的都不再选
+    const queuedIds = new Set(this.todayWords.map((w) => w.id));
+    if (skippedWord) queuedIds.add(skippedWord.id);
+
+    const candidates = pool.filter((w) => {
+      if (!w || queuedIds.has(w.id)) return false;
+      // 本次会话已经跳过的词不再补进来：否则刚跳过的那张马上又会出现
+      if (this._skippedWordIds.has(w.id)) return false;
+      if (!this.isWordInActiveScope(w)) return false;
+      const lastStudied = Number(w.lastStudied) || 0;
+      // 今天已经学过（掌握/陌生）的词不再补进来
+      if (lastStudied >= dayStart) return false;
+      // 仍处在「重复频率」静默期内的词也不补
+      if (frequency > 0 && now - lastStudied < frequency * dayMs) return false;
+      return true;
+    });
+
+    if (candidates.length === 0) return null;
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
+  /**
    * 跳过卡片。
    * releaseOffset：滑动松手时卡片位移占卡片宽度的比例（按钮触发时为 0），
    * 用于让过场动画从卡片当前位置无缝接续。
+   *
+   * 语义是「换一张没见过的词」，而不是把同一批词在今日队列里循环：
+   *   1) 把当前词移出队列，并记下学习时间，使它在今天（以及重复频率静默期内）不再出现；
+   *   2) 从当前词典范围补一张今天还没排进队列的新词放到队尾；补不到时
+   *      （范围内确实没有新词了）才退回旧行为，把被跳过的词放回队尾；
+   *   3) 队列长度保持不变，因此不会在队列末尾被误判成「今日已完成」。
+   *
+   * 注意 currentCardIndex 的回退：splice 把当前词移走后，原本的「下一张」已经落到
+   * 当前下标上，而 _sequenceCard 会自增下标，若不回退一格就会把下一张一起吞掉
+   * （旧实现在此基础上又把跳过的词挪到队尾，队列短时下一张就又看到它，表现为“循环跳过”）。
    */
   skipCard(releaseOffset = 0) {
     if (this._cardAnimating) return;
     if (this.currentCardIndex >= this.todayWords.length) return;
 
-    // 将当前卡片移到队列末尾（纯内存操作，立即完成，保证下一张内容可同步渲染）
-    const skipped = this.todayWords.splice(this.currentCardIndex, 1)[0];
-    skipped.lastStudied = Date.now(); // 记录学习时间
-    this.todayWords.push(skipped);
+    const skippedIndex = this.currentCardIndex;
+    // 将当前卡片移出队列（纯内存操作，立即完成，保证下一张内容可同步渲染）
+    const skipped = this.todayWords.splice(skippedIndex, 1)[0];
 
-    // 复用与「已掌握」相同的过场动画，保证左右滑动观感一致
-    this._sequenceCard('right', releaseOffset);
+    // 跳过不记录学习进度：不写词条的 status / lastStudied，也不计入今日完成张数。
+    // 只在内存里记住「本次会话已经跳过它」，避免它马上又被补回来。
+    this._skippedWordIds.add(skipped.id);
 
-    // 持久化学习时间：否则"跳过"的单词在下次会话仍被视为从未学过，
-    // 导致重复频率筛选（如 2 天内不再出现）失效。
-    // 落库放到动画开始之后，与滑动动画解耦，避免阻塞过场。
-    Promise.resolve(this.db.updateWord(skipped))
-      // "跳过"会把这张卡挪到队列末尾，也就是改变了今日队列本身。
-      // 不同步保存一次进度的话，跳过几张后切后台/刷新，恢复出来的还是
-      // 跳过之前的队列顺序与下标，等于跳过白做了。
-      .then(() => this.saveLearnProgress())
-      .catch((err) => {
-      console.error('保存跳过学习时间失败:', err);
+    // 补一张新词到队尾；范围内没有新词可补时才把跳过的词放回队尾
+    const replacement = this.pickSkipReplacement(skipped);
+    this.todayWords.push(replacement || skipped);
+
+    // 回退一格，抵消 _sequenceCard 的自增：让补位到当前下标的「下一张」正常显示
+    this.currentCardIndex = skippedIndex - 1;
+
+    // 复用与「已掌握」相同的过场动画，保证左右滑动观感一致。
+    // 第三个参数 false：跳过不计入今日完成张数，进度条与完成判断都不受影响。
+    this._sequenceCard('right', releaseOffset, false);
+
+    // 这里保存的是「今日队列」本身（跳过换掉了队列里的卡），不是学习记录：
+    // 不保存的话，跳过几张后切后台/刷新，恢复出来的还是跳过之前的队列，等于跳过白做了。
+    this.saveLearnProgress().catch((err) => {
+      console.error('保存跳过后的今日队列失败:', err);
     });
   }
 
@@ -3315,10 +3386,13 @@ class VocabApp {
    * releaseOffset 为松手时卡片位移占卡片宽度的比例（按钮/未拖动时为 0）：
    * 拖动越远，剩余滑出路程越短、滑出越快，避免出现忽快忽慢或空等。
    *
+   * countsTowardProgress=false 时本次切卡不计入今日完成张数（「跳过」用），
+   * 进度条与「今日目标已达成」的判断都不受影响。
+   *
    * 本方法完全同步、发起后立即返回，动画由定时器自行推进，因此调用方可以在
    * 触发动画后立刻去做写库等异步工作，两者互不阻塞。
    */
-  _sequenceCard(fromDirection = 'right', releaseOffset = 0) {
+  _sequenceCard(fromDirection = 'right', releaseOffset = 0, countsTowardProgress = true) {
     // 防抖：过场动画进行中忽略重复触发，避免索引与动画错位
     if (this._cardAnimating) return;
     // 切卡时取消待执行的「单击翻面」，避免卡片在滑出过程中被上一次点击翻转
@@ -3328,9 +3402,10 @@ class VocabApp {
     this._cardLongPressText = '';
     this._cardTouchLongPress = false;
     this.currentCardIndex++;
-    // 今日累计张数同步 +1（进度条口径）。跳过也算一张，与旧版「下标即进度」的行为一致；
-    // 跨队列时下标会归零，累计数不会，因此进度可以一直累加到每日目标
-    this.todayDoneCount++;
+    // 今日累计张数 +1（进度条口径）。掌握/陌生算一张；「跳过」不算
+    // （countsTowardProgress=false），所以跳过只换卡、不消耗每日目标。
+    // 跨队列时下标会归零，累计数不会，因此进度可以一直累加到每日目标。
+    if (countsTowardProgress) this.todayDoneCount++;
     // 队列背完、或者今日累计已经达到每日目标，都立刻收卡显示完成页。
     // 第二个条件不可少：词条数不整除每日目标时（例如 30 条短语 / 目标 100，
     // 第四轮学到第 10 张就满 100），队列里还剩着卡片，若不拦住就会继续展示卡片、
