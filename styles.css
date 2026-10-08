@@ -353,6 +353,9 @@ select {
   /* 靠上排布：配合下面的 padding-top 控制正文起始位置 */
   justify-content: flex-start;
   padding-top: 42px;
+  /* 行间距统一交给 gap，不要写成 .meaning/.phonetic 的上下内边距：
+     那样只会把背面的第一行（meaning）往下推 10px，翻面时正文会整体向下跳。 */
+  gap: 10px;
   text-align: center;
 }
 
@@ -367,6 +370,10 @@ select {
   font-size: 18px;
   /* color: var(--text-light); */
   color: var(--text-primary);
+  /* 正面第一行 .word（28px）比背面第一行 .meaning（20px）行盒略高，
+     同一 gap 下第二行会差约 4px（翻面时音标/例句位置跳一下）。
+     这里补 4px 把两面的第二行拉回同一水平位置。 */
+  margin-top: 4px;
   /* margin-bottom: 24px; */
 }
 
@@ -378,8 +385,12 @@ select {
   /* margin-bottom: 16px; */
 }
 
-.meaning,.phonetic {
-  padding: 10px 10px;
+/* 释义 / 音标在卡面上只保留左右内边距：
+   上下内边距会让它们比正面的 .word 更低，造成翻面后正文下移；
+   行与行之间的间距由 .card-content 的 gap 统一控制。 */
+.meaning,
+.phonetic {
+  padding: 0 10px;
 }
 .flashcard .example {
   font-size: 18px;
