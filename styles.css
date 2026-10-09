@@ -309,7 +309,10 @@ select {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  /* 卡片内边距抽成变量：背面要用负 inset 往外扩出这一圈，
+     让整块蓝紫底色与正面看到的米黄卡面一样大（此前四周缩进一圈，比正面小一号） */
+  --flashcard-pad: 16px;
+  padding: var(--flashcard-pad);
   cursor: grab;
   user-select: none;
   -webkit-user-select: none;
@@ -352,7 +355,7 @@ select {
   align-items: center;
   /* 靠上排布：配合下面的 padding-top 控制正文起始位置 */
   justify-content: flex-start;
-  padding-top: 42px;
+  padding-top: 30px;
   /* 行间距统一交给 gap，不要写成 .meaning/.phonetic 的上下内边距：
      那样只会把背面的第一行（meaning）往下推 10px，翻面时正文会整体向下跳。 */
   gap: 10px;
@@ -446,7 +449,7 @@ select {
 .flashcard-corner-tr {
   position: absolute;
   top: 10px;
-  right: 10px;
+  right: 6px;
   z-index: 2;
   display: flex;
   flex-direction: row-reverse;
@@ -520,7 +523,7 @@ select {
 .favorite-btn {
   position: absolute;
   top: 10px;
-  left: 10px;
+  left: 6px;
   width: 44px;
   height: 44px;
   border: none;
@@ -570,13 +573,15 @@ select {
 
 .flashcard .tap-hint {
   position: absolute;
-  bottom: 12px;
+  bottom: 6px;
   font-size: var(--font-size-xs);
   color: var(--text-light);
 }
 
 .flashcard-back .tap-hint-back {
   color: rgba(255, 255, 255, 0.78);
+  /* 背面底色外扩后，底部提示要补回同样的内边距，才与正面的提示停在同一高度 */
+  bottom: calc(6px + var(--flashcard-pad));
 }
 
 .flashcard .language-badge {
@@ -628,16 +633,17 @@ select {
 
 .flashcard-back {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  /* 向外扩出卡片的内边距：整块蓝紫底色正好铺满卡面，与正面看到的米黄卡面等大。
+     内边距同步加上扩出去的这一圈，正文与底部提示才会停在和正面相同的位置。
+     注意这里不能再写 width/height: 100%（会与负 inset 冲突导致尺寸错位）。 */
+  inset: calc(var(--flashcard-pad) * -1);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
   text-align: center;
-  /* 与正面使用同一套内边距，保证翻面后文字落在相同位置 */
-  padding: 20px;
+  /* 与正面使用同一套内边距（20px 内容边距 + 扩出去的一圈），保证翻面后文字落在相同位置 */
+  padding: calc(20px + var(--flashcard-pad));
   transform: rotateY(180deg);
   -webkit-transform: rotateY(180deg);
   /* 护眼：去饱和的柔和暖蓝紫，替代高饱和亮蓝紫 */
@@ -1586,7 +1592,7 @@ select {
     /* 高度不要写在这个断点里：宽度 412/430px 的手机匹配不到 max-width:400px，
        改了在手机上看不到效果。高度统一由 .flashcard 主样式的 clamp 决定，
        这里只调整窄屏的卡面内边距与字号。 */
-    padding: 24px;
+    --flashcard-pad: 24px;
   }
   
   .flashcard .word {
