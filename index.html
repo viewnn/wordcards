@@ -193,24 +193,7 @@
             <span class="progress-text" id="practiceProgressText">0/0</span>
           </div>
 
-          <!-- 工具栏：练习范围（全部/短语/字） + 输入模式（含调值/不含调值） -->
-          <div class="practice-toolbar">
-            <label class="practice-toolbar-item">
-              <span class="practice-toolbar-label">词库导入</span>
-              <select id="practiceScopeSelect" class="dict-select practice-scope-select">
-                <option value="all">全部</option>
-                <option value="phrase">短语</option>
-                <option value="word">字</option>
-              </select>
-            </label>
-            <div class="practice-toolbar-item">
-              <span class="practice-toolbar-label">输入模式</span>
-              <div class="practice-mode-options" id="practiceToneOptions">
-                <button class="practice-mode-option" data-tone="without" type="button">不含调值</button>
-                <button class="practice-mode-option active" data-tone="with" type="button">含调值</button>
-              </div>
-            </div>
-          </div>
+          <!-- 练习范围与调值开关已移到设置页的「练习设置」（见下） -->
 
           <!-- 卡片区域：正面只看词汇，点击翻面看音标/释义/例句；输入框紧贴卡片下方 -->
           <div class="card-stack practice-card-stack">
@@ -244,10 +227,17 @@
                      autocapitalize="off" spellcheck="false" inputmode="none" enterkeyhint="next">
               <div class="practice-hint" id="practiceHint"></div>
             </div>
+
+            <!-- 键盘开关：位于下方键盘的正上方，点箭头展开 / 收起键盘（默认收起） -->
+            <button class="practice-keyboard-toggle" id="practiceKeyboardToggle" type="button"
+                    aria-label="显示 / 隐藏键盘" aria-expanded="false">
+              <svg viewBox="0 0 24 24"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>
+            </button>
           </div>
 
-          <!-- 固定键盘：26 个字母键 + 数字键（粤拼调值 1-6）+ 退格，位于底部菜单栏上方 -->
-          <div class="practice-keyboard" id="practiceKeyboard">
+          <!-- 固定键盘：26 个字母键 + 数字键（粤拼调值 1-6）+ 退格，位于底部菜单栏上方；
+               默认收起，点上方输入区下面的箭头展开 / 收起 -->
+          <div class="practice-keyboard" id="practiceKeyboard" style="display: none;">
             <div class="practice-keyboard-row">
               <button class="practice-key is-digit" type="button" data-key="1">1</button>
               <button class="practice-key is-digit" type="button" data-key="2">2</button>
@@ -408,6 +398,29 @@
                 <p>开启后，卡片默认先展示释义和例句</p>
               </div>
               <div class="toggle" id="cardDefinitionFirstToggle"></div>
+            </div>
+          </div>
+
+          <!-- 练习设置 -->
+          <div class="settings-section">
+            <h3 class="settings-section-title">练习设置</h3>
+            <div class="setting-item">
+              <div class="setting-info">
+                <h4>词典导入</h4>
+                <p>选择要导入的词典，默认展示为全部</p>
+              </div>
+              <select id="practiceScopeSelect" class="dict-select">
+                <option value="all" selected>全部</option>
+                <option value="phrase">短语</option>
+                <option value="word">字</option>
+              </select>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
+                <h4>显示调值</h4>
+                <p>若开启含调值，则需要调值输入正确</p>
+              </div>
+              <div class="toggle active" id="practiceToneToggle"></div>
             </div>
           </div>
 

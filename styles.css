@@ -839,75 +839,29 @@ select {
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
-/* ---------- 顶部工具栏：练习范围 + 输入模式 ---------- */
-.practice-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 2px 2px 10px;
-}
-
-.practice-toolbar-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.practice-toolbar-label {
-  font-size: var(--font-size-xs);
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-
-/* 比设置页的下拉更紧凑，避免在工具栏里抢走卡片的空间。
-   选择器带上 .practice-toolbar 提高优先级：.dict-select 定义在本文件更靠后的位置，
-   同优先级下会反过来覆盖这里的 padding 与字号。 */
-.practice-toolbar .practice-scope-select {
-  padding: 6px 30px 6px 10px;
-  font-size: 13px;
-}
-
-.practice-mode-options {
-  display: flex;
-  gap: 6px;
-}
-
-.practice-mode-option {
-  padding: 6px 12px;
-  background: var(--bg-primary);
-  border: none;
-  border-radius: 8px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.2s;
-  white-space: nowrap;
-}
-
-.practice-mode-option.active {
-  background: var(--primary);
-  color: white;
-}
-
 /* ---------- 卡片区域 ---------- */
 /* 练习卡的正文排布（.card-content 的 padding-top / gap、字号、行距）与学习卡一致。
-   高度也是同一条 clamp 公式，再用 --practice-stack-gap 把「学习页卡片区上方比练习页
-   多出来的高度」（提示行 + 今日统计行）补进卡片区的下内边距，让两页的卡片区可用高度
-   相等 —— 于是卡片高度在任何屏幕上都一致（测量见 app.js 的 syncPracticeCardHeight）。 */
+   高度直接取学习卡的实测高度（--learn-card-height，见 app.js 的 syncPracticeCardHeight）：
+   练习页卡片区上方只有进度条，学习页还有「提示行 + 今日统计行」，
+   光靠同一条 clamp 公式会差几十像素，量出来才能保证电脑端与手机端都一致。
+   量不到时回退成与学习卡相同的 clamp 公式。 */
 .practice-card-stack {
-  /* 底部固定键盘要占一块高度：允许卡片区被压缩，避免整页滚动把键盘顶出屏幕 */
+  flex: 1;
   min-height: 0;
+  /* 卡片紧贴上方内容（进度条）排布；练习范围与调值开关移到设置页后，
+     这里上方不再有工具栏，卡片就是练习页最靠上的内容 */
+  justify-content: flex-start;
 }
 
 .practice-card-stack .flashcard {
-  /* 与学习卡同一条 clamp 公式，只多减掉 --practice-stack-gap（学习页卡片区上方比
-     练习页多出来的「提示行 + 今日统计行」高度）：两页卡片区的可用高度就相等，
-     卡片高度处处一致。空间不够时（底部要放键盘）允许一路压到 160px 兜底，
-     此时 gap 不再占位，键盘与输入框始终留在屏幕内。 */
-  height: clamp(160px, calc(100% - 96px - var(--practice-stack-gap, 0px)), 460px);
-  flex-shrink: 0;
+  height: var(--learn-card-height, clamp(320px, calc(100% - 96px), 460px));
+  /* 只收缩、不放大：
+     - flex-grow 0 → 空间再多也不会超过学习卡的高度，两页始终等高；
+     - flex-shrink 1 → 键盘展开、空间不够时按剩余高度收缩（输入区与箭头不可收缩），
+       卡片正好填满卡片区，因此不会在键盘上方留下空白。 */
+  flex: 0 1 auto;
+  max-height: var(--learn-card-height, 460px);
+  min-height: 0;
   cursor: pointer;
 }
 
@@ -935,6 +889,42 @@ select {
   /* 左右不留内边距：输入框宽度与卡片完全对齐（两者都是卡片区内容宽度）。
      顶部 12px = 学习页「卡片 → 跳过/掌握/陌生」的间距（.card-actions 的上内边距） */
   padding: 12px 0 4px;
+}
+
+/* 键盘开关：位于输入区之下、键盘正上方的小手柄，居中且不占输入框宽度
+   （输入框仍与卡片等宽）。高度很小，展开键盘时对卡片高度的影响可以忽略。 */
+.practice-keyboard-toggle {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 64px;
+  height: 22px;
+  margin-top: 2px;
+  padding: 0;
+  border: none;
+  border-radius: 11px;
+  background: var(--bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s;
+  touch-action: manipulation;
+}
+
+.practice-keyboard-toggle:active {
+  background: #E7E1D2;
+}
+
+.practice-keyboard-toggle svg {
+  width: 20px;
+  height: 20px;
+  fill: var(--text-secondary);
+  transition: transform 0.15s;
+}
+
+/* 键盘展开时箭头翻转向下（再点即收起） */
+.practice-keyboard-toggle.active svg {
+  transform: rotate(180deg);
 }
 
 .practice-input {
@@ -980,7 +970,7 @@ select {
 
 .practice-hint {
   min-height: 16px;
-  margin-top: 6px;
+  margin: 6px 0px;
   font-size: var(--font-size-xs);
   color: var(--text-light);
   text-align: center;
@@ -1020,7 +1010,7 @@ select {
   height: 36px;
   padding: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--bg-primary);
   color: var(--text-primary);
   font-size: 16px;
@@ -1039,7 +1029,7 @@ select {
 
 /* 数字键（粤拼调值 1~6）用略深的底色区分，避免和字母键混在一起 */
 .practice-key.is-digit {
-  background: #E7E1D2;
+  background: var(--bg-primary);
   color: var(--text-secondary);
   font-weight: 600;
 }
