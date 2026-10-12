@@ -420,6 +420,9 @@ class VocabApp {
     this._practiceScopeTotal = 0;
     /** 手机端软键盘是否处于弹出状态（由 initKeyboardViewport 维护，配合 body.keyboard-open） */
     this._keyboardOpen = false;
+    /** 学习页 / 练习页「卡片区距页面顶部」的实测值，用来把两页卡片高度对齐（见 syncPracticeCardHeight） */
+    this._learnStackTop = 0;
+    this._practiceStackTop = 0;
   }
   /**
    * 应用启动入口（DOMContentLoaded 后调用一次）。
@@ -824,22 +827,29 @@ class VocabApp {
   }
 
   /**
-   * 让练习卡与学习卡等高。
+   * 让练习页的卡片区可用高度与学习页一致，从而两页的卡片高度处处相等。
    *
-   * 两张卡的高度都按「卡片区高度 - 96px」算，但两个页面的卡片区可用高度天生不同：
    * 学习页卡片区上方是「进度条 + 提示行 + 今日统计行」，练习页是「进度条 + 范围工具栏」，
-   * 于是同一条 CSS 规则会算出相差几十像素的结果。这里直接量学习卡的真实高度，
-   * 写进 CSS 变量供练习卡使用（见 styles.css 的 --learn-card-height）。
+   * 后者矮了一截，于是同一条 clamp 公式会算出相差几十像素的卡片。这里量出两侧卡片区
+   * 距离页面顶部的差值，写进 CSS 变量 --practice-stack-gap，练习卡的高度公式把它减掉，
+   * 两页基准就完全一致 —— 而且是纯 CSS 计算，屏幕高度变化时会跟着变，不必反复重新量。
    *
-   * 必须在学习页可见时调用：页面被 display:none 隐藏后量到的是 0，
-   * 此时保持上一次的值（所以切页时要在隐藏旧页面之前先量）。
+   * 两个页面不会同时可见（另一个是 display:none，量出来是 0），
+   * 所以每次只更新「当前可见页面」那一侧，两侧都量到之后才写变量。
    */
   syncPracticeCardHeight() {
-    const learnCard = document.getElementById('flashcard');
-    if (!learnCard) return;
-    const height = Math.round(learnCard.getBoundingClientRect().height);
-    if (height > 0) {
-      document.documentElement.style.setProperty('--learn-card-height', `${height}px`);
+    if (this.currentPage === 'learn') {
+      const stack = document.querySelector('#learnPage .card-stack');
+      const top = stack ? stack.offsetTop : 0;
+      if (top > 0) this._learnStackTop = top;
+    } else if (this.currentPage === 'practice') {
+      const stack = document.querySelector('.practice-card-stack');
+      const top = stack ? stack.offsetTop : 0;
+      if (top > 0) this._practiceStackTop = top;
+    }
+    if (this._learnStackTop > 0 && this._practiceStackTop > 0) {
+      const gap = Math.max(0, Math.round(this._learnStackTop - this._practiceStackTop));
+      document.documentElement.style.setProperty('--practice-stack-gap', `${gap}px`);
     }
   }
 
@@ -1403,12 +1413,9 @@ class VocabApp {
     // 练习页（范围下拉、输入模式、卡片翻转、音标输入框）
     this.bindPracticeEvents();
 
-    // 窗口尺寸变化（旋屏、改窗口大小）后重新对齐两张卡片的高度。
-    // 不在学习页时量不到学习卡，就先退回 CSS 里的 clamp 规则（跟随当前可用高度），
-    // 下次切回学习页时会重新量出精确值。
+    // 窗口尺寸变化（旋屏、改窗口大小）后重新量一次当前可见页面的卡片区位置
     window.addEventListener('resize', () => {
-      if (this.currentPage === 'learn') this.syncPracticeCardHeight();
-      else document.documentElement.style.removeProperty('--learn-card-height');
+      this.syncPracticeCardHeight();
     });
     
   }
@@ -2552,6 +2559,9 @@ class VocabApp {
     if (page !== 'library') {
       this.resetLibraryTodayFilter();
     }
+
+    // 新页面已经激活：补量它那一侧卡片区的位置，两侧都齐了就能算出练习卡的补偿高度
+    this.syncPracticeCardHeight();
   }
 
   /** 首次渲染：准备今日学习队列（学习页默认显示）并把设置应用到界面 */
@@ -4068,6 +4078,62 @@ class VocabApp {
       if (e.target === input) return;
       input.blur();
     });
+
+    // 固定键盘（26 字母 + 1~6 调值 + 退格）：点键即输入
+    const keyboard = document.getElementById('practiceKeyboard');
+    if (keyboard) {
+      keyboard.addEventListener('click', (e) => {
+        const key = e.target.closest ? e.target.closest('.practice-key') : null;
+        if (!key) return;
+        e.preventDefault();
+        const value = key.dataset.key;
+        if (value === 'backspace') self.practiceBackspace();
+        else self.practiceTypeChar(value);
+      });
+      // 长按键盘不要弹出系统的选择/放大镜
+      keyboard.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
+
+    // 桌面端物理键盘：输入框是 readonly，浏览器默认输入已被关掉，
+    // 字母 / 数字 / 退格全部走与虚拟键盘相同的这一套逻辑，两边行为完全一致
+    document.addEventListener('keydown', (e) => {
+      if (self.currentPage !== 'practice') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === 'Backspace') {
+        e.preventDefault();
+        self.practiceBackspace();
+        return;
+      }
+      if (/^[a-zA-Z]$/.test(e.key)) {
+        e.preventDefault();
+        self.practiceTypeChar(e.key.toLowerCase());
+        return;
+      }
+      if (/^[1-6]$/.test(e.key)) {
+        e.preventDefault();
+        self.practiceTypeChar(e.key);
+      }
+    });
+  }
+
+  /** 输入一个字符（固定键盘与物理键盘共用）：追加到末尾后交给统一的判定逻辑 */
+  practiceTypeChar(ch) {
+    const input = document.getElementById('practiceInput');
+    if (!input || !ch) return;
+    // 「不含调值」模式不需要声调数字：按了也忽略，免得白白标红
+    if (this.settings.practiceToneMode === 'without' && /[1-6]/.test(ch)) return;
+    input.value += ch;
+    input.selectionStart = input.selectionEnd = input.value.length;
+    this.handlePracticeInput({ target: input, inputType: 'insertText', isComposing: false });
+  }
+
+  /** 退格：删掉输入框最后一个字符（已答对时 handlePracticeInput 会把内容还原） */
+  practiceBackspace() {
+    const input = document.getElementById('practiceInput');
+    if (!input || !input.value) return;
+    input.value = input.value.slice(0, -1);
+    input.selectionStart = input.selectionEnd = input.value.length;
+    this.handlePracticeInput({ target: input, inputType: 'deleteContentBackward', isComposing: false });
   }
 
   /** 把练习页控件（范围下拉、输入模式按钮）刷新成当前设置值 */
@@ -4261,6 +4327,7 @@ class VocabApp {
       if (stack) stack.style.display = 'none';
       if (inputArea) inputArea.style.display = 'none';
       if (emptyEl) emptyEl.style.display = 'flex';
+      this.togglePracticeKeyboard(false);
       return;
     }
     // 一轮练完
@@ -4273,6 +4340,7 @@ class VocabApp {
     if (emptyEl) emptyEl.style.display = 'none';
     if (stack) stack.style.display = 'flex';
     if (inputArea) inputArea.style.display = 'flex';
+    this.togglePracticeKeyboard(true);
 
     const wordEl = document.getElementById('practiceWord');
     if (wordEl) wordEl.textContent = word.word || '';
@@ -4500,7 +4568,7 @@ class VocabApp {
     this.renderPracticeCard();
   }
 
-  /** 练习页完成状态：隐去卡片与输入框，只留完成提示 */
+  /** 练习页完成状态：隐去卡片、输入框与键盘，只留完成提示 */
   showPracticeComplete() {
     this.cancelPracticeAdvance();
     const stack = document.querySelector('.practice-card-stack');
@@ -4510,9 +4578,16 @@ class VocabApp {
     if (stack) stack.style.display = 'none';
     if (inputArea) inputArea.style.display = 'none';
     if (emptyEl) emptyEl.style.display = 'none';
+    this.togglePracticeKeyboard(false);
     if (completeEl) completeEl.style.display = 'flex';
     const subtitle = completeEl ? completeEl.querySelector('.complete-subtitle') : null;
     if (subtitle) subtitle.textContent = `本轮练习已完成（共 ${this.practiceWords.length} 个词条）`;
+  }
+
+  /** 显示 / 隐藏底部固定键盘（空状态、完成页和题目区都不在时不需要它） */
+  togglePracticeKeyboard(visible) {
+    const keyboard = document.getElementById('practiceKeyboard');
+    if (keyboard) keyboard.style.display = visible ? 'flex' : 'none';
   }
 
   // ==================== 词库页面 ====================

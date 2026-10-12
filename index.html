@@ -235,12 +235,59 @@
               </div>
             </div>
 
-            <!-- 输入区域：输入词汇对应的音标；正确自动补空格，错误变红，全对变绿 -->
+            <!-- 输入区域：输入词汇对应的音标；正确自动补空格，错误变红，全对变绿。
+                 readonly：手机端由下方固定键盘输入，不唤起系统键盘（避免顶乱布局）；
+                 桌面端由物理键盘输入，事件在 app.js 里统一处理。 -->
             <div class="practice-input-area">
-              <input type="text" id="practiceInput" class="practice-input"
-                     placeholder="在此输入音标…" autocomplete="off" autocorrect="off"
-                     autocapitalize="off" spellcheck="false" inputmode="latin" enterkeyhint="next">
+              <input type="text" id="practiceInput" class="practice-input" readonly
+                     placeholder="请输入拼音…" autocomplete="off" autocorrect="off"
+                     autocapitalize="off" spellcheck="false" inputmode="none" enterkeyhint="next">
               <div class="practice-hint" id="practiceHint"></div>
+            </div>
+          </div>
+
+          <!-- 固定键盘：26 个字母键 + 数字键（粤拼调值 1-6）+ 退格，位于底部菜单栏上方 -->
+          <div class="practice-keyboard" id="practiceKeyboard">
+            <div class="practice-keyboard-row">
+              <button class="practice-key is-digit" type="button" data-key="1">1</button>
+              <button class="practice-key is-digit" type="button" data-key="2">2</button>
+              <button class="practice-key is-digit" type="button" data-key="3">3</button>
+              <button class="practice-key is-digit" type="button" data-key="4">4</button>
+              <button class="practice-key is-digit" type="button" data-key="5">5</button>
+              <button class="practice-key is-digit" type="button" data-key="6">6</button>
+            </div>
+            <div class="practice-keyboard-row">
+              <button class="practice-key" type="button" data-key="q">q</button>
+              <button class="practice-key" type="button" data-key="w">w</button>
+              <button class="practice-key" type="button" data-key="e">e</button>
+              <button class="practice-key" type="button" data-key="r">r</button>
+              <button class="practice-key" type="button" data-key="t">t</button>
+              <button class="practice-key" type="button" data-key="y">y</button>
+              <button class="practice-key" type="button" data-key="u">u</button>
+              <button class="practice-key" type="button" data-key="i">i</button>
+              <button class="practice-key" type="button" data-key="o">o</button>
+              <button class="practice-key" type="button" data-key="p">p</button>
+            </div>
+            <div class="practice-keyboard-row">
+              <button class="practice-key" type="button" data-key="a">a</button>
+              <button class="practice-key" type="button" data-key="s">s</button>
+              <button class="practice-key" type="button" data-key="d">d</button>
+              <button class="practice-key" type="button" data-key="f">f</button>
+              <button class="practice-key" type="button" data-key="g">g</button>
+              <button class="practice-key" type="button" data-key="h">h</button>
+              <button class="practice-key" type="button" data-key="j">j</button>
+              <button class="practice-key" type="button" data-key="k">k</button>
+              <button class="practice-key" type="button" data-key="l">l</button>
+            </div>
+            <div class="practice-keyboard-row">
+              <button class="practice-key" type="button" data-key="z">z</button>
+              <button class="practice-key" type="button" data-key="x">x</button>
+              <button class="practice-key" type="button" data-key="c">c</button>
+              <button class="practice-key" type="button" data-key="v">v</button>
+              <button class="practice-key" type="button" data-key="b">b</button>
+              <button class="practice-key" type="button" data-key="n">n</button>
+              <button class="practice-key" type="button" data-key="m">m</button>
+              <button class="practice-key is-wide" type="button" data-key="backspace" aria-label="退格">⌫</button>
             </div>
           </div>
 

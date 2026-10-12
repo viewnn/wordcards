@@ -892,20 +892,21 @@ select {
 }
 
 /* ---------- 卡片区域 ---------- */
-/* 练习卡的正文排布（.card-content 的 padding-top / gap、字号、行距）与高度规则
-   都沿用学习卡，两张卡片在同一块屏幕上高矮一致。 */
+/* 练习卡的正文排布（.card-content 的 padding-top / gap、字号、行距）与学习卡一致。
+   高度也是同一条 clamp 公式，再用 --practice-stack-gap 把「学习页卡片区上方比练习页
+   多出来的高度」（提示行 + 今日统计行）补进卡片区的下内边距，让两页的卡片区可用高度
+   相等 —— 于是卡片高度在任何屏幕上都一致（测量见 app.js 的 syncPracticeCardHeight）。 */
 .practice-card-stack {
-  /* 与学习页 .card-stack 完全一致：卡片下限(320) + 输入区预留(96) ≈ 420 */
-  min-height: 420px;
-  padding-bottom: 0;
+  /* 底部固定键盘要占一块高度：允许卡片区被压缩，避免整页滚动把键盘顶出屏幕 */
+  min-height: 0;
 }
 
 .practice-card-stack .flashcard {
-  /* 高度优先取「学习卡的实际高度」（由 syncPracticeCardHeight 写入 CSS 变量）：
-     练习页的卡片区比学习页高（少了「提示行 + 今日统计行」、多了范围工具栏），
-     光靠同一条 clamp 规则算出来会差几十像素，量一下学习卡才是真正等高。
-     量不到时（比如刷新后还没进过学习页）回退到与学习卡相同的 clamp 规则。 */
-  height: var(--learn-card-height, clamp(320px, calc(100% - 96px), 460px));
+  /* 与学习卡同一条 clamp 公式，只多减掉 --practice-stack-gap（学习页卡片区上方比
+     练习页多出来的「提示行 + 今日统计行」高度）：两页卡片区的可用高度就相等，
+     卡片高度处处一致。空间不够时（底部要放键盘）允许一路压到 160px 兜底，
+     此时 gap 不再占位，键盘与输入框始终留在屏幕内。 */
+  height: clamp(160px, calc(100% - 96px - var(--practice-stack-gap, 0px)), 460px);
   flex-shrink: 0;
   cursor: pointer;
 }
@@ -929,7 +930,7 @@ select {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  caret-color: transparent;
+  caret-color: transparent; 
   gap: 6px;
   /* 左右不留内边距：输入框宽度与卡片完全对齐（两者都是卡片区内容宽度）。
      顶部 12px = 学习页「卡片 → 跳过/掌握/陌生」的间距（.card-actions 的上内边距） */
@@ -992,6 +993,76 @@ select {
 .practice-hint.success {
   color: var(--success);
   font-weight: 600;
+}
+
+/* ---------- 固定键盘（底部菜单栏上方） ---------- */
+/* 26 个字母键 + 1~6 调值数字键 + 退格。手机端用它代替系统键盘，
+   这样键盘弹出不会顶乱布局；桌面端可以点，也可以直接用物理键盘打字。 */
+.practice-keyboard {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 0 2px;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.practice-keyboard-row {
+  display: flex;
+  gap: 5px;
+}
+
+.practice-key {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background 0.12s, color 0.12s, transform 0.08s;
+}
+
+.practice-key:active {
+  background: var(--primary);
+  color: white;
+  transform: scale(0.94);
+}
+
+/* 数字键（粤拼调值 1~6）用略深的底色区分，避免和字母键混在一起 */
+.practice-key.is-digit {
+  background: #E7E1D2;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.practice-key.is-wide {
+  flex: 1.6;
+}
+
+/* 矮屏再把键盘压低一点，给卡片多留几个像素 */
+@media (max-height:640px) {
+  .practice-keyboard {
+    gap: 4px;
+    padding-top: 6px;
+  }
+
+  .practice-keyboard-row {
+    gap: 4px;
+  }
+
+  .practice-key {
+    height: 32px;
+    font-size: 15px;
+  }
 }
 
 /* ==================== 词库页面 ==================== */
