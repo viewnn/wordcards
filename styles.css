@@ -869,10 +869,28 @@ select {
   cursor: pointer;
 }
 
-/* 背面的音标是本题答案，用高对比的米白色加粗显示 */
-.practice-card-stack .flashcard-back .phonetic {
+/* 背面的音标是本题答案：固定在卡片顶部居中，位置与正面的「语言 / 分类」标签一致。
+   这样背面的第一行正文是「释义」，正好落在正面第一行「词汇」的位置上，
+   翻面时文字不会整体往下掉。 */
+.practice-card-stack .flashcard-back .practice-back-phonetic {
+  position: absolute;
+  /* .flashcard-back 为了铺满卡面往外扩了 --flashcard-pad 一圈，
+     这里加回同样的距离，屏幕上看到的位置才与正面标签的 top: 0 相同 */
+  top: var(--flashcard-pad);
+  left: 0;
+  right: 0;
+  /* 抵消 .flashcard .phonetic 自带的 margin-top 与左右内边距 */
+  margin-top: 0;
+  padding: 0 calc(10px + var(--flashcard-pad));
+  text-align: center;
   color: #FBF7E8;
   font-weight: 700;
+  z-index: 2;
+  /* 与标签行同样做背面剔除，避免个别浏览器上透视合成叠层穿透 */
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
 }
 
 .practice-card-stack .flashcard-back .example {
