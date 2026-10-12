@@ -954,8 +954,8 @@ select {
 
 .practice-input {
   width: 100%;
-  padding: 14px 16px;
-  font-size: 20px;
+  padding: 10px 16px;
+  font-size: 18px;
   letter-spacing: 1px;
   text-align: center;
   /* 文字透明：可见内容由下方 .practice-input-display 渲染（要逐音节上色） */
@@ -978,7 +978,7 @@ select {
   justify-content: center;
   padding: 14px 16px;
   border: 2px solid transparent;
-  font-size: 20px;
+  font-size: 18px;
   letter-spacing: 1px;
   white-space: pre;
   overflow: hidden;
@@ -996,7 +996,7 @@ select {
 /* 输入正确（与目标音节完全一致）的音节：绿色 */
 .practice-input-display .ok {
   color: var(--success);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 /* 输入错误的音节：红色（正在输入的前缀不着色，保持默认色） */
@@ -1005,7 +1005,7 @@ select {
 }
 
 .practice-input::placeholder {
-  font-size: 15px;
+  font-size: 14px;
   letter-spacing: 0;
   color: var(--text-light);
 }
