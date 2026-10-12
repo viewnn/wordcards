@@ -89,6 +89,12 @@ const CARD_FINISH_MARGIN_PX = 0;
  */
 const PRACTICE_ADVANCE_DELAY_MS = 900;
 
+/**
+ * 判定「软键盘已弹出」的最小高度差（px）。
+ * 手机软键盘一般 250px 以上，而地址栏伸缩只有几十像素，用这个阈值把两者区分开。
+ */
+const KEYBOARD_MIN_HEIGHT_PX = 120;
+
 // ==================== IndexedDB 数据库操作（数据层） ====================
 /**
  * 数据层类：对 IndexedDB 的 Promise 化封装。
@@ -412,6 +418,8 @@ class VocabApp {
     this._practiceDone = { word: new Set(), phrase: new Set() };
     /** 当前练习范围内「可练习词条」的总数（进度条分母） */
     this._practiceScopeTotal = 0;
+    /** 手机端软键盘是否处于弹出状态（由 initKeyboardViewport 维护，配合 body.keyboard-open） */
+    this._keyboardOpen = false;
   }
   /**
    * 应用启动入口（DOMContentLoaded 后调用一次）。
@@ -436,6 +444,7 @@ class VocabApp {
       }
       this.initServiceWorker();
       this.bindEvents();
+      this.initKeyboardViewport();
       this.primeSpeechSynthesis();
 
       // 先导入词典（字+短语全量常驻并标注分类），再加载按分类归档的统计，
@@ -447,6 +456,8 @@ class VocabApp {
       // 显示上次词库更新时间
       await this.loadDictUpdateTimeDisplay();
       this.render();
+      // 学习卡此刻可见：量一次高度，练习卡据此与学习卡等高
+      this.syncPracticeCardHeight();
 
       // 【云同步钩子 3】启动云同步（登录态恢复、首次合并、注册网络/前台监听）。
       // 未配置 Supabase 或未加载 SDK 时，内部直接跳过，不影响任何本地功能。
@@ -764,7 +775,75 @@ class VocabApp {
     }
   }
   
-  // 测量滚动条宽度
+  /**
+   * 手机端软键盘适配（只做两件事，不改动任何业务逻辑）：
+   *
+   * 1) 键盘弹出时给 <body> 加 .keyboard-open，并用 visualViewport 的真实可见高度
+   *    约束 .app-container（见 styles.css）。iOS Safari 在键盘弹出时不会缩小布局视口，
+   *    而是把整个页面往上顶，底部菜单栏会被推出屏幕、页面也只剩半截；
+   *    改用「键盘上方的可视区域」来摆放应用后，菜单栏始终可见并紧贴键盘上沿，
+   *    页面内容也重新从顶部开始排布。
+   * 2) 记录键盘高度，供需要时使用；弹出/收起只在跨越阈值时切换 class，避免抖动。
+   */
+  initKeyboardViewport() {
+    const vv = window.visualViewport;
+    if (!vv || typeof vv.addEventListener !== 'function') return;
+    // 桌面浏览器没有软键盘：不加这层适配，免得「页面缩放」（同样会改 visualViewport）
+    // 被当成键盘弹出。触摸设备（手机 / 平板 / 触屏本）才启用。
+    const touchCapable = (navigator.maxTouchPoints || 0) > 0;
+    if (!touchCapable) return;
+
+    const root = document.documentElement;
+    const apply = () => {
+      const layoutHeight = window.innerHeight || 0;
+      // 页面缩放会让 vv.height 远小于 innerHeight，与键盘弹出的表现相同，
+      // 这里用 scale 把缩放排除掉
+      const zoomed = Math.abs((vv.scale || 1) - 1) > 0.01;
+      const keyboardHeight = zoomed ? 0 : Math.max(0, layoutHeight - vv.height - vv.offsetTop);
+
+      // 每次都要更新：键盘高度变化、地址栏伸缩、页面缩放都会改这两个值
+      root.style.setProperty('--visual-viewport-height', `${Math.round(vv.height)}px`);
+      root.style.setProperty('--visual-viewport-top', `${Math.round(vv.offsetTop)}px`);
+      this._keyboardHeight = keyboardHeight;
+
+      const open = keyboardHeight > KEYBOARD_MIN_HEIGHT_PX;
+      if (open === this._keyboardOpen) return;
+      this._keyboardOpen = open;
+      document.body.classList.toggle('keyboard-open', open);
+
+      if (open) {
+        // 可视高度骤减：内容回到顶部，保证卡片和输入框都在键盘上方看得到
+        const content = document.querySelector('.page-content');
+        if (content) content.scrollTop = 0;
+      }
+    };
+
+    vv.addEventListener('resize', apply);
+    vv.addEventListener('scroll', apply);
+    apply();
+  }
+
+  /**
+   * 让练习卡与学习卡等高。
+   *
+   * 两张卡的高度都按「卡片区高度 - 96px」算，但两个页面的卡片区可用高度天生不同：
+   * 学习页卡片区上方是「进度条 + 提示行 + 今日统计行」，练习页是「进度条 + 范围工具栏」，
+   * 于是同一条 CSS 规则会算出相差几十像素的结果。这里直接量学习卡的真实高度，
+   * 写进 CSS 变量供练习卡使用（见 styles.css 的 --learn-card-height）。
+   *
+   * 必须在学习页可见时调用：页面被 display:none 隐藏后量到的是 0，
+   * 此时保持上一次的值（所以切页时要在隐藏旧页面之前先量）。
+   */
+  syncPracticeCardHeight() {
+    const learnCard = document.getElementById('flashcard');
+    if (!learnCard) return;
+    const height = Math.round(learnCard.getBoundingClientRect().height);
+    if (height > 0) {
+      document.documentElement.style.setProperty('--learn-card-height', `${height}px`);
+    }
+  }
+
+  /** 测量滚动条宽度 */
   measureScrollbarWidth() {
     const scrollDiv = document.createElement('div');
     scrollDiv.style.cssText = 'width: 100px; height: 100px; overflow: scroll; position: absolute; top: -9999px;';
@@ -1323,6 +1402,14 @@ class VocabApp {
 
     // 练习页（范围下拉、输入模式、卡片翻转、音标输入框）
     this.bindPracticeEvents();
+
+    // 窗口尺寸变化（旋屏、改窗口大小）后重新对齐两张卡片的高度。
+    // 不在学习页时量不到学习卡，就先退回 CSS 里的 clamp 规则（跟随当前可用高度），
+    // 下次切回学习页时会重新量出精确值。
+    window.addEventListener('resize', () => {
+      if (this.currentPage === 'learn') this.syncPracticeCardHeight();
+      else document.documentElement.style.removeProperty('--learn-card-height');
+    });
     
   }
   
@@ -2347,6 +2434,9 @@ class VocabApp {
    */
   switchPage(page) {
     if (this.currentPage === page) return;
+
+    // 旧页面此刻仍然可见：先量一下学习卡高度，好让练习卡与它等高
+    this.syncPracticeCardHeight();
 
     // 切页时取消尚未执行的「单击翻面」并复位手势状态：卡片翻面是延迟执行的，
     // 不取消的话会把点击留到另一个页面的卡片上执行
@@ -3968,6 +4058,16 @@ class VocabApp {
       restartBtn.addEventListener('click', () => self.restartPractice());
       restartBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.restartPractice(); });
     }
+
+    // 点击输入框以外的地方就收起软键盘：键盘只服务于输入，
+    // 不该一直占着半屏（点卡片看答案、切范围、切菜单时都会自动收回）
+    document.addEventListener('pointerdown', (e) => {
+      if (self.currentPage !== 'practice') return;
+      const input = document.getElementById('practiceInput');
+      if (!input || document.activeElement !== input) return;
+      if (e.target === input) return;
+      input.blur();
+    });
   }
 
   /** 把练习页控件（范围下拉、输入模式按钮）刷新成当前设置值 */

@@ -892,23 +892,21 @@ select {
 }
 
 /* ---------- 卡片区域 ---------- */
-/* 练习卡的正文排布（.card-content 的 padding-top / gap、字号、行距）完全沿用学习卡：
-   这里只调整卡片自身的高度与下方间距，不再覆盖正文样式。
-   布局与学习页的「卡片 + 跳过/掌握/陌生」一致：卡片是吃掉剩余空间的那一项，
-   输入区固定高度紧跟其后 —— 这样卡片不会被撑高、下方留出一大块空白。 */
+/* 练习卡的正文排布（.card-content 的 padding-top / gap、字号、行距）与高度规则
+   都沿用学习卡，两张卡片在同一块屏幕上高矮一致。 */
 .practice-card-stack {
-  /* 卡片下限（240px）+ 输入区高度，保证两者都能完整放下 */
-  min-height: 340px;
+  /* 与学习页 .card-stack 完全一致：卡片下限(320) + 输入区预留(96) ≈ 420 */
+  min-height: 420px;
   padding-bottom: 0;
 }
 
 .practice-card-stack .flashcard {
-  /* 由 flex 分配高度（min/max 兜住），而不是写死百分比/固定高度：
-     写死高度时卡片达不到那个高度就会在下方留白，输入框被迫离得很远 */
-  flex: 1 1 auto;
-  height: auto;
-  min-height: 240px;
-  max-height: 460px;
+  /* 高度优先取「学习卡的实际高度」（由 syncPracticeCardHeight 写入 CSS 变量）：
+     练习页的卡片区比学习页高（少了「提示行 + 今日统计行」、多了范围工具栏），
+     光靠同一条 clamp 规则算出来会差几十像素，量一下学习卡才是真正等高。
+     量不到时（比如刷新后还没进过学习页）回退到与学习卡相同的 clamp 规则。 */
+  height: var(--learn-card-height, clamp(320px, calc(100% - 96px), 460px));
+  flex-shrink: 0;
   cursor: pointer;
 }
 
@@ -931,6 +929,7 @@ select {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
+  caret-color: transparent;
   gap: 6px;
   /* 左右不留内边距：输入框宽度与卡片完全对齐（两者都是卡片区内容宽度）。
      顶部 12px = 学习页「卡片 → 跳过/掌握/陌生」的间距（.card-actions 的上内边距） */
@@ -1783,13 +1782,43 @@ select {
     min-height: 358px;
   }
 
-  /* 练习页卡片下方是输入框，矮屏同样要收矮，保证输入框不被挤出屏幕 */
-  .practice-card-stack {
-    min-height: 260px;
-  }
+  /* 练习页不需要在这里单独收矮：卡片高度与卡片区下限都直接沿用上面这两条
+     （练习卡就是 .flashcard / .card-stack），两张卡片在矮屏上同样一致。 */
+}
 
-  .practice-card-stack .flashcard {
-    min-height: 150px;
-    max-height: 280px;
-  }
+/* ==================== 手机端软键盘 ==================== */
+/* 键盘弹出时（body.keyboard-open 由 initKeyboardViewport 维护）：
+   把应用整体固定在 visualViewport 给出的「键盘上方可视区域」内，
+   避免 iOS Safari 把整页往上顶、底部菜单栏被推出屏幕。
+   这样一来菜单栏始终可见并紧贴键盘上沿，页面内容也重新从顶部开始排布。 */
+body.keyboard-open .app-container {
+  position: fixed;
+  top: var(--visual-viewport-top, 0px);
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  height: var(--visual-viewport-height, 100vh);
+}
+
+/* 键盘占掉了大半屏：卡片改成吃掉输入区之外的剩余空间，
+   保证输入框一定贴在键盘上方（此时不再强求与学习卡等高） */
+body.keyboard-open .practice-card-stack {
+  min-height: 0;
+}
+
+body.keyboard-open .practice-card-stack .flashcard {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 90px;
+  max-height: 460px;
+}
+
+body.keyboard-open .practice-input-area {
+  padding-top: 8px;
+}
+
+/* 键盘弹出时底部安全区已被键盘覆盖，菜单栏不需要再为 home indicator 留白，
+   这样才能真正紧贴键盘上沿 */
+body.keyboard-open .bottom-nav {
+  padding-bottom: 8px;
 }
