@@ -35,7 +35,7 @@
  *     离开学习页时快照到 _learnSessionSnapshot；同一天刷新页面也会从
  *     settings.learnProgress 恢复，避免进度丢失。
  *
- * 底部导航在三个页面间切换：learn（学习）/ library（词库）/ settings（设置）。
+ * 底部导航在四个页面间切换：learn（学习）/ library（词库）/ practice（练习）/ settings（设置）。
  * 页面加载完成后（DOMContentLoaded）创建 VocabApp 实例并调用 init() 启动。
  *
  * 【云同步（可选）】多端同步由独立模块 cloud-sync.js 提供，本文件只保留 4 个
@@ -81,6 +81,13 @@ const CARD_CLEAR_MARGIN_PX = 8;
 const CARD_PARK_MARGIN_PX = 30;
 /** 新卡入场起点在滑出终点基础上再越界的像素数，0 = 正好接在旧卡离场的位置继续滑入 */
 const CARD_FINISH_MARGIN_PX = 0;
+
+// ==================== 练习页参数 ====================
+/**
+ * 整条音标全部输入正确后，停留多久自动切换到下一个词（ms）。
+ * 留一点时间让用户看到绿色输入框与背面答案，但不要太久影响连续练习。
+ */
+const PRACTICE_ADVANCE_DELAY_MS = 900;
 
 // ==================== IndexedDB 数据库操作（数据层） ====================
 /**
@@ -331,7 +338,16 @@ class VocabApp {
       dictImportType: 'all',
       categoryDisplay: false,         // 卡片上方是否显示分类徽标（默认关闭；loadSettings 会从库中读取用户选择）
       /** 词库列表卡片中，单词下方是否显示释义（默认开启；只影响词库卡片，查看单词弹窗不受影响） */
-      meaningDisplay: true
+      meaningDisplay: true,
+      /** 练习页：练习范围 all / phrase / word（独立于学习页的「词典导入」） */
+      practiceScope: 'all',
+      /** 练习页：输入模式 with 含调值 / without 不含调值 */
+      practiceToneMode: 'with',
+      /**
+       * 练习进度：按「字 / 短语」分别记录已经答对过的词条 id（进度条口径）。
+       * 与学习记录完全无关（练习不改 status/收藏），但会随云同步在多设备间合并。
+       */
+      practiceProgress: { word: [], phrase: [] }
     };
     this.todayStats = {               // 今日统计（按当前展示范围汇总后的镜像值）
       mastered: 0,                    //   今日“已掌握”次数
@@ -377,6 +393,25 @@ class VocabApp {
     this._learnSessionSnapshot = null;
     /** 当前词典范围内各状态的词条数缓存 { mastered, review }，与词库页筛选结果一致 */
     this._cachedStatusCounts = { mastered: 0, review: 0 };
+    /** 练习页：本轮练习队列（已打乱）、当前题目下标 */
+    this.practiceWords = [];
+    this.practiceIndex = 0;
+    /** 练习页队列对应的范围（all/phrase/word）；换范围时重建队列 */
+    this._practicePoolKey = null;
+    /** 当前题目的目标音节（已按输入模式归一化），如 ['jat','di'] */
+    this._practiceTargets = [];
+    /** 当前题目音标的原始音节，如 ['jat1','di1']（翻面时展示） */
+    this._practiceSyllables = [];
+    /** 整条音标输入正确后「自动下一题」的定时器 */
+    this._practiceAdvanceTimer = null;
+    /** 当前题目是否已经答对（答对后锁住输入，避免多余输入把绿框改红） */
+    this._practiceSolved = false;
+    /** 答对那一刻输入框里的内容（锁定期间用来还原被误敲的字符） */
+    this._practiceSolvedValue = '';
+    /** 练习进度索引 { word:Set, phrase:Set }，与 settings.practiceProgress 保持同步，便于 O(1) 查询 */
+    this._practiceDone = { word: new Set(), phrase: new Set() };
+    /** 当前练习范围内「可练习词条」的总数（进度条分母） */
+    this._practiceScopeTotal = 0;
   }
   /**
    * 应用启动入口（DOMContentLoaded 后调用一次）。
@@ -850,6 +885,11 @@ class VocabApp {
     this.settings.phoneticDelay = await this.db.getSetting('phoneticDelay', 2);
     this.settings.repeatFrequency = await this.db.getSetting('repeatFrequency', 2);
     this.settings.dictImportType = await this.db.getSetting('dictImportType', 'all');
+    this.settings.practiceScope = await this.db.getSetting('practiceScope', 'all');
+    this.settings.practiceToneMode = await this.db.getSetting('practiceToneMode', 'with');
+    this.settings.practiceProgress = await this.db.getSetting('practiceProgress', { word: [], phrase: [] });
+    // 进度索引（Set）由持久化的 id 列表重建
+    this.initPracticeProgress();
   }
 
   // ==================== 按分类(字/短语)归档的学习统计 ====================
@@ -1195,49 +1235,9 @@ class VocabApp {
     saveWordBtn.addEventListener('click', () => self.saveWord());
     saveWordBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.saveWord(); });
 
-    // 卡片点击翻转（仅非触摸设备）
+    // 卡片单击翻面（桌面鼠标走这里；触屏的翻面在 initCardSwipe 的 touchend 里）
     const flashcard = document.getElementById('flashcard');
-    flashcard.addEventListener('click', handleCardClick);
-
-    function handleCardClick(e) {
-      if (self._suppressNextCardClickFlip) {
-        self._suppressNextCardClickFlip = false;
-        return;
-      }
-      if (self._isCardControl(e.target)) return;
-
-      // 双击的第二下：不再排翻面，把这次双击让给浏览器选中该词
-      if (e.detail > 1) {
-        self._cancelPendingCardFlip();
-        return;
-      }
-
-      // 拖动选字 / 长按取词之后的收尾点击：保留选中，不翻面
-      if (self._cardPointerMoved || self._cardLongPressFired) {
-        self._cardPointerMoved = false;
-        self._cardLongPressFired = false;
-        return;
-      }
-
-      // 已选中文字时：这次点击只用于取消选中，不翻面（避免“选完想取消却翻了卡”）
-      if (self._hasTextSelection()) {
-        window.getSelection().removeAllRanges();
-        return;
-      }
-
-      // 单击翻面延迟执行：期间若发生双击选词，则取消翻面
-      self._cancelPendingCardFlip();
-      self._cardFlipTimer = setTimeout(() => {
-        self._cardFlipTimer = null;
-        self.flipCard();
-      }, CARD_CLICK_FLIP_DELAY_MS);
-    }
-
-    // 双击选词：取消待执行的翻面，保留浏览器选中的词（正反两面都适用）
-    flashcard.addEventListener('dblclick', (e) => {
-      self._cancelPendingCardFlip();
-      if (self._isCardControl(e.target)) e.preventDefault();
-    });
+    this._bindCardFlipGesture(flashcard, () => self.flipCard());
     
     // 发音 / 收藏：移动端会先 touchstart 再合成 click；document 默认 passive 导致 preventDefault 无效，
     // 会连续触发两次。用 passive:false + 短时间忽略紧随其后的 click。
@@ -1291,11 +1291,11 @@ class VocabApp {
       self.toggleFavorite();
     }
     
-    // 卡片滑动
-    this.initCardSwipe();
+    // 卡片滑动 + 触屏长按取词（学习卡支持左右滑动切卡）
+    this.initCardSwipe(flashcard, () => self.flipCard(), true);
 
     // 卡片文字长按/拖选复制（与滑动、翻面互斥）
-    this.initCardTextSelection();
+    this.initCardTextSelection(flashcard);
     
     // 操作按钮
     const btnDifficult = document.getElementById('btnDifficult');
@@ -1320,6 +1320,9 @@ class VocabApp {
     
     // 搜索和筛选
     this.bindLibraryEvents();
+
+    // 练习页（范围下拉、输入模式、卡片翻转、音标输入框）
+    this.bindPracticeEvents();
     
   }
   
@@ -1877,22 +1880,30 @@ class VocabApp {
   /** 把当前设置应用到界面：语音相关控件可用状态、字号等 */
   applySettings() {
     this.refreshSpeechDependentToggles();
+    // 练习页的范围下拉与输入模式按钮取库里的设置值
+    this.refreshPracticeToneOptions();
+    // 云同步可能刚合并了练习进度：进度条跟着刷新（总数由进入练习页时算好）
+    this.refreshPracticeProgressUI();
 
     const fontSizes = { small: '14px', medium: '16px', large: '20px' };
     document.documentElement.style.setProperty('--font-size-md', fontSizes[this.settings.fontSize] || '16px');
   }
 
   /**
-   * 初始化学习卡片的触摸手势（移动端）：
-   * - 短按（<500ms 且未移动）：翻转卡片；
+   * 初始化卡片的触摸手势（移动端）：
+   * - 短按（<500ms 且未移动）：翻转卡片（onFlip）；
    * - 长按（≥450ms 且未移动）：让位给系统取词复制，松手不翻面；
    * - 向左滑超过 80px：标记“已掌握”；
    * - 向右滑超过 80px：跳过当前词（移到队尾）；
    * - 其余情况：卡片回弹原位。
    * 滑动过程中让卡片跟手平移并轻微旋转。
+   *
+   * allowSwipe = false 时只保留「短按翻面 + 长按取词 + 拖动选字」这三支，
+   * 不做位移与切卡（练习卡没有左右滑动，其余手感与学习卡完全一致）。
    */
-  initCardSwipe() {
-    const card = document.getElementById('flashcard');
+  initCardSwipe(card, onFlip, allowSwipe = true) {
+    card = card || document.getElementById('flashcard');
+    if (!card) return;
     let startX = 0, startY = 0, currentX = 0;
     let isDragging = false;
     let isClick = true;
@@ -1950,7 +1961,7 @@ class VocabApp {
         // _selectCardWordAt 的注释），系统长按在背面取不到词。正面保留系统原生
         // 长按（选区手柄与系统「拷贝」菜单更符合系统习惯），这里不做干预。
         if (card.classList.contains('flipped')) {
-          const text = self._selectCardWordAt(startX, startY);
+          const text = self._selectCardWordAt(startX, startY, card);
           // 写剪贴板推迟到 touchend（带用户手势的时机），见下面的 touchend
           if (text) longPressCopyText = text;
         }
@@ -1969,8 +1980,8 @@ class VocabApp {
       // 只有当滑动超过阈值时才认为是滑动
       if (Math.abs(currentX) > 10 || Math.abs(currentY) > 10) {
         isClick = false;
-        // 只在水平滑动为主时处理移动效果
-        if (Math.abs(currentX) > Math.abs(currentY)) {
+        // 只在水平滑动为主时处理移动效果（练习卡不允许滑动切卡，跳过）
+        if (allowSwipe && Math.abs(currentX) > Math.abs(currentY)) {
           e.preventDefault();
           card.style.transform = `translateX(${currentX}px) rotate(${currentX * 0.05}deg)`;
         }
@@ -2004,21 +2015,21 @@ class VocabApp {
         } else if (!self._hasTextSelection()) {
           // 正面按设计交给系统原生长按取词；若系统没有给出选区（部分浏览器/WebView
           // 不支持长按选字），这里兜底由 JS 取词并复制，保证手机上长按一定能复制
-          const text = self._selectCardWordAt(startX, startY);
+          const text = self._selectCardWordAt(startX, startY, card);
           if (text) self._copyCardText(text);
         }
       } else if (isClick && touchDuration < 500 && !self._hasTextSelection()) {
-        // 触摸翻面后仍会触发合成 click，避免与 handleCardClick 重复翻面
+        // 触摸翻面后仍会触发合成 click，避免与 click 的翻面重复
         self._suppressNextCardClickFlip = true;
-        self.flipCard();
-      } else if (currentX > CARD_SWIPE_THRESHOLD) {
+        if (typeof onFlip === 'function') onFlip();
+      } else if (allowSwipe && currentX > CARD_SWIPE_THRESHOLD) {
         // 向右滑动（从左往右）- 跳过、下一个单词
         // 卡片位置继续沿用拖动时写入的 transform，由 _sequenceCard 接管滑出动画，
         // 避免插入一个“瞬间跳到画外”的关键帧造成卡顿/空白
         setTimeout(() => {
           self.skipCard(releaseRatio);
         }, 0);
-      } else if (currentX < -CARD_SWIPE_THRESHOLD) {
+      } else if (allowSwipe && currentX < -CARD_SWIPE_THRESHOLD) {
         // 向左滑动（从右往左）- 掌握
         // 注意：markMastered 内部只同步推进卡片动画，写库/刷新统计放到后台执行。
         // 切勿改成「await 落库完成后再切卡」，否则卡片会在滑出后的画外位置等待 IO，
@@ -2048,15 +2059,15 @@ class VocabApp {
   }
 
   /**
-   * 卡片文字长按复制（桌面鼠标 + 移动端触屏，正反两面都生效）：
+   * 卡片文字长按复制（桌面鼠标 + 移动端触屏，正反两面都生效，学习卡与练习卡共用）：
    * - 鼠标：按住不动 600ms 选中指针下的整个词并复制（单字也能选中自身），
    *   按住拖动则由浏览器原生拖选；这两种情况都会取消这次「单击翻面」；
    * - 触屏：正面保留系统原生长按取词（选区菜单最符合系统习惯）；背面因为浏览器的
    *   命中测试取不到背面文字（见 _selectCardWordAt 注释），改由 JS 按坐标选中并复制；
    * - 取词全程按坐标 + DOM Range 计算，不依赖浏览器命中测试，所以翻面后同样有效。
    */
-  initCardTextSelection() {
-    const card = document.getElementById('flashcard');
+  initCardTextSelection(card) {
+    card = card || document.getElementById('flashcard');
     if (!card) return;
 
     const self = this;
@@ -2083,7 +2094,7 @@ class VocabApp {
         pressTimer = null;
         // 按住不动：先选中指针下的词并取消这次点击的翻面；真正的写剪贴板放到
         // mouseup（那才是带有用户手势的时机，异步剪贴板 API 才不会被拒）
-        const text = self._selectCardWordAt(pressX, pressY);
+        const text = self._selectCardWordAt(pressX, pressY, card);
         if (text) {
           self._cardLongPressFired = true;
           self._cardLongPressText = text;
@@ -2115,12 +2126,12 @@ class VocabApp {
     card.addEventListener('mouseleave', clearPressTimer);
   }
 
-  /** 当前朝上的一面（正面 / 背面） */
-  _visibleCardFace() {
-    const card = document.getElementById('flashcard');
-    if (!card) return null;
-    return card.querySelector(
-      card.classList.contains('flipped') ? '.flashcard-back' : '.flashcard-front'
+  /** 当前朝上的一面（正面 / 背面）；card 省略时取学习卡 */
+  _visibleCardFace(card) {
+    const el = card || document.getElementById('flashcard');
+    if (!el) return null;
+    return el.querySelector(
+      el.classList.contains('flipped') ? '.flashcard-back' : '.flashcard-front'
     );
   }
 
@@ -2140,8 +2151,8 @@ class VocabApp {
    * 这些接口取到的是看不见的正面文字（已实测）。按“当前可见面内、包含该点的最小
    * 文字块 + Range 逐字量宽”来定位，翻面后同样准确。
    */
-  _selectCardWordAt(x, y) {
-    const face = this._visibleCardFace();
+  _selectCardWordAt(x, y, card) {
+    const face = this._visibleCardFace(card);
     if (!face) return '';
 
     // 1) 取包含该点的最小文字块（词条 / 音标 / 释义 / 例句）
@@ -2268,7 +2279,7 @@ class VocabApp {
     ));
   }
 
-  /** 取消尚未执行的「单击翻面」（双击选词、换卡、长按取词时调用） */
+  /** 取消尚未执行的「单击翻面」（双击选词、换卡、长按取词、切页时调用） */
   _cancelPendingCardFlip() {
     if (this._cardFlipTimer) {
       clearTimeout(this._cardFlipTimer);
@@ -2277,12 +2288,74 @@ class VocabApp {
   }
 
   /**
-   * 切换底部导航页面（learn / library / settings）。
+   * 卡片的「单击翻面」手势判定（学习卡与练习卡共用，保证两处手感一致）。
+   * 下列情况都不翻面，把这次点击让给文字选择：
+   *   - 双击的第二下（双击是选词，不是翻面）；
+   *   - 刚刚拖动选字 / 长按取词之后的收尾点击；
+   *   - 当前已经选中了文字（这次点击只用于取消选中）。
+   * 单击翻面延迟 CARD_CLICK_FLIP_DELAY_MS 执行，给双击选词留出取消窗口。
+   */
+  _bindCardFlipGesture(card, onFlip) {
+    if (!card) return;
+    const self = this;
+
+    card.addEventListener('click', (e) => {
+      if (self._suppressNextCardClickFlip) {
+        self._suppressNextCardClickFlip = false;
+        return;
+      }
+      if (self._isCardControl(e.target)) return;
+
+      // 双击的第二下：不再排翻面，把这次双击让给浏览器选中该词
+      if (e.detail > 1) {
+        self._cancelPendingCardFlip();
+        return;
+      }
+
+      // 拖动选字 / 长按取词之后的收尾点击：保留选中，不翻面
+      if (self._cardPointerMoved || self._cardLongPressFired) {
+        self._cardPointerMoved = false;
+        self._cardLongPressFired = false;
+        return;
+      }
+
+      // 已选中文字时：这次点击只用于取消选中，不翻面（避免“选完想取消却翻了卡”）
+      if (self._hasTextSelection()) {
+        window.getSelection().removeAllRanges();
+        return;
+      }
+
+      // 单击翻面延迟执行：期间若发生双击选词，则取消翻面
+      self._cancelPendingCardFlip();
+      self._cardFlipTimer = setTimeout(() => {
+        self._cardFlipTimer = null;
+        onFlip();
+      }, CARD_CLICK_FLIP_DELAY_MS);
+    });
+
+    // 双击选词：取消待执行的翻面，保留浏览器选中的词（正反两面都适用）
+    card.addEventListener('dblclick', (e) => {
+      self._cancelPendingCardFlip();
+      if (self._isCardControl(e.target)) e.preventDefault();
+    });
+  }
+
+  /**
+   * 切换底部导航页面（learn / library / practice / settings）。
    * 离开学习页时把当前队列与下标快照到 _learnSessionSnapshot；
    * 回到学习页时，若快照队列长度与每日目标一致则恢复进度，否则重建今日队列。
    */
   switchPage(page) {
     if (this.currentPage === page) return;
+
+    // 切页时取消尚未执行的「单击翻面」并复位手势状态：卡片翻面是延迟执行的，
+    // 不取消的话会把点击留到另一个页面的卡片上执行
+    this._cancelPendingCardFlip();
+    this._suppressNextCardClickFlip = false;
+    this._cardPointerMoved = false;
+    this._cardLongPressFired = false;
+    this._cardLongPressText = '';
+    this._cardTouchLongPress = false;
 
     // 离开学习页时把会话存到实例上，否则返回学习页时局部变量已丢失，会误走 prepareLearnSession 导致进度清零
     if (this.currentPage === 'learn' && this.todayWords && this.todayWords.length > 0) {
@@ -2298,6 +2371,11 @@ class VocabApp {
 
     if (page !== 'learn') {
       this.cancelScheduledPhoneticRead();
+    }
+
+    // 离开练习页时取消「自动下一题」，避免在别的页面上把练习题悄悄翻过去
+    if (page !== 'practice') {
+      this.cancelPracticeAdvance();
     }
     
     this.currentPage = page;
@@ -2371,6 +2449,11 @@ class VocabApp {
     } else if (page === 'library') {
       this.renderCategoryOptions();
       this.renderLibrary();
+    } else if (page === 'practice') {
+      // 队列重建/渲染是异步的，这里兜住异常，避免个别失败变成未捕获的 Promise 异常
+      this.enterPracticePage().catch((error) => {
+        console.error('[practice] 准备练习题目失败:', error);
+      });
     } else if (page === 'settings') {
       this.renderSettings();
     }
@@ -2653,25 +2736,9 @@ class VocabApp {
     
     const isCantonese = this.isCantoneseWord(word);
     const cantonesePhoneticFirst = isCantonese || this.isImportedCantoneseLanguage(word);
-    const badgeLabel = this.getLanguageBadgeLabel(word);
-    
-    // 添加分类标签（显示在语言标签后面）
-    // 关闭"分类显示"开关时，不显示分类徽标；开启时显示 dict 表 category 列内容
-    let categoryHtml = '';
-    if (this.settings.categoryDisplay !== false) {
-      const category = word.category || '';
-      if (category) {
-        categoryHtml = `<span class="language-badge category-badge">${this.escapeHtml(category)}</span>`;
-      }
-    }
-    
-    const badgeHtml = badgeLabel
-      ? `<span class="language-badge">${this.escapeHtml(badgeLabel)}</span>`
-      : '';
-    
-    const badgeRowHtml = (badgeHtml || categoryHtml)
-      ? `<div class="flashcard-badge-row">${badgeHtml}${badgeHtml && categoryHtml ? '&nbsp;&nbsp;' : ''}${categoryHtml}</div>`
-      : '';
+    // 顶部标签（语言 + 分类）与练习页共用同一套生成逻辑
+    const badgesHtml = this.buildCardBadgesHtml(word);
+    const badgeRowHtml = badgesHtml ? `<div class="flashcard-badge-row">${badgesHtml}</div>` : '';
 
     cardInner.innerHTML = `
       <div class="flashcard-front">
@@ -2933,6 +3000,28 @@ class VocabApp {
     else if (low === 'chinese') raw = '中文';
     if (raw) return raw;
     return this.inferLanguageBadgeLabel(word);
+  }
+
+  /**
+   * 卡片顶部标签（语言 + 分类）的内层 HTML，学习页与练习页共用，保证两处完全一致。
+   * 语言标签取词典 language 列；分类标签（如「家电数码」）受「分类显示」开关控制，
+   * 没有可显示的内容时返回空串（调用方据此决定要不要渲染整行标签）。
+   */
+  buildCardBadgesHtml(word) {
+    if (!word) return '';
+    const badgeLabel = this.getLanguageBadgeLabel(word);
+    let categoryHtml = '';
+    if (this.settings.categoryDisplay !== false) {
+      const category = word.category || '';
+      if (category) {
+        categoryHtml = `<span class="language-badge category-badge">${this.escapeHtml(category)}</span>`;
+      }
+    }
+    const badgeHtml = badgeLabel
+      ? `<span class="language-badge">${this.escapeHtml(badgeLabel)}</span>`
+      : '';
+    if (!badgeHtml && !categoryHtml) return '';
+    return `${badgeHtml}${badgeHtml && categoryHtml ? '&nbsp;&nbsp;' : ''}${categoryHtml}`;
   }
 
   /** 该词条是否按粤语处理（决定音标优先粤拼、朗读用 zh-HK 音色） */
@@ -3800,6 +3889,530 @@ class VocabApp {
     this._learnSessionSnapshot = null;
     // 重新生成学习队列（范围内词条都学过时会自动进入「复习轮」）
     await this.prepareLearnSession();
+  }
+
+  // ==================== 练习页面 ====================
+  // 与学习页的区别：只看词汇写出粤拼音标，不写任何学习记录（不改 status/收藏/今日统计）。
+  //   1) 范围可单独选（全部 / 短语 / 字），与设置页的「词典导入」互不影响；
+  //   2) 输入模式可选「含调值 / 不含调值」，决定音标里的声调数字要不要一起输入；
+  //   3) 卡片只保留翻转，去掉滑动、收藏、喇叭与三个操作按钮；
+  //   4) 卡片下方是输入框：每音节输入正确自动补空格，错误标红，整条正确标绿。
+
+  /** 练习页事件绑定：范围下拉、输入模式、卡片翻面、输入框、再练一轮 */
+  bindPracticeEvents() {
+    const self = this;
+
+    const scopeSelect = document.getElementById('practiceScopeSelect');
+    if (scopeSelect) {
+      scopeSelect.addEventListener('change', async () => {
+        self.settings.practiceScope = scopeSelect.value || 'all';
+        await self.db.setSetting('practiceScope', self.settings.practiceScope);
+        // 换了范围就换一批题：重建队列并从头开始
+        await self.preparePracticePool();
+        self.renderPracticeCard();
+      });
+    }
+
+    document.querySelectorAll('#practiceToneOptions .practice-mode-option').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const mode = btn.dataset.tone === 'without' ? 'without' : 'with';
+        if (self.settings.practiceToneMode === mode) return;
+        self.settings.practiceToneMode = mode;
+        await self.db.setSetting('practiceToneMode', mode);
+        self.refreshPracticeToneOptions();
+        // 输入模式只改变“目标音标怎么比”，不必重建队列：重算当前题目即可
+        if (self.currentPage === 'practice') {
+          self.applyPracticeTargets();
+          self.resetPracticeInput();
+        }
+      });
+    });
+
+    const card = document.getElementById('practiceFlashcard');
+    if (card) {
+      // 与学习卡同一套翻面手势：单击翻面；双击选词、长按取词、拖选文字都不翻面
+      this._bindCardFlipGesture(card, () => self.flipPracticeCard());
+      // 触屏：短按翻面 + 长按取词复制（练习卡没有左右滑动切卡，故 allowSwipe = false）
+      this.initCardSwipe(card, () => self.flipPracticeCard(), false);
+      // 鼠标长按取词复制
+      this.initCardTextSelection(card);
+    }
+
+    const input = document.getElementById('practiceInput');
+    if (input) {
+      // 「不含调值」模式下声调数字不需要输入：直接拦掉数字键，
+      // 否则用户打完字母顺手敲的调值会被当成下一段的开头而判错
+      input.addEventListener('beforeinput', (e) => {
+        if (self.settings.practiceToneMode !== 'without') return;
+        if (e.inputType === 'insertText' && /^[1-6]+$/.test(e.data || '')) {
+          e.preventDefault();
+        }
+      });
+      input.addEventListener('input', (e) => self.handlePracticeInput(e));
+      input.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        // 只有整条音标已经输入正确时才允许回车立刻进入下一题，避免误跳过
+        if (input.classList.contains('success')) self.nextPracticeCard();
+      });
+      // 手机上聚焦输入框时把输入区滚进可视范围（底部导航/软键盘容易把它挡住）
+      input.addEventListener('focus', () => {
+        setTimeout(() => {
+          if (self.currentPage === 'practice') input.scrollIntoView({ block: 'nearest' });
+        }, 120);
+      });
+    }
+
+    const restartBtn = document.getElementById('practiceRestartBtn');
+    if (restartBtn) {
+      restartBtn.addEventListener('click', () => self.restartPractice());
+      restartBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.restartPractice(); });
+    }
+  }
+
+  /** 把练习页控件（范围下拉、输入模式按钮）刷新成当前设置值 */
+  refreshPracticeToneOptions() {
+    const mode = this.settings.practiceToneMode === 'without' ? 'without' : 'with';
+    document.querySelectorAll('#practiceToneOptions .practice-mode-option').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.tone === mode);
+    });
+    const scopeSelect = document.getElementById('practiceScopeSelect');
+    if (scopeSelect) scopeSelect.value = this.settings.practiceScope || 'all';
+  }
+
+  /** 进入练习页：范围没变就接着上次的进度，变了（或还没建过队列）才重新抽题 */
+  async enterPracticePage() {
+    this.cancelPracticeAdvance();
+    const scope = this.settings.practiceScope || 'all';
+    if (this._practicePoolKey !== scope || this.practiceWords.length === 0) {
+      await this.preparePracticePool();
+    }
+    // 池子复用时总数缓存仍然有效，但进度是实时算的，进页面就刷一次
+    this.refreshPracticeProgressUI();
+    this.renderPracticeCard();
+  }
+
+  /**
+   * 组织本轮练习队列：取当前练习范围内的词条，只保留「音标能解析出音节」的，
+   * 打乱后从第一题开始。练习不写学习记录，因此不做重复频率、进度恢复等处理。
+   *
+   * 队列顺序：先排「还没练过」的词条，再把练过的排在后面 —— 这样进度条会一直往前走，
+   * 而不是一遍遍重复已经完成的词。
+   */
+  async preparePracticePool() {
+    const scope = this.settings.practiceScope || 'all';
+    const allWords = await this.db.getAllWords();
+    const pool = [];
+    for (const word of allWords) {
+      if (scope !== 'all' && this.practiceScopeKeyOf(word) !== scope) continue;
+      if (this.parsePracticeSyllables(word).length === 0) continue;
+      pool.push(word);
+    }
+
+    // 进度条分母 = 当前范围内全部可练习词条（含已练过的）
+    this._practiceScopeTotal = pool.length;
+
+    const pending = [];
+    const finished = [];
+    for (const word of pool) {
+      (this.isPracticeDone(word) ? finished : pending).push(word);
+    }
+    this.shuffleArray(pending);
+    this.shuffleArray(finished);
+
+    this.practiceWords = pending.concat(finished);
+    this.practiceIndex = 0;
+    this._practicePoolKey = scope;
+    this.refreshPracticeProgressUI();
+  }
+
+  /** 词条归属的练习范围键：'phrase'（短语）或 'word'（字） */
+  practiceScopeKeyOf(word) {
+    return word && word.dictScope === 'phrase' ? 'phrase' : 'word';
+  }
+
+  /** 把持久化的练习进度（id 列表）读进内存索引 Set */
+  initPracticeProgress() {
+    const raw = this.settings.practiceProgress;
+    // 注意先排除 null/undefined/空串：Number(null) 是 0，会把无效值混进进度里
+    const toSet = (list) => {
+      const set = new Set();
+      for (const item of Array.isArray(list) ? list : []) {
+        if (item === null || item === undefined || item === '') continue;
+        const id = Number(item);
+        if (Number.isFinite(id)) set.add(id);
+      }
+      return set;
+    };
+    this._practiceDone = {
+      word: toSet(raw && raw.word),
+      phrase: toSet(raw && raw.phrase)
+    };
+    this.refreshPracticeProgressUI();
+  }
+
+  /** 该词条是否已经练过（答对过） */
+  isPracticeDone(word) {
+    if (!word || word.id === undefined || word.id === null) return false;
+    const key = this.practiceScopeKeyOf(word);
+    const set = this._practiceDone[key];
+    return set ? set.has(Number(word.id)) : false;
+  }
+
+  /**
+   * 记录一个词条练习完成：更新内存索引 → 刷新进度条 → 落库。
+   * 落库会经 VocabDB.setSetting 触发云同步钩子（practiceProgress 是参与同步的设置项），
+   * 因此多设备之间会自动合并进度。
+   */
+  async markPracticeDone(word) {
+    if (!word || word.id === undefined || word.id === null) return;
+    const key = this.practiceScopeKeyOf(word);
+    const id = Number(word.id);
+    const set = this._practiceDone[key];
+    if (!set || set.has(id)) return;
+
+    set.add(id);
+    this.refreshPracticeProgressUI();
+    await this.savePracticeProgress();
+  }
+
+  /** 把内存索引写回设置（数组按 id 升序，保证云端比对时 JSON 稳定） */
+  async savePracticeProgress() {
+    const toList = (set) => Array.from(set).sort((a, b) => a - b);
+    const payload = {
+      word: toList(this._practiceDone.word),
+      phrase: toList(this._practiceDone.phrase)
+    };
+    this.settings.practiceProgress = payload;
+    await this.db.setSetting('practiceProgress', payload);
+  }
+
+  /** 当前范围内已经练过的词条数（只统计当前范围内真实存在的词条，词典删改后不会虚高） */
+  countPracticeDoneInScope() {
+    let done = 0;
+    for (const word of this.practiceWords) {
+      if (this.isPracticeDone(word)) done++;
+    }
+    return done;
+  }
+
+  /** 刷新练习页顶部进度条：已完成 / 当前范围可练习总数 */
+  refreshPracticeProgressUI() {
+    const total = Math.max(0, Number(this._practiceScopeTotal) || 0);
+    const done = total > 0 ? this.countPracticeDoneInScope() : 0;
+    const fill = document.getElementById('practiceProgressFill');
+    const text = document.getElementById('practiceProgressText');
+    if (fill) {
+      fill.style.width = total > 0 ? `${Math.round((Math.min(done, total) / total) * 100)}%` : '0%';
+    }
+    if (text) text.textContent = `${done}/${total}`;
+  }
+
+  /**
+   * 从词条的 phonetic（缺省时用 jyutping）里取出「这个词怎么读」的粤拼音节数组。
+   *
+   * 词典里两种表的写法不同：
+   *   - 短语表：phonetic 就是纯拼音串，如「细路仔」= "sai3 lou6 zai2"；
+   *   - 字表：phonetic 后面还跟着组词，如「䂿」= "dam6，䂿（跺）脚 dam6 goek3"。
+   * 所以只取开头连续的「字母 + 可选声调数字」片段，遇到中文/标点即停止。
+   */
+  parsePracticeSyllables(word) {
+    if (!word) return [];
+    const raw = String(word.phonetic || word.jyutping || '').trim();
+    if (!raw) return [];
+    const matched = raw.match(/^[A-Za-z]+[1-6]?(?:[ \t]+[A-Za-z]+[1-6]?)*/);
+    if (!matched) return [];
+    return matched[0].split(/[ \t]+/).filter(Boolean);
+  }
+
+  /**
+   * 按当前输入模式归一化一个音节（统一小写；「不含调值」时去掉声调数字）。
+   * 用户输入与目标音节都走这里，保证两边口径一致。
+   */
+  normalizePracticeSyllable(text) {
+    let t = String(text ?? '').trim().toLowerCase();
+    if (this.settings.practiceToneMode === 'without') {
+      t = t.replace(/[1-6]+$/, '');
+    }
+    return t;
+  }
+
+  /** 重算当前题目的目标音节，并同步卡片背面的答案 */
+  applyPracticeTargets() {
+    const word = this.practiceWords[this.practiceIndex];
+    const syllables = this.parsePracticeSyllables(word);
+    this._practiceSyllables = syllables;
+    this._practiceTargets = syllables.map((s) => this.normalizePracticeSyllable(s));
+    const answerEl = document.getElementById('practicePhonetic');
+    if (answerEl) answerEl.textContent = this._practiceTargets.join(' ');
+    return syllables;
+  }
+
+  /** 渲染当前题目：正面只放词汇（音标是要用户写的答案，不能提前露出来），背面放答案/释义/例句 */
+  renderPracticeCard() {
+    const stack = document.querySelector('.practice-card-stack');
+    const inputArea = document.querySelector('.practice-input-area');
+    const emptyEl = document.getElementById('practiceEmptyState');
+    const completeEl = document.getElementById('practiceComplete');
+    if (completeEl) completeEl.style.display = 'none';
+
+    // 当前范围内没有可练习的词条
+    if (!this.practiceWords.length) {
+      if (stack) stack.style.display = 'none';
+      if (inputArea) inputArea.style.display = 'none';
+      if (emptyEl) emptyEl.style.display = 'flex';
+      return;
+    }
+    // 一轮练完
+    if (this.practiceIndex >= this.practiceWords.length) {
+      this.showPracticeComplete();
+      return;
+    }
+
+    const word = this.practiceWords[this.practiceIndex];
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (stack) stack.style.display = 'flex';
+    if (inputArea) inputArea.style.display = 'flex';
+
+    const wordEl = document.getElementById('practiceWord');
+    if (wordEl) wordEl.textContent = word.word || '';
+    // 顶部标签（语言 / 分类）与学习卡完全一致，用的是同一个生成方法
+    const badgeRow = document.getElementById('practiceBadgeRow');
+    if (badgeRow) {
+      const badgesHtml = this.buildCardBadgesHtml(word);
+      badgeRow.innerHTML = badgesHtml;
+      badgeRow.style.display = badgesHtml ? '' : 'none';
+    }
+    this.applyPracticeTargets();
+    const meaningEl = document.getElementById('practiceMeaning');
+    if (meaningEl) meaningEl.textContent = word.definition || word.meaning || '';
+    const exampleEl = document.getElementById('practiceExample');
+    if (exampleEl) exampleEl.textContent = word.example ? `“${word.example}”` : '';
+
+    const card = document.getElementById('practiceFlashcard');
+    if (card) card.classList.remove('flipped');
+
+    this.resetPracticeInput();
+    this.focusPracticeInput();
+  }
+
+  /** 翻转练习卡；答对之后翻卡是在看答案，据此暂停 / 恢复「自动下一题」 */
+  flipPracticeCard() {
+    const card = document.getElementById('practiceFlashcard');
+    if (!card) return;
+    card.classList.toggle('flipped');
+    if (this._practiceSolved) {
+      if (card.classList.contains('flipped')) this.cancelPracticeAdvance();
+      else this.schedulePracticeAdvance();
+    }
+  }
+
+  /** 清空输入框与红/绿状态，回到「等待输入」 */
+  resetPracticeInput() {    const input = document.getElementById('practiceInput');
+    if (!input) return;
+    input.value = '';
+    this._practiceSolved = false;
+    this._practiceSolvedValue = '';
+    this.setPracticeInputState('');
+    this.updatePracticeHint('typing', 0);
+  }
+
+  /** 进入题目后自动聚焦输入框（在练习页时），让用户可以直接开始打字 */
+  focusPracticeInput() {
+    if (this.currentPage !== 'practice') return;
+    const input = document.getElementById('practiceInput');
+    if (!input) return;
+    setTimeout(() => {
+      if (this.currentPage === 'practice' && !this._practiceSolved) input.focus();
+    }, 0);
+  }
+
+  /** 输入框状态：'' 普通 / 'error' 红 / 'success' 绿 */
+  setPracticeInputState(state) {
+    const input = document.getElementById('practiceInput');
+    if (!input) return;
+    input.classList.toggle('error', state === 'error');
+    input.classList.toggle('success', state === 'success');
+  }
+
+  /** 输入框下方的提示文字 */
+  updatePracticeHint(state, matchedCount) {
+    const hint = document.getElementById('practiceHint');
+    if (!hint) return;
+    hint.classList.toggle('error', state === 'error');
+    hint.classList.toggle('success', state === 'success');
+
+    if (state === 'success') {
+      hint.textContent = '✓ 全部正确';
+      return;
+    }
+    if (state === 'error') {
+      hint.textContent = '✗ 与音标不一致，请修改标红的部分';
+      return;
+    }
+    const total = this._practiceTargets.length;
+    const modeText = this.settings.practiceToneMode === 'without' ? '不含调值' : '含调值';
+    if (this.settings.practiceToneMode === 'without') {
+      hint.textContent = total > 1
+        ? `共 ${total} 个音节（不含调值），已完整输入【 ${Math.max(0, matchedCount)} 】个`
+        : `只输入字母，不用输调值数字`;
+      return;
+    }
+    hint.textContent = total > 1
+      ? `共 ${total} 个音节（含调值），已完整输入 【 ${Math.max(0, matchedCount)} 】个`
+      : `输入完整音标`;
+  }
+
+  /**
+   * 音标输入的核心判定。输入框里用空格分隔音节，逐段与目标音节比较：
+   *   - 某一段完整等于目标音节：若后面还有音节，就自动补一个空格（用户不必自己敲），
+   *     光标直接落在新空格之后继续输入下一个音节；
+   *   - 最后一段只是目标音节的前缀（如目标 jat1，刚输入到 ja）：视为「还在输入」，不报错；
+   *   - 其它情况：判为拼写错误，输入框标红；
+   *   - 所有音节都完整正确：输入框标绿，短暂停留后自动进入下一题。
+   * 删除操作（Backspace）不会触发自动补空格，否则用户没法回退修改上一段。
+   */
+  handlePracticeInput(event) {
+    const input = event.target;
+    // 输入法组合过程中给出的是未确定的字符串，不参与判定
+    if (event.isComposing || input.composing) return;
+
+    const targets = this._practiceTargets || [];
+    if (targets.length === 0) return;
+
+    // 本题已答对：多余的输入（误敲、粘贴、删除）一律还原，避免把绿框改红；
+    // 这里不用 readOnly，否则手机上键盘会先收起来、下一题再弹一次
+    if (this._practiceSolved) {
+      if (input.value !== this._practiceSolvedValue) input.value = this._practiceSolvedValue;
+      return;
+    }
+
+    let raw = input.value;
+    // 兜底：beforeinput 没能拦住时（旧浏览器、部分输入法直接上屏），
+    // 「不含调值」模式下把混进来的声调数字直接剔掉
+    if (this.settings.practiceToneMode === 'without' && /[1-6]/.test(raw)) {
+      raw = raw.replace(/[1-6]/g, '');
+      input.value = raw;
+    }
+    const rawParts = raw.split(' ');
+    // 末尾的空片段 = 用户刚敲下的那个空格。记住它，避免再自动补一个空格（否则会连出两个）
+    const hasTrailingSpace = rawParts.length > 1 && rawParts[rawParts.length - 1] === '';
+    // 中间连续敲出的多个空格当噪声忽略，不因此判错
+    const parts = rawParts.filter((p) => p !== '');
+    const inputType = typeof event.inputType === 'string' ? event.inputType : '';
+    const isInsert = inputType === '' || inputType.indexOf('insert') === 0;
+
+    let state = 'typing';
+    let matchedCount = 0;
+
+    for (let i = 0; i < parts.length; i++) {
+      const isLast = i === parts.length - 1;
+      const norm = this.normalizePracticeSyllable(parts[i]);
+      const target = targets[i];
+
+      // 音节数超出目标（多输入了一段），或整段只剩空格
+      if (target === undefined || !norm) {
+        state = 'error';
+        break;
+      }
+      if (norm === target) {
+        matchedCount = i + 1;
+        // 目标音节已全部输入正确（后面若还有多余片段，会在下一轮被上面判成 error）
+        if (matchedCount === targets.length) state = 'success';
+        continue;
+      }
+      // 最后一段是目标音节的前缀：还在输入中，不算错
+      if (isLast && target.indexOf(norm) === 0) break;
+      state = 'error';
+      break;
+    }
+
+    // 自动补空格：这一段已完整正确、后面还有音节、末尾还没有空格、是用户新键入的、且光标停在末尾
+    if (
+      state !== 'error' &&
+      parts.length > 0 &&
+      matchedCount === parts.length &&
+      matchedCount < targets.length &&
+      !hasTrailingSpace &&
+      isInsert &&
+      input.selectionStart === raw.length
+    ) {
+      input.value = `${raw} `;
+    }
+
+    if (state === 'success') {
+      this.setPracticeInputState('success');
+      this.updatePracticeHint('success', matchedCount);
+      // 答对即锁定本题（换题时由 resetPracticeInput 解锁）
+      this._practiceSolved = true;
+      this._practiceSolvedValue = input.value;
+      // 记入练习进度（写库并触发云同步），进度条随即前进
+      const current = this.practiceWords[this.practiceIndex];
+      this.markPracticeDone(current).catch((error) => {
+        console.error('[practice] 保存练习进度失败:', error);
+      });
+      this.schedulePracticeAdvance();
+      return;
+    }
+
+    this.cancelPracticeAdvance();
+    if (state === 'error') {
+      this.setPracticeInputState('error');
+      this.updatePracticeHint('error', matchedCount);
+    } else {
+      this.setPracticeInputState('');
+      this.updatePracticeHint('typing', matchedCount);
+    }
+  }
+
+  /** 整条音标输入正确后，短暂停留再自动进入下一题（期间可回车立刻跳过等待） */
+  schedulePracticeAdvance() {
+    this.cancelPracticeAdvance();
+    this._practiceAdvanceTimer = setTimeout(() => {
+      this._practiceAdvanceTimer = null;
+      if (this.currentPage !== 'practice') return;
+      // 用户正翻着卡看答案：先不切题，等他翻回题目面时会重新排一次
+      const card = document.getElementById('practiceFlashcard');
+      if (card && card.classList.contains('flipped')) return;
+      this.nextPracticeCard();
+    }, PRACTICE_ADVANCE_DELAY_MS);
+  }
+
+  /** 取消「自动下一题」定时器 */
+  cancelPracticeAdvance() {
+    if (this._practiceAdvanceTimer != null) {
+      clearTimeout(this._practiceAdvanceTimer);
+      this._practiceAdvanceTimer = null;
+    }
+  }
+
+  /** 进入下一题（练完一轮则显示完成状态） */
+  nextPracticeCard() {
+    this.cancelPracticeAdvance();
+    this.practiceIndex++;
+    this.renderPracticeCard();
+  }
+
+  /** 【再练一轮】：重新抽题并从头开始 */
+  async restartPractice() {
+    this.cancelPracticeAdvance();
+    await this.preparePracticePool();
+    this.renderPracticeCard();
+  }
+
+  /** 练习页完成状态：隐去卡片与输入框，只留完成提示 */
+  showPracticeComplete() {
+    this.cancelPracticeAdvance();
+    const stack = document.querySelector('.practice-card-stack');
+    const inputArea = document.querySelector('.practice-input-area');
+    const emptyEl = document.getElementById('practiceEmptyState');
+    const completeEl = document.getElementById('practiceComplete');
+    if (stack) stack.style.display = 'none';
+    if (inputArea) inputArea.style.display = 'none';
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (completeEl) completeEl.style.display = 'flex';
+    const subtitle = completeEl ? completeEl.querySelector('.complete-subtitle') : null;
+    if (subtitle) subtitle.textContent = `本轮练习已完成（共 ${this.practiceWords.length} 个词条）`;
   }
 
   // ==================== 词库页面 ====================

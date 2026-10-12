@@ -91,7 +91,9 @@
     'meaningDisplay',
     'soundEnabled',
     'speechEnabled',
-    'phoneticAutoRead'
+    'phoneticAutoRead',
+    // 练习页的练习进度（按 字/短语 记录的已完成词条 id）：云端按并集合并，见 applyRemoteSettings
+    'practiceProgress'
   ];
 
   /** Supabase 英文错误 → 中文提示 */
@@ -172,6 +174,37 @@
     if (word.dictScope === 'word') return 'word';
     // 与 app.js 的兜底口径保持一致：未标注的旧词条按「字」处理
     return 'word';
+  }
+
+  /**
+   * 练习进度的合并：按「字 / 短语」分别取并集（不是覆盖）。
+   *
+   * 设置整体是 LWW（较晚一次生效）同步的，但练习进度是逐题累加出来的：
+   * 如果也按覆盖处理，两台设备各自练过的词条会互相抹掉。
+   * 取并集后，客户端发现「本地与云端不同」会把合并结果再推回云端，
+   * 于是多台设备的练习进度能持续累加。
+   */
+  function mergePracticeProgress(local, remote) {
+    var out = {};
+    var keys = ['word', 'phrase'];
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      var seen = new Set();
+      var lists = [local && local[key], remote && remote[key]];
+      for (var l = 0; l < lists.length; l++) {
+        var list = Array.isArray(lists[l]) ? lists[l] : [];
+        for (var n = 0; n < list.length; n++) {
+          var raw = list[n];
+          // 注意先排除 null/undefined/空串：Number(null) 是 0，会把无效值混进进度里
+          if (raw === null || raw === undefined || raw === '') continue;
+          var id = Number(raw);
+          if (Number.isFinite(id)) seen.add(id);
+        }
+      }
+      // 排序：保证两侧合并出的 JSON 完全一致，避免每次都误判为「有变化」而反复上传
+      out[key] = Array.from(seen).sort(function (a, b) { return a - b; });
+    }
+    return out;
   }
 
   /**
@@ -1013,6 +1046,20 @@
       for (var i = 0; i < SYNCED_SETTING_KEYS.length; i++) {
         var key = SYNCED_SETTING_KEYS[i];
         if (settings[key] === undefined || settings[key] === null) continue;
+
+        // 练习进度是逐题累加出来的：与本地取并集，而不是像其它设置那样整份覆盖，
+        // 否则两台设备各自练过的词条会互相抹掉。合并结果比云端更全时，
+        // 调用方（_doSyncAll）会发现「本地与云端不同」并把并集推回云端。
+        if (key === 'practiceProgress') {
+          var merged = mergePracticeProgress(this.app.settings.practiceProgress, settings[key]);
+          if (stableStringify(merged) === stableStringify(this.app.settings.practiceProgress || {})) continue;
+          this.app.settings.practiceProgress = merged;
+          if (typeof this.app.initPracticeProgress === 'function') this.app.initPracticeProgress();
+          await this.app.db.setSetting(key, merged);
+          applied++;
+          continue;
+        }
+
         if (this.app.settings[key] === settings[key]) continue;
         this.app.settings[key] = settings[key];
         if (key === 'dictImportType') rangeChanged = true;

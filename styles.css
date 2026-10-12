@@ -825,6 +825,176 @@ select {
   transform: scale(0.98);
 }
 
+/* ==================== 练习页面 ==================== */
+/* 练习页 = 学习页的“精简版”：去掉进度条、左右滑动提示、收藏/喇叭与三个操作按钮，
+   保留卡片翻转；卡片下方换成音标输入框。 */
+.practice-container {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: 8px;
+  box-sizing: border-box;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+/* ---------- 顶部工具栏：练习范围 + 输入模式 ---------- */
+.practice-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 2px 2px 10px;
+}
+
+.practice-toolbar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.practice-toolbar-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* 比设置页的下拉更紧凑，避免在工具栏里抢走卡片的空间。
+   选择器带上 .practice-toolbar 提高优先级：.dict-select 定义在本文件更靠后的位置，
+   同优先级下会反过来覆盖这里的 padding 与字号。 */
+.practice-toolbar .practice-scope-select {
+  padding: 6px 30px 6px 10px;
+  font-size: 13px;
+}
+
+.practice-mode-options {
+  display: flex;
+  gap: 6px;
+}
+
+.practice-mode-option {
+  padding: 6px 12px;
+  background: var(--bg-primary);
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.practice-mode-option.active {
+  background: var(--primary);
+  color: white;
+}
+
+/* ---------- 卡片区域 ---------- */
+/* 练习卡的正文排布（.card-content 的 padding-top / gap、字号、行距）完全沿用学习卡：
+   这里只调整卡片自身的高度与下方间距，不再覆盖正文样式。
+   布局与学习页的「卡片 + 跳过/掌握/陌生」一致：卡片是吃掉剩余空间的那一项，
+   输入区固定高度紧跟其后 —— 这样卡片不会被撑高、下方留出一大块空白。 */
+.practice-card-stack {
+  /* 卡片下限（240px）+ 输入区高度，保证两者都能完整放下 */
+  min-height: 340px;
+  padding-bottom: 0;
+}
+
+.practice-card-stack .flashcard {
+  /* 由 flex 分配高度（min/max 兜住），而不是写死百分比/固定高度：
+     写死高度时卡片达不到那个高度就会在下方留白，输入框被迫离得很远 */
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 240px;
+  max-height: 460px;
+  cursor: pointer;
+}
+
+.practice-card-stack .flashcard:active {
+  cursor: pointer;
+}
+
+/* 背面的音标是本题答案，用高对比的米白色加粗显示 */
+.practice-card-stack .flashcard-back .phonetic {
+  color: #FBF7E8;
+  font-weight: 700;
+}
+
+.practice-card-stack .flashcard-back .example {
+  margin-top: 4px;
+}
+
+/* ---------- 输入区域 ---------- */
+.practice-input-area {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* 左右不留内边距：输入框宽度与卡片完全对齐（两者都是卡片区内容宽度）。
+     顶部 12px = 学习页「卡片 → 跳过/掌握/陌生」的间距（.card-actions 的上内边距） */
+  padding: 12px 0 4px;
+}
+
+.practice-input {
+  width: 100%;
+  padding: 14px 16px;
+  font-size: 20px;
+  letter-spacing: 1px;
+  text-align: center;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  /* 边框常驻（只是透明），红/绿切换时输入框高度不会跳一下 */
+  border: 2px solid transparent;
+  border-radius: 10px;
+  outline: none;
+  transition: border-color 0.18s, background 0.18s, color 0.18s;
+}
+
+.practice-input::placeholder {
+  font-size: 15px;
+  letter-spacing: 0;
+  color: var(--text-light);
+}
+
+.practice-input:focus {
+  border-color: var(--primary);
+}
+
+/* 输入与目标音标不一致：红色提示 */
+.practice-input.error,
+.practice-input.error:focus {
+  border-color: var(--danger);
+  background: rgba(201, 106, 80, 0.14);
+  color: var(--danger);
+}
+
+/* 整条音标全部输入正确：绿色提示 */
+.practice-input.success,
+.practice-input.success:focus {
+  border-color: var(--success);
+  background: rgba(90, 158, 111, 0.16);
+  color: var(--success);
+}
+
+.practice-hint {
+  min-height: 16px;
+  margin-top: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--text-light);
+  text-align: center;
+}
+
+.practice-hint.error {
+  color: var(--danger);
+}
+
+.practice-hint.success {
+  color: var(--success);
+  font-weight: 600;
+}
+
 /* ==================== 词库页面 ==================== */
 .library-header {
   padding: 16px 20px;
@@ -1611,5 +1781,15 @@ select {
 
   .card-stack {
     min-height: 358px;
+  }
+
+  /* 练习页卡片下方是输入框，矮屏同样要收矮，保证输入框不被挤出屏幕 */
+  .practice-card-stack {
+    min-height: 260px;
+  }
+
+  .practice-card-stack .flashcard {
+    min-height: 150px;
+    max-height: 280px;
   }
 }
