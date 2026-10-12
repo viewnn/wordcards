@@ -4311,7 +4311,13 @@ class VocabApp {
     const fill = document.getElementById('practiceProgressFill');
     const text = document.getElementById('practiceProgressText');
     if (fill) {
-      fill.style.width = total > 0 ? `${Math.round((Math.min(done, total) / total) * 100)}%` : '0%';
+      // 宽度保留小数，不要 Math.round：词库动辄几千条（全部 5814 / 字 3811 / 短语 2003），
+      // 答对一个词只占 0.0x%，取整后永远是 0%，进度条看起来就像"没更新"。
+      const ratio = total > 0 ? Math.min(done, total) / total : 0;
+      // toFixed + Number 去掉尾部多余的 0（100% 而不是 100.000%），同时避免浮点尾巴
+      fill.style.width = `${Number((ratio * 100).toFixed(3))}%`;
+      // 再给一个最小像素宽度：比例小到看不清时，也能看到进度条往前挪了一点
+      fill.style.minWidth = done > 0 ? '4px' : '0px';
     }
     if (text) text.textContent = `${done}/${total}`;
   }
@@ -4418,7 +4424,8 @@ class VocabApp {
   }
 
   /** 清空输入框与红/绿状态，回到「等待输入」 */
-  resetPracticeInput() {    const input = document.getElementById('practiceInput');
+  resetPracticeInput() {
+    const input = document.getElementById('practiceInput');
     if (!input) return;
     input.value = '';
     this._practiceSolved = false;
@@ -4437,12 +4444,52 @@ class VocabApp {
     }, 0);
   }
 
-  /** 输入框状态：'' 普通 / 'error' 红 / 'success' 绿 */
+  /** 输入框状态：'' 普通 / 'error' 红 / 'success' 绿（顺带重画逐音节着色） */
   setPracticeInputState(state) {
     const input = document.getElementById('practiceInput');
     if (!input) return;
     input.classList.toggle('error', state === 'error');
     input.classList.toggle('success', state === 'success');
+    // 每次判定完都重画一次：输入正确的音节要立刻变绿
+    this.renderPracticeInputDisplay();
+  }
+
+  /**
+   * 把输入框内容按音节渲染到着色显示层：**输入正确的音节显示为绿色**，
+   * 输错的显示红色，还只是目标音节前缀（正在输入）的保持默认色。
+   *
+   * input 本身不能给局部文字上色，所以它的文字是透明的，可见内容全部由这一层画出来；
+   * 两层的字体 / 内边距 / 边框 / 居中完全一致，看起来就是一个输入框。
+   */
+  renderPracticeInputDisplay() {
+    const display = document.getElementById('practiceInputDisplay');
+    if (!display) return;
+    const input = document.getElementById('practiceInput');
+    const raw = input ? input.value : '';
+    if (!raw) {
+      display.innerHTML = '';
+      return;
+    }
+
+    const targets = this._practiceTargets || [];
+    let html = '';
+    raw.split(' ').forEach((piece, index) => {
+      if (index > 0) {
+        // 音节之间要留出自动补的空格。这里必须把空格包进元素里：
+        // 显示层是 flex 容器，而「只含空白的匿名文本节点」在 flex 布局中不会被渲染，
+        // 裸写一个空格会被整段丢掉，几个音节就会挤在一起。
+        html += '<span class="sep"> </span>';
+      }
+      if (!piece) return;
+      const norm = this.normalizePracticeSyllable(piece);
+      const target = targets[index];
+      const matched = target !== undefined && norm === target;
+      // 还没打完（是目标音节的前缀）不着色；其余（输错或多余音节）标红
+      const typing = !matched && target !== undefined && target.indexOf(norm) === 0;
+      const cls = matched ? 'ok' : (typing ? 'typing' : 'bad');
+      html += `<span class="${cls}">${this.escapeHtml(piece)}</span>`;
+    });
+    display.innerHTML = html;
   }
 
   /** 输入框下方的提示文字 */

@@ -945,19 +945,63 @@ select {
   transform: rotate(180deg);
 }
 
+/* 输入框与它的「着色显示层」叠在一起：input 负责存值 / 交互，显示层负责可见文字。
+   两层用完全相同的字体、内边距、边框与居中方式，文字不会错位。 */
+.practice-input-wrap {
+  position: relative;
+  width: 100%;
+}
+
 .practice-input {
   width: 100%;
   padding: 14px 16px;
   font-size: 20px;
   letter-spacing: 1px;
   text-align: center;
-  color: var(--text-primary);
+  /* 文字透明：可见内容由下方 .practice-input-display 渲染（要逐音节上色） */
+  color: transparent;
   background: var(--bg-primary);
   /* 边框常驻（只是透明），红/绿切换时输入框高度不会跳一下 */
   border: 2px solid transparent;
   border-radius: 10px;
   outline: none;
   transition: border-color 0.18s, background 0.18s, color 0.18s;
+}
+
+/* 着色显示层：字体 / 内边距 / 边框 / 居中都要与上面的 input 对齐 */
+.practice-input-display {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 16px;
+  border: 2px solid transparent;
+  font-size: 20px;
+  letter-spacing: 1px;
+  white-space: pre;
+  overflow: hidden;
+  color: var(--text-primary);
+  /* 点击穿透到下面的 input（聚焦、选中等交互不受影响） */
+  pointer-events: none;
+}
+
+/* 音节之间的空格占位（自动补的空格也要看得见）。
+   空格必须由元素承载：显示层是 flex 容器，只含空白的匿名文本节点不会被渲染 */
+.practice-input-display .sep {
+  white-space: pre;
+}
+
+/* 输入正确（与目标音节完全一致）的音节：绿色 */
+.practice-input-display .ok {
+  color: var(--success);
+  font-weight: 600;
+}
+
+/* 输入错误的音节：红色（正在输入的前缀不着色，保持默认色） */
+.practice-input-display .bad {
+  color: var(--danger);
 }
 
 .practice-input::placeholder {
@@ -970,20 +1014,18 @@ select {
   border-color: var(--primary);
 }
 
-/* 输入与目标音标不一致：红色提示 */
+/* 输入与目标音标不一致：红色提示（只改边框与底色，文字颜色交给显示层逐音节控制） */
 .practice-input.error,
 .practice-input.error:focus {
   border-color: var(--danger);
   background: rgba(201, 106, 80, 0.14);
-  color: var(--danger);
 }
 
-/* 整条音标全部输入正确：绿色提示 */
+/* 整条音标全部输入正确：绿色提示（同样只改边框与底色） */
 .practice-input.success,
 .practice-input.success:focus {
   border-color: var(--success);
   background: rgba(90, 158, 111, 0.16);
-  color: var(--success);
 }
 
 .practice-hint {

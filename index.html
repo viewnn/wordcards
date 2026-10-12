@@ -222,11 +222,16 @@
 
             <!-- 输入区域：输入词汇对应的音标；正确自动补空格，错误变红，全对变绿。
                  readonly：手机端由下方固定键盘输入，不唤起系统键盘（避免顶乱布局）；
-                 桌面端由物理键盘输入，事件在 app.js 里统一处理。 -->
+                 桌面端由物理键盘输入，事件在 app.js 里统一处理。
+                 input 的文字设为透明，可见文字由上面的 .practice-input-display 渲染 ——
+                 只有这样才做得到「输入正确的音节单独变绿」。 -->
             <div class="practice-input-area">
-              <input type="text" id="practiceInput" class="practice-input" readonly
-                     placeholder="请输入拼音…" autocomplete="off" autocorrect="off"
-                     autocapitalize="off" spellcheck="false" inputmode="none" enterkeyhint="next">
+              <div class="practice-input-wrap">
+                <input type="text" id="practiceInput" class="practice-input" readonly
+                       placeholder="请输入拼音…" autocomplete="off" autocorrect="off"
+                       autocapitalize="off" spellcheck="false" inputmode="none" enterkeyhint="next">
+                <div class="practice-input-display" id="practiceInputDisplay" aria-hidden="true"></div>
+              </div>
               <div class="practice-hint" id="practiceHint"></div>
             </div>
 
