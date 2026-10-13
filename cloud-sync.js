@@ -287,7 +287,7 @@
 
     // ---- 配置/环境类问题：给出明确的下一步动作 ----
     if (raw === 'TIMEOUT' || /超时/.test(raw)) {
-      return '连接 Supabase 超时，请检查网络后重试（若一直超时，可能是当前网络无法访问 supabase.co）';
+      return '连接 Supabase 超时，请检查网络后重试！';
     }
     if (/PGRST125|Invalid path specified in request URL/i.test(raw)) {
       return '请求地址不对：请检查 supabase-config.js 里的 url，应填项目根地址 ' +

@@ -174,9 +174,13 @@ select {
   min-height: 100%;
 }
 
+/* 切页入场动画：只做淡入，不做位移。
+   页面本身至少占满一屏（.learn-container 等是 min-height: 100%），
+   一旦加上 translateY(10px)，内容底部就会在动画这 0.3 秒里超出滚动容器，
+   .page-content 会先闪出一条纵向滚动条、动画结束又消失（滚动条还会挤窄内容，看起来像抖了一下）。 */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* ==================== 学习页面 ==================== */

@@ -1317,6 +1317,29 @@ class VocabApp {
     // 卡片单击翻面（桌面鼠标走这里；触屏的翻面在 initCardSwipe 的 touchend 里）
     const flashcard = document.getElementById('flashcard');
     this._bindCardFlipGesture(flashcard, () => self.flipCard());
+
+    // Shift 键 = 点一下卡片（正面↔背面）。学习页与练习页都支持，
+    // 统一在这里处理，避免两处监听把同一次按键翻两次。
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Shift' || e.repeat) return; // 长按不连续翻面
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      // 真正的输入场景（词库搜索框、登录弹窗等可编辑控件）里不抢 Shift
+      const target = e.target;
+      const tag = target && target.tagName ? target.tagName.toLowerCase() : '';
+      const editing = (tag === 'input' && !target.readOnly) ||
+        tag === 'textarea' ||
+        Boolean(target && target.isContentEditable);
+      if (editing) return;
+
+      if (self.currentPage === 'learn') {
+        // 取消尚未执行的「单击翻面」：否则这次 Shift 会和上一次点击叠加成翻两下
+        self._cancelPendingCardFlip();
+        self.flipCard();
+      } else if (self.currentPage === 'practice') {
+        self._cancelPendingCardFlip();
+        self.flipPracticeCard();
+      }
+    });
     
     // 发音 / 收藏：移动端会先 touchstart 再合成 click；document 默认 passive 导致 preventDefault 无效，
     // 会连续触发两次。用 passive:false + 短时间忽略紧随其后的 click。
@@ -2886,7 +2909,7 @@ class VocabApp {
           <div class="phonetic" id="phoneticText">${cantonesePhoneticFirst ? (word.jyutping || word.phonetic || '') : (word.phonetic || word.jyutping || '')}</div>
           ${isCantonese && word.cantonese ? `<div class="cantonese-word">${word.cantonese}</div>` : ''}
         </div>
-        <div class="tap-hint">点击查看释义</div>
+        <div class="tap-hint">点击查看释义（Shift）</div>
       </div>
       <div class="flashcard-back">
         <div class="flashcard-corner-tr">
@@ -2902,7 +2925,7 @@ class VocabApp {
           <div class="example">${word.example ? `"${word.example}"` : ''}</div>
           ${isCantonese && word.cantoneseExample ? `<div class="cantonese-example">"${word.cantoneseExample}"</div>` : ''}
         </div>
-        <div class="tap-hint tap-hint-back">点击查看词汇</div>
+        <div class="tap-hint tap-hint-back">点击查看词汇（Shift）</div>
       </div>
     `;
     
@@ -4109,6 +4132,7 @@ class VocabApp {
 
     // 桌面端物理键盘：输入框是 readonly，浏览器默认输入已被关掉，
     // 字母 / 数字 / 退格全部走与虚拟键盘相同的这一套逻辑，两边行为完全一致
+    // （Shift 翻卡片在学习页与练习页都生效，统一绑在 bindEvents 里）
     document.addEventListener('keydown', (e) => {
       if (self.currentPage !== 'practice') return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -4188,11 +4212,10 @@ class VocabApp {
     }
   }
 
-  /** 进入练习页：范围没变就接着上次的进度，变了（或还没建过队列）才重新抽题 */
+  /** 进入练习页：范围 / 单词顺序没变就接着上次的进度，变了才重新抽题 */
   async enterPracticePage() {
     this.cancelPracticeAdvance();
-    const scope = this.settings.practiceScope || 'all';
-    if (this._practicePoolKey !== scope || this.practiceWords.length === 0) {
+    if (this._practicePoolKey !== this.practicePoolKey() || this.practiceWords.length === 0) {
       await this.preparePracticePool();
     }
     // 池子复用时总数缓存仍然有效，但进度是实时算的，进页面就刷一次
@@ -4201,11 +4224,22 @@ class VocabApp {
   }
 
   /**
+   * 练习队列的标识：范围 + 单词顺序。
+   * 设置页改了「词典导入」（范围）或「单词顺序」（顺序 / 随机）都会让这个值变化，
+   * 下次进入练习页就会按新设置重排队列。
+   */
+  practicePoolKey() {
+    return `${this.settings.practiceScope || 'all'}|${this.settings.learnMode || 'random'}`;
+  }
+
+  /**
    * 组织本轮练习队列：取当前练习范围内的词条，只保留「音标能解析出音节」的，
-   * 打乱后从第一题开始。练习不写学习记录，因此不做重复频率、进度恢复等处理。
+   * 从第一题开始。练习不写学习记录，因此不做重复频率、进度恢复等处理。
    *
-   * 队列顺序：先排「还没练过」的词条，再把练过的排在后面 —— 这样进度条会一直往前走，
-   * 而不是一遍遍重复已经完成的词。
+   * 队列顺序：
+   *   1) 先排「还没练过」的词条，再把练过的排在后面 —— 进度条会一直往前走，
+   *      而不是一遍遍重复已经完成的词；
+   *   2) 组内顺序跟随设置页的「单词顺序」：随机 = 打乱，顺序 = 保持词典本身的顺序。
    */
   async preparePracticePool() {
     const scope = this.settings.practiceScope || 'all';
@@ -4225,12 +4259,15 @@ class VocabApp {
     for (const word of pool) {
       (this.isPracticeDone(word) ? finished : pending).push(word);
     }
-    this.shuffleArray(pending);
-    this.shuffleArray(finished);
+    // 与学习页共用「单词顺序」设置：顺序模式按词典原序，随机模式打乱
+    if ((this.settings.learnMode || 'random') !== 'sequential') {
+      this.shuffleArray(pending);
+      this.shuffleArray(finished);
+    }
 
     this.practiceWords = pending.concat(finished);
     this.practiceIndex = 0;
-    this._practicePoolKey = scope;
+    this._practicePoolKey = this.practicePoolKey();
     this.refreshPracticeProgressUI();
   }
 
@@ -4622,15 +4659,16 @@ class VocabApp {
     }
   }
 
-  /** 整条音标输入正确后，短暂停留再自动进入下一题（期间可回车立刻跳过等待） */
+  /**
+   * 整条音标输入正确后，短暂停留再自动进入下一题（期间可回车立刻跳过等待）。
+   * 无论此刻卡片是正面还是背面都会切题 —— 在背面（蓝色面）答对时要求自动翻回正面
+   * 换下一个词，nextPracticeCard → renderPracticeCard 本来就会把卡片复位到正面。
+   */
   schedulePracticeAdvance() {
     this.cancelPracticeAdvance();
     this._practiceAdvanceTimer = setTimeout(() => {
       this._practiceAdvanceTimer = null;
       if (this.currentPage !== 'practice') return;
-      // 用户正翻着卡看答案：先不切题，等他翻回题目面时会重新排一次
-      const card = document.getElementById('practiceFlashcard');
-      if (card && card.classList.contains('flipped')) return;
       this.nextPracticeCard();
     }, PRACTICE_ADVANCE_DELAY_MS);
   }
