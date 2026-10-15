@@ -364,8 +364,6 @@
       lastPullAt: 0,
       /** 上次「全量双向同步」完成的时间：resumeSync 用它决定回到前台走全量还是增量 */
       lastFullSyncAt: 0,
-      /** 上次同步的一句说明（例如「云端有 145 条本机词库没有」），显示在设置页 */
-      lastSyncDetail: '',
       lastPullCursor: null,
       lastPushedSettingsJson: '',
       lastPushedSessionJson: '',
@@ -2005,19 +2003,6 @@
         }
       }
 
-      // 8.2) 记一条简短的同步说明：云端有记录、但本机词库里根本没有这些词条时
-      //      （两端词典版本不同），在设置页「上次同步」后面直接写出来，
-      //      否则用户只会看到「两端都显示已同步、数字却不一样」而不知道差在哪
-      var unmatchedCount = 0;
-      var engine = this;
-      remoteByKey.forEach(function (row, key) {
-        if (localMap.has(key)) return;
-        if (engine.resolveLocalWords(key).length === 0) unmatchedCount++;
-      });
-      this.meta.lastSyncDetail = unmatchedCount > 0
-        ? '云端有 ' + unmatchedCount + ' 条本机词库没有'
-        : '';
-
       // 增量拉取的游标推进到本次全量看到的最大服务端时间：否则下一次增量
       // 会把整份历史重新拉一遍（几千行），首次同步后又慢又费流量
       if (maxServerUpdatedAt > 0) {
@@ -2298,8 +2283,16 @@
 
       if (rebuildLearnQueue) {
         this.app._learnSessionSnapshot = null;
-        // 只在还没开始背（下标为 0）时立刻重建，避免打断正在学习的人
-        if (this.app.currentPage === 'learn' && this.app.currentCardIndex === 0) {
+        // 立刻重建队列的两种情况：
+        //   1) 还没开始背（下标为 0）—— 不会打断正在学习的人；
+        //   2) 学习页正停在完成页、但按最新统计并没有达标（例如刷新瞬间统计才对齐，
+        //      或云端把记录改少了）—— 必须切回学习卡片，否则用户会点到一个
+        //      不该出现的【继续学习】，一点就把本轮进度清零。
+        var atStart = this.app.currentCardIndex === 0;
+        var wrongCompletePage = this.app._learnView === 'complete' &&
+          typeof this.app.isDailyGoalReached === 'function' &&
+          !this.app.isDailyGoalReached();
+        if (this.app.currentPage === 'learn' && (atStart || wrongCompletePage)) {
           await this.app.prepareLearnSession();
         }
       }
@@ -2670,9 +2663,8 @@
 
     var lastSync = $('cloudLastSyncText');
     if (lastSync) {
-      var detail = this.meta.lastSyncDetail ? '（' + this.meta.lastSyncDetail + '）' : '';
       lastSync.textContent = this.meta.lastSyncAt
-        ? '上次同步：' + new Date(this.meta.lastSyncAt).toLocaleString('zh-CN', { hour12: false }) + detail
+        ? '上次同步：' + new Date(this.meta.lastSyncAt).toLocaleString('zh-CN', { hour12: false })
         : '尚未同步过';
     }
 

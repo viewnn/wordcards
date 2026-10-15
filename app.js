@@ -342,10 +342,23 @@ class VocabApp {
      * 本轮起点由 settings 里的 todayRoundStart 持久化（点【继续学习】时前移）。
      */
     this.todayDoneCount = 0;
-    /** 本轮开始时「今日已计入统计的词条数」；进度 = 今日词条数 − 这个起点 */
+    /**
+     * 本轮开始时「今日已计入统计的词条数」；进度 = 今日词条数 − 这个起点
+     */
     this._todayRoundStart = 0;
     /** _todayRoundStart 所属日期（用于跨天自动归零） */
     this._todayRoundDate = '';
+    /**
+     * 本轮起点是否已经从库里读出来。读出之前不拿统计去推 done，
+     * 否则刷新瞬间会把「今日已学词条数」误当成进度、闪出完成页。
+     */
+    this._roundStartReady = false;
+    /**
+     * 学习页当前展示的是什么：'card' 卡片 / 'complete' 完成页 / 'empty' 空状态。
+     * 云同步改写了统计之后据此纠偏 —— 明明没达标却停在完成页时切回卡片，
+     * 避免用户点到一个不该出现的【继续学习】把本轮进度清零。
+     */
+    this._learnView = 'card';
     /**
      * 当前队列里是否还有「今天还没计入统计」的词条。
      * 为 false 时这一轮是纯复习：进度条与今日统计都不会再增长，界面会给出提示。
@@ -502,9 +515,11 @@ class VocabApp {
       // 给旧数据里的收藏补上「收藏时间」—— 没有它收藏列表只能退化成按学习时间排，
       // 看起来就是「顺序乱的」，而用户期望的是最近收藏的排在最上面
       await this.backfillFavoriteAt();
-      await this.loadTodayStats();
-      // 恢复「今日累计完成张数」：进度条按这个数走，跨天自动归零
+      // 先读「本轮起点」，再算统计。顺序反了的话，第一次算统计时起点还是 0，
+      // 会把「今日已学词条数」当成进度，于是刷新瞬间误判「今日目标已完成」、
+      // 闪出完成页与【继续学习】按钮（用户手快一点就把本轮进度清零了）
       await this.loadTodayDoneCount();
+      await this.loadTodayStats();
       // 显示上次词库更新时间
       await this.loadDictUpdateTimeDisplay();
       this.render();
@@ -2770,43 +2785,43 @@ class VocabApp {
   }
 
   /**
-   * 读取「本轮起点」。不是今天记录的一律从 0 开始，等价于每天重置进度。
+   * 读取「本轮起点」。
    *
-   * 进度条口径 = 今日已计入统计的词条数 − 本轮起点，两者都是**去重词条数**，
+   * 进度 = 今日已计入统计的词条数 − 本轮起点，两者都是**去重词条数**，
    * 因此进度条数字与上方的「今日已掌握 + 今日待复习」永远相等。
    *
-   * 旧版本把「今日点过的卡片张数」单独累加（todayDoneCount），同一词条学两次会多记一张，
-   * 学完 100 张时上方两个数字之和只有 98/99。这里做一次迁移：把旧值折算成起点
-   * （起点 = 今日词条数 − 旧张数，下限 0）。旧张数大于今日词条数时（正是上面那种
-   * 重复学习的场景）进度数字会回落到今日词条数 —— 之后两者就再也拉不开了。
+   * 调用时机很重要：必须在算统计（loadTodayStats → refreshStatusCounts）**之前**读好。
+   * 顺序反了的话，第一次算统计时起点还是 0，会把「今日已学词条数」当成进度，
+   * 于是刷新瞬间误判「今日目标已完成」、闪出完成页与【继续学习】按钮，
+   * 用户手快一点就把本轮进度清零了。
+   *
+   * 旧版本用「今日累计完成张数」单独累加（同一词条学两次会多记一张，学完 100 张时
+   * 上方两数之和只有 98/99），现在统一由统计推导，旧键用完即弃。
    */
   async loadTodayDoneCount() {
     const today = this.todayKey();
-    const clamp = (v) => Math.max(0, Math.floor(Number(v) || 0));
-
     const saved = await this.db.getSetting('todayRoundStart', null);
-    if (saved && saved.date === today) {
-      this._todayRoundStart = clamp(saved.count);
-    } else {
-      const legacy = await this.db.getSetting('todayDoneCount', null);
-      if (legacy && legacy.date === today && Number.isFinite(Number(legacy.count))) {
-        // 旧版张数口径 → 新起点口径：起点 = 今日词条数 − 旧张数（下限 0）
-        this._todayRoundStart = Math.max(0, this.currentTodayStudyCount() - clamp(legacy.count));
-        // 旧键用完即弃，避免它一直留在库里造成误解
-        await this.db.setSetting('todayDoneCount', null);
-      } else {
-        this._todayRoundStart = 0;
-      }
-    }
+    this._todayRoundStart = (saved && saved.date === today)
+      ? Math.max(0, Math.floor(Number(saved.count) || 0))
+      : 0;
 
     this._todayRoundDate = today;
+    this._roundStartReady = true;
     this.syncTodayDoneFromStats();
     await this.saveTodayDoneCount();
+
+    const legacy = await this.db.getSetting('todayDoneCount', null);
+    if (legacy !== null) await this.db.setSetting('todayDoneCount', null);
+
     return this.todayDoneCount;
   }
 
   /** 写入「本轮起点」（带日期戳，用于跨天判断） */
   async saveTodayDoneCount() {
+    // 起点还没从库里读出来时绝不能落库：否则会用内存里的默认值 0
+    // 覆盖掉库里真实的本轮起点，「进度 = 统计 − 起点」就会被算成「统计」，
+    // 表现为刷新瞬间误判「今日目标已完成」并闪出完成页
+    if (!this._roundStartReady) return;
     await this.db.setSetting('todayRoundStart', {
       date: this._todayRoundDate || this.todayKey(),
       count: Math.max(0, Math.floor(Number(this._todayRoundStart) || 0))
@@ -2831,6 +2846,7 @@ class VocabApp {
     if (this._todayRoundDate && this._todayRoundDate !== today) {
       this._todayRoundDate = today;
       this._todayRoundStart = 0;
+      this._roundStartReady = true;   // 跨天归零是有意义的，允许落库
       this.todayDoneCount = 0;
       this.saveTodayDoneCount().catch(() => {});
       return true;
@@ -2845,6 +2861,9 @@ class VocabApp {
    */
   syncTodayDoneFromStats() {
     this.rollOverRoundIfNewDay();
+    // 起点还没从库里读出来时，先不要把「今日统计」当成进度：
+    // 那会让刷新瞬间的 done 偏大，误判「今日目标已完成」而闪出完成页
+    if (!this._roundStartReady) return this.todayDoneCount;
     this.todayDoneCount = Math.max(0, this.currentTodayStudyCount() - this._todayRoundStart);
     return this.todayDoneCount;
   }
@@ -2856,6 +2875,7 @@ class VocabApp {
   async setTodayRoundStart(value) {
     this._todayRoundDate = this.todayKey();
     this._todayRoundStart = Math.max(0, Math.floor(Number(value) || 0));
+    this._roundStartReady = true;
     this.syncTodayDoneFromStats();
     await this.saveTodayDoneCount();
     this.updateProgress();
@@ -2867,6 +2887,7 @@ class VocabApp {
     // 起点前移到「此刻今日已计入统计的词条数」：之后新学的词条才计入本轮进度
     this._todayRoundDate = this.todayKey();
     this._todayRoundStart = this.currentTodayStudyCount();
+    this._roundStartReady = true;
     this.todayDoneCount = 0;
     await this.saveTodayDoneCount();
   }
@@ -3113,6 +3134,8 @@ class VocabApp {
     if (index >= this.todayWords.length) {
       return;
     }
+
+    this._learnView = 'card';
 
     // 换卡：清掉上一张卡残留的文字选中与尚未执行的「单击翻面」，
     // 避免新卡片带着旧选中态，或在滑入过程中被上一次点击翻转
@@ -4283,6 +4306,7 @@ class VocabApp {
 
   // 显示完成页面
   showComplete() {
+    this._learnView = 'complete';
     document.querySelector('.card-stack').style.display = 'none';
     document.querySelector('.complete-container').style.display = 'flex';
     // 完成页与空状态互斥：否则「还没有可学习的单词」会和【继续学习】按钮同时出现在屏幕上
@@ -4312,6 +4336,7 @@ class VocabApp {
 
   // 显示空状态（只有当前词典范围里确实一个词条都没有时才会走到这里）
   showEmptyState() {
+    this._learnView = 'empty';
     document.querySelector('.card-stack').style.display = 'none';
     const completeContainer = document.querySelector('.complete-container');
     if (completeContainer) completeContainer.style.display = 'none';
