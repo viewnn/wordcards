@@ -354,6 +354,11 @@ class VocabApp {
      */
     this._roundStartReady = false;
     /**
+     * 今日统计是否已经算过一次。统计算出来之前，不能拿「起点 > 今日词条数」去判断起点是否失效，
+     * 否则刚启动（统计还是 0）就会把好好的起点清零。
+     */
+    this._statsReady = false;
+    /**
      * 学习页当前展示的是什么：'card' 卡片 / 'complete' 完成页 / 'empty' 空状态。
      * 云同步改写了统计之后据此纠偏 —— 明明没达标却停在完成页时切回卡片，
      * 避免用户点到一个不该出现的【继续学习】把本轮进度清零。
@@ -1325,6 +1330,7 @@ class VocabApp {
       this._scopeToday = today;
       this._scopeTotal = total;
       this.syncActiveStatsMirrors();
+      this._statsReady = true;
       // 累计统计 = 当前词典范围内各状态的真实词条数（与词库页筛选结果一致）。
       // 取镜像值而不是把两个分类相加，否则「沿用」的另一个分类会被算进来
       this._cachedStatusCounts = {
@@ -2864,7 +2870,21 @@ class VocabApp {
     // 起点还没从库里读出来时，先不要把「今日统计」当成进度：
     // 那会让刷新瞬间的 done 偏大，误判「今日目标已完成」而闪出完成页
     if (!this._roundStartReady) return this.todayDoneCount;
-    this.todayDoneCount = Math.max(0, this.currentTodayStudyCount() - this._todayRoundStart);
+
+    const counted = this.currentTodayStudyCount();
+    // 起点不可能大于「今天总共学过的词条数」：起点是某一轮开始时已经学过的数量，
+    // 而今天学过的词条数只会越积越多（清除记录 / 切范围都会同时重设起点）。
+    // 一旦出现「起点 > 今日词条数」，说明这个起点已经失效 —— 最常见的来源是
+    // 误点【继续学习】时把当时的统计当成了起点，之后统计变小（或本就没那么多），
+    // 于是进度被永久压在 0/100。这里直接把它归零，让进度回到真实值。
+    if (this._statsReady && this._todayRoundStart > counted) {
+      console.info('[learn] 检测到本轮起点（' + this._todayRoundStart +
+        '）大于今日已学词条数（' + counted + '），已重置为 0');
+      this._todayRoundStart = 0;
+      this.saveTodayDoneCount().catch(() => {});
+    }
+
+    this.todayDoneCount = Math.max(0, counted - this._todayRoundStart);
     return this.todayDoneCount;
   }
 
