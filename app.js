@@ -306,11 +306,28 @@ class VocabApp {
     this.currentCardIndex = 0;        // 今日学习队列中，当前卡片的下标
     this.todayWords = [];             // 今日学习队列（词条对象数组）
     /**
-     * 今日累计已完成的张数（进度条口径，由 settings 里的 todayDoneCount 持久化）。
-     * 进度条不再按「当前队列下标」算：词条数少于每日目标时（如 20 条短语 / 目标 100），
-     * 点【继续学习】会重抽一轮队列，下标归零但累计数继续往上加，直到达到每日目标才算完成。
+     * 本轮已完成的词条数（进度条口径）。
+     *
+     * 口径与上方的「今日已掌握 + 今日待复习」完全一致，都是
+     * 「今日学过、且当前状态为 mastered/review 的**去重词条数**」：
+     *
+     *   本轮完成数 = 今日已计入统计的词条数 − 本轮起点(_todayRoundStart)
+     *
+     * 早期版本用的是「今天点过的卡片张数」，同一词条今天被学两次会记两张，
+     * 于是学完 100 张时上方两个数字之和只有 98/99（差 1~2 个）。
+     * 现在两个数字由同一份词条状态推导，永远对得上。
+     * 本轮起点由 settings 里的 todayRoundStart 持久化（点【继续学习】时前移）。
      */
     this.todayDoneCount = 0;
+    /** 本轮开始时「今日已计入统计的词条数」；进度 = 今日词条数 − 这个起点 */
+    this._todayRoundStart = 0;
+    /** _todayRoundStart 所属日期（用于跨天自动归零） */
+    this._todayRoundDate = '';
+    /**
+     * 当前队列里是否还有「今天还没计入统计」的词条。
+     * 为 false 时这一轮是纯复习：进度条与今日统计都不会再增长，界面会给出提示。
+     */
+    this._queueHasFreshWords = true;
     /** 本轮队列的容量上限 = min(每日目标, 当前范围内词条数)；用于判断切页时能否恢复快照 */
     this._queueCapacity = 0;
     /**
@@ -350,7 +367,9 @@ class VocabApp {
       /** 练习页：输入模式 with 含调值 / without 不含调值 */
       practiceToneMode: 'with',
       /**
-       * 练习进度：按「字 / 短语」分别记录已经答对过的词条 id（进度条口径）。
+       * 练习进度：按「字 / 短语」分别记录已经答对过的词条标识（进度条口径）。
+       * 标识用 practiceDictKey()（分类|词汇|音标）而不是词条 id：id 是 IndexedDB 自增主键，
+       * 换设备后会错位，同步过去会贴到别的词条上。
        * 与学习记录完全无关（练习不改 status/收藏），但会随云同步在多设备间合并。
        */
       practiceProgress: { word: [], phrase: [] }
@@ -967,8 +986,11 @@ class VocabApp {
     this.settings.practiceScope = await this.db.getSetting('practiceScope', 'all');
     this.settings.practiceToneMode = await this.db.getSetting('practiceToneMode', 'with');
     this.settings.practiceProgress = await this.db.getSetting('practiceProgress', { word: [], phrase: [] });
-    // 进度索引（Set）由持久化的 id 列表重建
+    // 进度索引（Set）由持久化的列表重建
     this.initPracticeProgress();
+    // 旧版本把练习进度存成本地词条 id：id 是 IndexedDB 自增主键，换设备后会错位，
+    // 同步过去等于把「练过的词」贴到别的词条上。这里把旧数据迁移成跨设备稳定的 dict_key。
+    await this.migratePracticeProgressIds();
   }
 
   // ==================== 按分类(字/短语)归档的学习统计 ====================
@@ -1006,9 +1028,57 @@ class VocabApp {
     return this.activeScopeKeys().includes(w.dictScope);
   }
 
+  /**
+   * 词条是否已经计入「今日已掌握 / 今日待复习」。
+   *
+   * 口径与 refreshStatusCounts() 里统计今日词条的条件逐字一致：
+   *   状态是 mastered/review，且 lastStudied 落在今天。
+   * 进度条用同一个判断决定「这张卡要不要推进度」，所以
+   * 学完一轮后「进度条数字」与「今日已掌握 + 今日待复习」必然相等。
+   */
+  isWordCountedToday(word) {
+    if (!word) return false;
+    if (word.status !== 'mastered' && word.status !== 'review') return false;
+    const studiedAt = Number(word.lastStudied);
+    if (!Number.isFinite(studiedAt) || studiedAt <= 0) return false;
+    return new Date(studiedAt).toDateString() === this.todayKey();
+  }
+
+  /**
+   * 「今天」的日期键。
+   *
+   * 用 nowMs()（同步可用时是服务端校准时间）而不是裸 Date.now()：
+   * 词条的 lastStudied 也是用 nowMs() 写的，两边必须是同一时间基准，
+   * 否则两端时钟有偏差时，「今天学过没有」的判断会跟着错位。
+   */
+  todayKey() {
+    return new Date(this.nowMs()).toDateString();
+  }
+
+  /**
+   * 当前时间（毫秒）。
+   *
+   * 云同步可用时用「服务端基准」的时间（本机时间 + 观测到的偏移）：
+   * 词条的 lastStudied / syncUpdatedAt 既参与「今天学过没有」的统计判断，
+   * 也参与跨设备的冲突判定 —— 两台设备系统时间差几十秒时，
+   * 慢的那台刚学的记录会被另一台的旧记录盖掉，表现就是「两边都显示已同步、
+   * 数字却不一样」。未登录 / 未配置同步时就是本机时间，行为与以前完全一致。
+   */
+  nowMs() {
+    const cloud = window.CloudSync;
+    if (cloud && typeof cloud.nowMs === 'function') {
+      try {
+        return cloud.nowMs();
+      } catch (error) {
+        /* 同步模块异常时退回本机时间，不影响学习 */
+      }
+    }
+    return Date.now();
+  }
+
   // 加载今日统计与累计统计（含首次升级迁移与每日跨天累加）
   async loadTodayStats() {
-    const today = new Date().toDateString();
+    const today = this.todayKey();
     const savedDate = await this.db.getSetting('statsDate', '');
 
     // 确保计数结构完整：{ word:{mastered,review}, phrase:{mastered,review} }
@@ -1175,7 +1245,8 @@ class VocabApp {
     const run = async () => {
       const allWords = await this.db.getAllWords();
       const scoped = allWords.filter((w) => this.isWordInActiveScope(w));
-      const now = new Date();
+      // 「今天」的判断与词条 lastStudied 用同一时间基准（同步可用时是服务端校准时间）
+      const now = new Date(this.nowMs());
       const today = this._emptyScopeStats();
       const total = this._emptyScopeStats();
 
@@ -1210,12 +1281,48 @@ class VocabApp {
         mastered: this.totalStats.mastered,
         review: this.totalStats.review
       };
+      // 进度条数字与「今日已掌握 + 今日待复习」同源：都由上面的今日词条数减本轮起点得出，
+      // 因此学完一批卡后两者永远相等（不会再出现差 1~2 个的情况）
+      this.syncTodayDoneFromStats();
+      await this.saveTodayDoneCount();
       this.updateProgress();
       await this.persistScopeStats();
     };
 
     this._statusCountsChain = (this._statusCountsChain || Promise.resolve()).then(run, run);
     return this._statusCountsChain;
+  }
+
+  /**
+   * 本轮进度条的分母（本轮目标）。
+   *
+   * = min(每日目标, 本轮已完成的 + 队列里「今天还没学过」的剩余张数)
+   *
+   * 不直接用每日目标的原因：当前范围内的可学词条可能少于每日目标
+   * （例如 20 条短语 / 目标 100，或今天已经把范围内所有词条都学过一遍）。
+   * 此时分母跟着缩到实际可学数，于是
+   *   「进度条数字」=「今日已掌握 + 今日待复习」− 本轮起点
+   * 依旧成立，目标也能正常达成，而不是让进度条永远停在 20/100。
+   *
+   * 返回 0 表示本轮已经没有「今天还没学过」的词条了（纯复习轮）：
+   * 这时进度条显示每日目标口径、不再增长，界面会给出说明。
+   */
+  progressGoal() {
+    const goal = Math.max(0, Number(this.settings.dailyGoal) || 0);
+    if (goal <= 0) return 0;
+    const done = Math.max(0, Number(this.todayDoneCount) || 0);
+    return Math.min(goal, done + this.remainingFreshInQueue());
+  }
+
+  /** 今日队列里（当前卡之后，含当前卡）还有多少「今天还没计入统计」的词条 */
+  remainingFreshInQueue() {
+    if (!Array.isArray(this.todayWords) || this.todayWords.length === 0) return 0;
+    const start = Math.max(0, Math.min(Number(this.currentCardIndex) || 0, this.todayWords.length));
+    let count = 0;
+    for (let i = start; i < this.todayWords.length; i++) {
+      if (!this.isWordCountedToday(this.todayWords[i])) count++;
+    }
+    return count;
   }
 
   /**
@@ -2569,11 +2676,11 @@ class VocabApp {
         this.todayWords = snap.todayWords;
         this.currentCardIndex = snap.currentCardIndex;
         this.todayStats = { ...snap.todayStats };
-        if (Number.isFinite(Number(snap.todayDoneCount))) {
-          this.todayDoneCount = Math.max(0, Math.floor(Number(snap.todayDoneCount)));
-        }
         // 统计数据以按分类归档的计数为准，避免恢复会话快照时把数字回退到旧值
         this.syncActiveStatsMirrors();
+        // 进度条数字由「今日词条数 − 本轮起点」推导（与上方统计同源），
+        // 因此这里重新推导而不是直接采用快照里的旧张数，避免两个口径再次分叉
+        this.syncTodayDoneFromStats();
         const emptyState = document.getElementById('learnEmptyState');
         if (emptyState) emptyState.style.display = 'none';
         
@@ -2641,33 +2748,103 @@ class VocabApp {
   }
 
   /**
-   * 读取「今日累计完成张数」。不是今天记录的一律从 0 开始，等价于每天重置进度。
+   * 读取「本轮起点」。不是今天记录的一律从 0 开始，等价于每天重置进度。
    *
-   * 单独存一个设置项、而不是塞进 learnProgress，是因为点【继续学习】时会清空
-   * learnProgress（强制重抽队列）；如果累计数跟着被清掉，「词条数 < 每日目标」时
-   * 进度就会永远停在词条数上，到不了用户设置的 100。
+   * 进度条口径 = 今日已计入统计的词条数 − 本轮起点，两者都是**去重词条数**，
+   * 因此进度条数字与上方的「今日已掌握 + 今日待复习」永远相等。
+   *
+   * 旧版本把「今日点过的卡片张数」单独累加（todayDoneCount），同一词条学两次会多记一张，
+   * 学完 100 张时上方两个数字之和只有 98/99。这里做一次迁移：把旧值折算成起点
+   * （起点 = 今日词条数 − 旧张数，下限 0）。旧张数大于今日词条数时（正是上面那种
+   * 重复学习的场景）进度数字会回落到今日词条数 —— 之后两者就再也拉不开了。
    */
   async loadTodayDoneCount() {
-    const saved = await this.db.getSetting('todayDoneCount', null);
-    const today = new Date().toDateString();
-    if (saved && saved.date === today && Number.isFinite(Number(saved.count))) {
-      this.todayDoneCount = Math.max(0, Math.floor(Number(saved.count)));
+    const today = this.todayKey();
+    const clamp = (v) => Math.max(0, Math.floor(Number(v) || 0));
+
+    const saved = await this.db.getSetting('todayRoundStart', null);
+    if (saved && saved.date === today) {
+      this._todayRoundStart = clamp(saved.count);
     } else {
-      this.todayDoneCount = 0;
+      const legacy = await this.db.getSetting('todayDoneCount', null);
+      if (legacy && legacy.date === today && Number.isFinite(Number(legacy.count))) {
+        // 旧版张数口径 → 新起点口径：起点 = 今日词条数 − 旧张数（下限 0）
+        this._todayRoundStart = Math.max(0, this.currentTodayStudyCount() - clamp(legacy.count));
+        // 旧键用完即弃，避免它一直留在库里造成误解
+        await this.db.setSetting('todayDoneCount', null);
+      } else {
+        this._todayRoundStart = 0;
+      }
     }
+
+    this._todayRoundDate = today;
+    this.syncTodayDoneFromStats();
+    await this.saveTodayDoneCount();
     return this.todayDoneCount;
   }
 
-  /** 写入「今日累计完成张数」（带日期戳，用于跨天判断） */
+  /** 写入「本轮起点」（带日期戳，用于跨天判断） */
   async saveTodayDoneCount() {
-    await this.db.setSetting('todayDoneCount', {
-      date: new Date().toDateString(),
-      count: Math.max(0, Math.floor(Number(this.todayDoneCount) || 0))
+    await this.db.setSetting('todayRoundStart', {
+      date: this._todayRoundDate || this.todayKey(),
+      count: Math.max(0, Math.floor(Number(this._todayRoundStart) || 0))
     });
+  }
+
+  /** 今日已计入统计的词条数（= 上方「今日已掌握 + 今日待复习」，当前词典范围口径） */
+  currentTodayStudyCount() {
+    const mastered = Math.max(0, Number(this.todayStats && this.todayStats.mastered) || 0);
+    const review = Math.max(0, Number(this.todayStats && this.todayStats.review) || 0);
+    return mastered + review;
+  }
+
+  /**
+   * 跨天（页面常驻过夜，PWA 很常见）时把本轮起点与进度归零。
+   * 不做这一步的话，第二天点第一张卡时会拿昨天的完成数去比每日目标，
+   * 于是「完成页」和「1/100」同时出现。
+   * 返回是否真的跨天了。
+   */
+  rollOverRoundIfNewDay() {
+    const today = this.todayKey();
+    if (this._todayRoundDate && this._todayRoundDate !== today) {
+      this._todayRoundDate = today;
+      this._todayRoundStart = 0;
+      this.todayDoneCount = 0;
+      this.saveTodayDoneCount().catch(() => {});
+      return true;
+    }
+    if (!this._todayRoundDate) this._todayRoundDate = today;
+    return false;
+  }
+
+  /**
+   * 按「今日词条数 − 本轮起点」重算本轮完成数。
+   * 跨天时起点自动归零（进度条每天从头开始）。
+   */
+  syncTodayDoneFromStats() {
+    this.rollOverRoundIfNewDay();
+    this.todayDoneCount = Math.max(0, this.currentTodayStudyCount() - this._todayRoundStart);
+    return this.todayDoneCount;
+  }
+
+  /**
+   * 设置本轮起点（云端同步今日会话时调用）。
+   * 另一台设备可能已经开始过新一轮（起点不为 0），跟着它才能让两端进度条数字一致。
+   */
+  async setTodayRoundStart(value) {
+    this._todayRoundDate = this.todayKey();
+    this._todayRoundStart = Math.max(0, Math.floor(Number(value) || 0));
+    this.syncTodayDoneFromStats();
+    await this.saveTodayDoneCount();
+    this.updateProgress();
+    this.refreshGoalSliderLockedState();
   }
 
   /** 今日累计进度归零（改每日目标、切换词典范围、清除记录、达标后开新一轮时调用） */
   async resetTodayDoneCount() {
+    // 起点前移到「此刻今日已计入统计的词条数」：之后新学的词条才计入本轮进度
+    this._todayRoundDate = this.todayKey();
+    this._todayRoundStart = this.currentTodayStudyCount();
     this.todayDoneCount = 0;
     await this.saveTodayDoneCount();
   }
@@ -2750,6 +2927,8 @@ class VocabApp {
       // 恢复之前的学习进度，并使用数据库中的最新词条内容，避免旧快照覆盖词典更新
       this.todayWords = restoredTodayWords;
       this.currentCardIndex = savedProgress.currentCardIndex;
+      // 恢复出来的队列里还有没有「今天还没学过」的词条（纯复习轮时界面要给出说明）
+      this._queueHasFreshWords = this.todayWords.some((w) => !this.isWordCountedToday(w));
       
       // 更新统计数据
       this.todayStats.total = this.todayWords.length;
@@ -2780,7 +2959,8 @@ class VocabApp {
 
     // 根据重复频率筛选单词
     const frequency = this.settings.repeatFrequency;
-    const now = Date.now();
+    // 与词条 lastStudied 用同一时间基准（同步可用时是服务端基准），避免两端时钟偏差影响筛选
+    const now = this.nowMs();
     const dayMs = 24 * 60 * 60 * 1000; // 一天的毫秒数
     
     let availableWords = allWords;
@@ -2806,22 +2986,46 @@ class VocabApp {
         (a, b) => (Number(a.lastStudied) || 0) - (Number(b.lastStudied) || 0)
       );
     }
-    
+
+    // 队列里优先放「今天还没计入统计」的词条。
+    //
+    // 这是进度条与「今日已掌握 + 今日待复习」不再差 1~2 个的关键：
+    // 今天已经学过并计入统计的词条，再学一次不会让两个数字增加，进度条（同一口径）也不会增加；
+    // 若把它们排进今天的队列，用户就会看到「学完 100 张，上方两数之和只有 98/99」。
+    // 「重复频率」为 0 天、或小范围词典需要跨轮时，旧实现正是这种情况。
+    const untouchedWords = availableWords.filter((w) => !this.isWordCountedToday(w));
+    const alreadyTodayWords = availableWords.filter((w) => this.isWordCountedToday(w));
+    /** 顺序模式排序：新词 → 待复习 → 已掌握（组内保持词典原序） */
+    const orderSequential = (pool) => {
+      const rank = (w) => (w.status === 'new' ? 0 : (w.status === 'review' ? 1 : 2));
+      return pool
+        .map((w, index) => ({ w, index, r: rank(w) }))
+        .sort((a, b) => a.r - b.r || a.index - b.index)
+        .map((item) => item.w);
+    };
+
+    const goal = Math.max(0, Number(this.settings.dailyGoal) || 0);
     let todayWords;
-    if (this.settings.learnMode === 'random') {
-      todayWords = this.pickRandomSpreadByCategory(availableWords, this.settings.dailyGoal);
-    } else if (this._isReviewRound) {
-      // 复习轮：availableWords 已按「最久没学」升序，直接取前 N 个，
-      // 不再按 新词→待复习 分组（此时已经没有新词了）
-      todayWords = availableWords.slice(0, this.settings.dailyGoal);
+    if (this._isReviewRound) {
+      // 复习轮：availableWords 已按「最久没学」升序，先取今天还没学过的，再用今天学过的补足
+      todayWords = [...untouchedWords, ...alreadyTodayWords].slice(0, goal);
+    } else if (this.settings.learnMode === 'random') {
+      todayWords = this.pickRandomSpreadByCategory(untouchedWords, goal);
+      if (todayWords.length < goal) {
+        todayWords = todayWords.concat(
+          this.pickRandomSpreadByCategory(alreadyTodayWords, goal - todayWords.length)
+        );
+      }
     } else {
-      const newWords = availableWords.filter((w) => w.status === 'new');
-      const reviewWords = availableWords.filter((w) => w.status === 'review');
-      // 过了静默期、但已经是「已掌握」的词排最后（与旧版用 remaining 兜底追加的效果一致）
-      const masteredWords = availableWords.filter((w) => w.status !== 'new' && w.status !== 'review');
-      todayWords = [...newWords, ...reviewWords, ...masteredWords].slice(0, this.settings.dailyGoal);
+      todayWords = [
+        ...orderSequential(untouchedWords),
+        ...orderSequential(alreadyTodayWords)
+      ].slice(0, goal);
     }
-    
+    // 队列里已经没有「今天还没学过」的词条了：接下来只能复习今天已学过的词，
+    // 进度条不会再往前涨（口径使然），提示一下，免得用户以为是卡住了
+    this._queueHasFreshWords = untouchedWords.length > 0;
+
     this.todayWords = todayWords;
     this.currentCardIndex = 0;
     this.todayStats.total = this.todayWords.length;
@@ -2839,7 +3043,12 @@ class VocabApp {
       document.querySelector('.complete-container').style.display = 'none';
       const emptyState = document.getElementById('learnEmptyState');
       if (emptyState) emptyState.style.display = 'none';
-      if (this._isReviewRound) {
+      if (!this._queueHasFreshWords) {
+        // 当前范围今天已经没有没学过的词条了：这是一轮纯复习，两个统计数字不会增加
+        this.showToast(this._isReviewRound
+          ? '词条都已学过，已开始新一轮复习（今日统计不会再增加）'
+          : '今日可学词条已学完，接下来是复习（今日统计不会再增加）');
+      } else if (this._isReviewRound) {
         // 让用户知道这轮为什么又出现了学过的词，而不是以为筛选/进度出了问题
         this.showToast('词条都已学过，已开始新一轮学习');
       }
@@ -3481,12 +3690,15 @@ class VocabApp {
     if (this.currentCardIndex >= this.todayWords.length) return;
 
     const word = this.todayWords[this.currentCardIndex];
+    // 进度条与「今日待复习」同口径（去重词条）：今天已经计入过统计的词条再次学习时，
+    // 今日统计不会再增加，进度条也不该增加，否则两者会差出 1~2 个
+    const countsTowardProgress = !this.isWordCountedToday(word);
     word.status = 'review';
-    word.lastStudied = Date.now(); // 记录学习时间
+    word.lastStudied = this.nowMs(); // 记录学习时间（同步可用时用服务端基准，避免两端时钟偏差）
 
     // 切卡动画与落库解耦：先同步推进卡片（与「跳过」一致立即开始滑出/滑入动画），
     // 再把写库、写统计、刷新累计统计放到后台执行，避免 IO 期间卡片停在画外造成卡顿
-    this._sequenceCard('right', releaseOffset);
+    this._sequenceCard('right', releaseOffset, countsTowardProgress);
     this._persistStudyAction(word).catch((err) => {
       console.error('保存「需复习」状态失败:', err);
     });
@@ -3506,8 +3718,8 @@ class VocabApp {
     const pool = this._scopePoolCache || [];
     if (pool.length === 0) return null;
 
-    const now = Date.now();
-    const dayStart = new Date().setHours(0, 0, 0, 0);
+    const now = this.nowMs();
+    const dayStart = new Date(now).setHours(0, 0, 0, 0);
     const frequency = Number(this.settings.repeatFrequency) || 0;
     const dayMs = 24 * 60 * 60 * 1000;
 
@@ -3562,6 +3774,8 @@ class VocabApp {
     // 补一张新词到队尾；范围内没有新词可补时才把跳过的词放回队尾
     const replacement = this.pickSkipReplacement(skipped);
     this.todayWords.push(replacement || skipped);
+    // 补进来的一定是「今天还没学过」的词，队列里又有能推进度的卡了
+    if (replacement) this._queueHasFreshWords = true;
 
     // 回退一格，抵消 _sequenceCard 的自增：让补位到当前下标的「下一张」正常显示
     this.currentCardIndex = skippedIndex - 1;
@@ -3583,12 +3797,14 @@ class VocabApp {
     if (this.currentCardIndex >= this.todayWords.length) return;
 
     const word = this.todayWords[this.currentCardIndex];
+    // 同 markDifficult：今天已计入统计的词条不再重复推进度，保证进度条与今日统计同口径
+    const countsTowardProgress = !this.isWordCountedToday(word);
     word.status = 'mastered';
-    word.lastStudied = Date.now(); // 记录学习时间
+    word.lastStudied = this.nowMs(); // 记录学习时间（同步可用时用服务端基准）
 
     // 同 markDifficult：先同步切卡，落库在后台进行。
     // 这样左滑（已掌握）与右滑（跳过）的动画时序完全一致，不再出现中途闪烁。
-    this._sequenceCard('left', releaseOffset);
+    this._sequenceCard('left', releaseOffset, countsTowardProgress);
     this._persistStudyAction(word).catch((err) => {
       console.error('保存「已掌握」状态失败:', err);
     });
@@ -3628,8 +3844,9 @@ class VocabApp {
    * releaseOffset 为松手时卡片位移占卡片宽度的比例（按钮/未拖动时为 0）：
    * 拖动越远，剩余滑出路程越短、滑出越快，避免出现忽快忽慢或空等。
    *
-   * countsTowardProgress=false 时本次切卡不计入今日完成张数（「跳过」用），
-   * 进度条与「今日目标已达成」的判断都不受影响。
+   * countsTowardProgress=false 时本次切卡不计入今日完成数（「跳过」用，以及
+   * 「今天已经学过、已计入今日统计」的重复学习）。进度条与「今日目标已达成」的判断
+   * 因此始终与上方的「今日已掌握 + 今日待复习」保持同一口径。
    *
    * 本方法完全同步、发起后立即返回，动画由定时器自行推进，因此调用方可以在
    * 触发动画后立刻去做写库等异步工作，两者互不阻塞。
@@ -3644,9 +3861,10 @@ class VocabApp {
     this._cardLongPressText = '';
     this._cardTouchLongPress = false;
     this.currentCardIndex++;
-    // 今日累计张数 +1（进度条口径）。掌握/陌生算一张；「跳过」不算
-    // （countsTowardProgress=false），所以跳过只换卡、不消耗每日目标。
-    // 跨队列时下标会归零，累计数不会，因此进度可以一直累加到每日目标。
+    // 跨天（页面常驻过夜）时先把本轮进度归零，避免拿昨天的完成数误判「今日目标已达成」
+    this.rollOverRoundIfNewDay();
+    // 本轮完成数 +1。掌握/陌生且该词条今天还没计入统计时算一个；「跳过」不算
+    // （countsTowardProgress=false），重复学习同一词条也不算 —— 口径与今日统计一致。
     if (countsTowardProgress) this.todayDoneCount++;
     // 队列背完、或者今日累计已经达到每日目标，都立刻收卡显示完成页。
     // 第二个条件不可少：词条数不整除每日目标时（例如 30 条短语 / 目标 100，
@@ -3885,20 +4103,26 @@ class VocabApp {
   }
 
   /**
-   * 更新进度：进度条与数字都按「今日累计完成张数」计，而不是当前队列的下标。
+   * 更新进度：进度条与数字按「本轮已完成的去重词条数」计，而不是当前队列的下标。
    *
-   * 这样「词条数 < 每日目标」时（例如 20 条短语 / 目标 100），点【继续学习】重抽一轮
-   * 队列后，进度会从 20 接着往 40、60… 涨，直到达到每日目标才算完成；
-   * 队列末尾可能略微超出目标（比如 95/100 时又把一轮 20 张背完），显示时封顶在目标值。
+   * 本轮完成数 = 今日已计入统计的词条数 − 本轮起点，与上方的「今日已掌握 + 今日待复习」
+   * 是同一口径，因此两者永远相等（早期版本按“点过的卡片张数”算，同一词条学两次会多算，
+   * 学完 100 张时上方两数之和只有 98/99）。
+   *
+   * 分母是本轮目标（progressGoal）：范围内可学词条不足每日目标时自动缩小，
+   * 保证目标能达成；纯复习轮（没有今天没学过的词条）时为 0，此时按每日目标显示、进度不再增长。
    */
   updateProgress() {
     const goal = Math.max(0, Number(this.settings.dailyGoal) || 0);
     const done = Math.max(0, Number(this.todayDoneCount) || 0);
-    const shown = goal > 0 ? Math.min(done, goal) : done;
-    const progress = goal > 0 ? Math.round((shown / goal) * 100) : 0;
+    const roundGoal = this.progressGoal();
+    // roundGoal 为 0 = 本轮没有可新学的词条（纯复习），退回每日目标口径显示
+    const displayGoal = roundGoal > 0 ? roundGoal : goal;
+    const shown = displayGoal > 0 ? Math.min(done, displayGoal) : done;
+    const progress = displayGoal > 0 ? Math.round((shown / displayGoal) * 100) : 0;
 
     document.getElementById('progressFill').style.width = `${progress}%`;
-    document.getElementById('progressText').textContent = `${shown}/${goal}`;
+    document.getElementById('progressText').textContent = `${shown}/${displayGoal}`;
 
     // 今日统计 = 今天学习且当前状态为掌握/待复习的词条数
     document.getElementById('statMastered').textContent = this.todayStats.mastered;
@@ -3975,16 +4199,18 @@ class VocabApp {
   }
 
   /**
-   * 今日目标是否已达成。
+   * 本轮目标是否已达成（用于判断「该收卡显示完成页了」）。
    *
-   * 达成之后一律不再展示卡片：词条数不整除每日目标时（例如 30 条短语 / 目标 100，
-   * 第四轮学到第 10 张就满 100），当前队列里还剩着卡片，如果不拦住，用户会看到
-   * 进度条已经 100/100 却还能一直往下背。正确做法是收卡显示完成页，
-   * 等用户点【继续学习】把进度重置为 0，再开始新一轮。
+   * 判定用本轮目标 progressGoal()，而不是每日目标本身：
+   *   - 可学词条充足时两者相同（例如目标 100、队列里 100 个新词）；
+   *   - 可学词条不足时（20 条短语 / 目标 100）本轮目标就是 20，
+   *     学完 20 张即算完成，不会让进度条永远停在 20/100；
+   *   - 纯复习轮（今天没有没学过的词条）返回 0，此时不算达成，用户仍可继续复习。
    */
   isDailyGoalReached() {
-    const goal = Math.max(0, Number(this.settings.dailyGoal) || 0);
-    return goal > 0 && Math.max(0, Number(this.todayDoneCount) || 0) >= goal;
+    const roundGoal = this.progressGoal();
+    if (roundGoal <= 0) return false;
+    return Math.max(0, Number(this.todayDoneCount) || 0) >= roundGoal;
   }
 
   // 显示完成页面
@@ -3998,15 +4224,19 @@ class VocabApp {
     // document.getElementById('completeMastered').textContent = this.todayStats.mastered;
     // document.getElementById('completeReview').textContent = this.todayStats.review;
 
-    // 一轮队列背完但今日累计还没到目标时（词条数少于每日目标会一直如此），
-    // 文案要说清「还能接着往下背」，否则用户会以为今天已经结束、进度条却还差一截
+    // 「今日目标已完成」只在真正做到每日目标时才说；可学词条不足目标时
+    // 说的是「本轮已完成（x/y）」—— y 是本轮实际可学数，与进度条一致，
+    // 不会出现「进度条显示 20/20、文案却说 20/100」这种自相矛盾
     const goal = Math.max(0, Number(this.settings.dailyGoal) || 0);
-    const shown = goal > 0 ? Math.min(Math.max(0, Number(this.todayDoneCount) || 0), goal) : 0;
+    const done = Math.max(0, Number(this.todayDoneCount) || 0);
+    const roundGoal = this.progressGoal();
+    const displayGoal = roundGoal > 0 ? roundGoal : goal;
+    const shown = displayGoal > 0 ? Math.min(done, displayGoal) : done;
     const subtitle = document.querySelector('.complete-subtitle');
     if (subtitle) {
-      subtitle.textContent = goal > 0 && shown >= goal
+      subtitle.textContent = goal > 0 && done >= goal
         ? '今日学习目标已完成'
-        : `本轮已完成（${shown}/${goal}）`;
+        : `本轮已完成（${shown}/${displayGoal}）`;
     }
   }
 
@@ -4022,13 +4252,14 @@ class VocabApp {
   /**
    * 继续学习 / 再来一轮。
    *
-   * 关键点：只有「今日累计已经达到每日目标」时才把进度归零，否则原样保留累计数。
-   * 因为词条数可能少于每日目标（例如 20 条短语 / 目标 100）：一轮背完 20 张后
-   * 点【继续学习】，应该让进度接着从 20 涨到 40、60…，而不是清空重新从 0 开始。
+   * 关键点：只有「本轮已经达到每日目标」时才把本轮起点前移（进度归零），否则原样保留。
+   * 进度条 = 今日已计入统计的词条数 − 本轮起点，因此：
+   *   - 达标后点【继续学习】→ 起点前移到当前今日词条数 → 进度从 0 重新开始；
+   *   - 没达标（今日还能学新词条）→ 起点不动 → 进度接着往上走。
    */
   async restartLearn() {
     if (this.isDailyGoalReached()) {
-      // 今日目标已达成：这一轮结束，进度归零，开始新的一轮
+      // 本轮目标已达成：起点前移，进度归零，开始新的一轮
       await this.resetTodayDoneCount();
     }
     // 重置当前卡片索引为0
@@ -4036,7 +4267,7 @@ class VocabApp {
     // 清除保存的学习进度，确保重新生成队列
     // （必须 await：否则紧接着的 prepareLearnSession 可能读回刚清掉的旧进度，
     //   表现就是点【继续学习】没有任何反应）
-    // 注意这里不动 todayDoneCount，进度条因此能接着上一轮的数字继续涨
+    // 注意这里不动本轮起点：没达标时进度条要接着上一轮的数字继续涨
     await this.db.setSetting('learnProgress', null);
     // 会话快照一并作废，避免切页时又恢复回旧队列
     this._learnSessionSnapshot = null;
@@ -4276,16 +4507,36 @@ class VocabApp {
     return word && word.dictScope === 'phrase' ? 'phrase' : 'word';
   }
 
-  /** 把持久化的练习进度（id 列表）读进内存索引 Set */
+  /**
+   * 练习进度用的跨设备稳定标识：分类 | 词汇 | 音标（与 cloud-sync.js 的 makeDictKey 同一套规则）。
+   *
+   * 不能用词条的 id —— 它是 IndexedDB 的自增主键，同一份词典在手机和电脑上导入顺序不同，
+   * 同一个词完全可能拿到不同的 id。用 id 当练习进度，同步到另一台设备就会贴到别的词条上，
+   * 表现为「两端的练习数据对不上」。
+   */
+  practiceDictKey(word) {
+    if (!word) return '';
+    const norm = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().toLowerCase().replace(/\|/g, '/');
+    const text = norm(word.word);
+    if (!text) return '';
+    return `${this.practiceScopeKeyOf(word)}|${text}|${norm(word.phonetic)}`;
+  }
+
+  /** 该条目是不是旧版遗留的「词条 id」进度（数字） */
+  isLegacyPracticeId(item) {
+    return typeof item === 'number' || (typeof item === 'string' && /^\d+$/.test(item.trim()));
+  }
+
+  /** 把持久化的练习进度（dict_key 列表）读进内存索引 Set */
   initPracticeProgress() {
     const raw = this.settings.practiceProgress;
-    // 注意先排除 null/undefined/空串：Number(null) 是 0，会把无效值混进进度里
     const toSet = (list) => {
       const set = new Set();
       for (const item of Array.isArray(list) ? list : []) {
         if (item === null || item === undefined || item === '') continue;
-        const id = Number(item);
-        if (Number.isFinite(id)) set.add(id);
+        // 旧版的数字 id 无跨设备意义：这里直接忽略，由 migratePracticeProgressIds() 翻译成 dict_key
+        if (this.isLegacyPracticeId(item)) continue;
+        set.add(String(item));
       }
       return set;
     };
@@ -4296,12 +4547,74 @@ class VocabApp {
     this.refreshPracticeProgressUI();
   }
 
+  /**
+   * 一次性迁移：把旧版按「本机词条 id」记录的练习进度翻译成本机的 dict_key。
+   * 迁移只在本地做（旧 id 只对本机有意义），迁移后立即落库并随云同步上行，
+   * 于是另一台设备拿到的就是稳定的 dict_key 进度。
+   */
+  async migratePracticeProgressIds() {
+    const raw = this.settings.practiceProgress;
+    if (!raw || typeof raw !== 'object') return 0;
+
+    const legacyLists = ['word', 'phrase'].filter((k) =>
+      Array.isArray(raw[k]) && raw[k].some((item) => this.isLegacyPracticeId(item))
+    );
+    if (legacyLists.length === 0) return 0;
+
+    // 旧 id 只对本机有意义，只有在「本机从未登录过云同步」时才能安全翻译。
+    // 若曾开启云同步，云端旧格式里可能混着**另一台设备**的 id（旧版按并集合并），
+    // 拿这些 id 在本机按 id 匹配会命中无关词条，把错误进度推上云且不可逆 ——
+    // 宁可放弃这批旧进度（重练即可），也不写错。
+    const cloudMeta = window.CloudSync && window.CloudSync.meta;
+    if (cloudMeta && cloudMeta.lastUserId) {
+      const dropped = legacyLists.reduce(
+        (n, k) => n + raw[k].filter((item) => this.isLegacyPracticeId(item)).length,
+        0
+      );
+      console.info(
+        `[practice] 本机用过云同步，旧的 id 进度（${dropped} 条）可能来自另一台设备，` +
+        '为避免错配已放弃；可重新练习以重建进度。'
+      );
+      // 用当前（不含旧 id）的索引覆盖落库，把库里的旧 id 清掉
+      if (dropped > 0) await this.savePracticeProgress();
+      return 0;
+    }
+
+    let allWords = [];
+    try {
+      allWords = await this.db.getAllWords();
+    } catch (error) {
+      return 0;
+    }
+    const byId = new Map(allWords.map((w) => [Number(w.id), w]));
+
+    let migrated = 0;
+    for (const key of legacyLists) {
+      const set = this._practiceDone[key];
+      for (const item of raw[key]) {
+        if (!this.isLegacyPracticeId(item)) continue;
+        const word = byId.get(Number(item));
+        if (!word) continue; // 词条已不存在：放弃这条旧记录
+        const dictKey = this.practiceDictKey(word);
+        if (!dictKey) continue;
+        set.add(dictKey);
+        migrated++;
+      }
+    }
+    if (migrated > 0) {
+      console.info(`[practice] 练习进度已迁移为跨设备标识（${migrated} 条）`);
+      await this.savePracticeProgress();
+      this.refreshPracticeProgressUI();
+    }
+    return migrated;
+  }
+
   /** 该词条是否已经练过（答对过） */
   isPracticeDone(word) {
-    if (!word || word.id === undefined || word.id === null) return false;
-    const key = this.practiceScopeKeyOf(word);
-    const set = this._practiceDone[key];
-    return set ? set.has(Number(word.id)) : false;
+    const dictKey = this.practiceDictKey(word);
+    if (!dictKey) return false;
+    const set = this._practiceDone[this.practiceScopeKeyOf(word)];
+    return set ? set.has(dictKey) : false;
   }
 
   /**
@@ -4310,20 +4623,19 @@ class VocabApp {
    * 因此多设备之间会自动合并进度。
    */
   async markPracticeDone(word) {
-    if (!word || word.id === undefined || word.id === null) return;
-    const key = this.practiceScopeKeyOf(word);
-    const id = Number(word.id);
-    const set = this._practiceDone[key];
-    if (!set || set.has(id)) return;
+    const dictKey = this.practiceDictKey(word);
+    if (!dictKey) return;
+    const set = this._practiceDone[this.practiceScopeKeyOf(word)];
+    if (!set || set.has(dictKey)) return;
 
-    set.add(id);
+    set.add(dictKey);
     this.refreshPracticeProgressUI();
     await this.savePracticeProgress();
   }
 
-  /** 把内存索引写回设置（数组按 id 升序，保证云端比对时 JSON 稳定） */
+  /** 把内存索引写回设置（数组按字典序，保证云端比对时 JSON 稳定） */
   async savePracticeProgress() {
-    const toList = (set) => Array.from(set).sort((a, b) => a - b);
+    const toList = (set) => Array.from(set).map(String).sort();
     const payload = {
       word: toList(this._practiceDone.word),
       phrase: toList(this._practiceDone.phrase)
@@ -4734,7 +5046,7 @@ class VocabApp {
 
     // “只看今天学过”的（仅今日已掌握/今日待复习入口会打开）
     if (this._libraryTodayOnly) {
-      const todayKey = new Date().toDateString();
+      const todayKey = this.todayKey();
       words = words.filter((w) => {
         const t = Number(w.lastStudied);
         return Number.isFinite(t) && new Date(t).toDateString() === todayKey;
@@ -4924,7 +5236,7 @@ class VocabApp {
         const word = words.find(w => w.id === id);
         if (word) {
           word.status = newStatus;
-          word.lastStudied = Date.now();
+          word.lastStudied = this.nowMs();
           await this.db.updateWord(word);
           
           // 更新学习页面的状态数据

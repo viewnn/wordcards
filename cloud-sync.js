@@ -92,7 +92,11 @@
     'soundEnabled',
     'speechEnabled',
     'phoneticAutoRead',
-    // 练习页的练习进度（按 字/短语 记录的已完成词条 id）：云端按并集合并，见 applyRemoteSettings
+    // 练习页的范围与调值开关：两端不一致时进度条的分母、题目难度都不同，
+    // 用户会以为是「练习数据没同步」，所以一起同步
+    'practiceScope',
+    'practiceToneMode',
+    // 练习页的练习进度（按 字/短语 记录的已完成词条标识）：云端按并集合并，见 applyRemoteSettings
     'practiceProgress'
   ];
 
@@ -183,6 +187,10 @@
    * 如果也按覆盖处理，两台设备各自练过的词条会互相抹掉。
    * 取并集后，客户端发现「本地与云端不同」会把合并结果再推回云端，
    * 于是多台设备的练习进度能持续累加。
+   *
+   * 列表元素是 practiceDictKey()（分类|词汇|音标）—— 跨设备稳定。
+   * 早期版本的列表元素是 IndexedDB 自增 id，换设备必然错位，这里直接忽略
+   * （客户端会先把旧 id 迁移成 dict_key 再上行，见 app.js 的 migratePracticeProgressIds）。
    */
   function mergePracticeProgress(local, remote) {
     var out = {};
@@ -195,14 +203,16 @@
         var list = Array.isArray(lists[l]) ? lists[l] : [];
         for (var n = 0; n < list.length; n++) {
           var raw = list[n];
-          // 注意先排除 null/undefined/空串：Number(null) 是 0，会把无效值混进进度里
-          if (raw === null || raw === undefined || raw === '') continue;
-          var id = Number(raw);
-          if (Number.isFinite(id)) seen.add(id);
+          if (raw === null || raw === undefined) continue;
+          var text = String(raw).trim();
+          if (!text) continue;
+          if (/^\d+$/.test(text)) continue; // 旧版的本地词条 id：没有跨设备意义
+          seen.add(text);
         }
       }
-      // 排序：保证两侧合并出的 JSON 完全一致，避免每次都误判为「有变化」而反复上传
-      out[key] = Array.from(seen).sort(function (a, b) { return a - b; });
+      // 排序：保证两侧合并出的 JSON 完全一致，避免每次都误判为「有变化」而反复上传。
+      // 必须与 app.js 的 savePracticeProgress() 用同一种排序（默认字典序）
+      out[key] = Array.from(seen).sort();
     }
     return out;
   }
@@ -336,7 +346,22 @@
       lastPushedSettingsJson: '',
       lastPushedSessionJson: '',
       progressResetAt: 0,
-      lastUserId: null
+      lastUserId: null,
+      /**
+       * 与服务端的时钟偏移估计（毫秒）：本地时间 + 该值 ≈ 服务端时间。
+       * 冲突判定用的是客户端逻辑时间戳，如果两台设备的系统时间有偏差
+       * （手机和电脑差几十秒很常见），较慢的那台怎么操作都赢不了，
+       * 于是「两边都显示已同步，内容却不一样」。这里用服务端回传的时间校准。
+       * null 表示还没观测到；取最近若干次观测里最大的一个（网络抖动只会让观测偏低）。
+       */
+      serverOffsetMs: null,
+      /** 最近几次的时钟偏移观测（滑动窗口，避免单次异常值长期生效） */
+      serverOffsetSamples: [],
+      /** 本机最近生成过的逻辑时间戳：保证时间戳单调递增，改系统时间也不会倒退 */
+      lastStamp: 0,
+      /** 设置 / 会话各自的客户端逻辑时间戳（LWW 判定依据，越大越新） */
+      settingsUpdatedAt: 0,
+      sessionUpdatedAt: 0
     };
 
     /** 本地词条索引，同步过程中反复用到，重建一次即可 */
@@ -345,6 +370,10 @@
 
     /** 抑制标志：为 true 时本地写入不再打脏标记（防止把云端数据又推回去） */
     this._suppress = false;
+
+    /** 本机最近一次改动设置 / 今日会话的时刻（内存）：避免本地刚改的内容被云端旧版本覆盖 */
+    this._localSettingsTouchedAt = 0;
+    this._localSessionTouchedAt = 0;
 
     this._pushTimer = null;
     this._syncPromise = null;
@@ -483,6 +512,16 @@
       this.meta.lastPullCursor = null;
       this.meta.lastPushedSettingsJson = '';
       this.meta.lastPushedSessionJson = '';
+      // 时间戳与重置信号也要归零：每个账号的云端版本是独立的一套，
+      // 沿用上一个账号的时间戳会让「云端是否更新」的判断全部失效
+      this.meta.settingsUpdatedAt = 0;
+      this.meta.sessionUpdatedAt = 0;
+      this.meta.progressResetAt = 0;
+      this.meta.lastStamp = 0;
+      // 内存里的「本机刚改过」时间也要清：否则会把上一个账号的设置/会话
+      // 当成「比新账号云端更新」而推上去，污染新账号
+      this._localSettingsTouchedAt = 0;
+      this._localSessionTouchedAt = 0;
     }
 
     this.renderUi();
@@ -573,9 +612,96 @@
     await this.app.db.setSetting(META_SETTING_KEY, this.meta);
   };
 
+  // ---------------------------------------------------------------- 逻辑时间戳
+
+  /**
+   * 生成客户端逻辑时间戳（毫秒），它就是上行时的 client_updated_at：
+   *   1) 以服务端时间为基准（本地时间 + 观测到的偏移）：两台设备系统时间有偏差时，
+   *      冲突判定才不会变成「时钟快的那台永远赢」；
+   *   2) 保证单调递增：同一毫秒内连续操作、或系统时间被回拨，都不会生成更小的时间戳。
+   */
+  CloudSyncEngine.prototype.nextStamp = function () {
+    var offset = toNumber(this.meta.serverOffsetMs, 0);
+    var t = Date.now() + offset;
+    var last = toNumber(this.meta.lastStamp, 0);
+    if (!Number.isFinite(t) || t <= last) t = last + 1;
+    this.meta.lastStamp = t;
+    return t;
+  };
+
+  /**
+   * 当前时间（毫秒），已按服务端时钟校准。app.js 写词条 lastStudied 时用它，
+   * 这样「今天学过没有」的判断与冲突判定用的是同一时间基准。
+   * 未登录 / 未配置时就是本机时间。
+   */
+  CloudSyncEngine.prototype.nowMs = function () {
+    if (!this.isActive()) return Date.now();
+    return Date.now() + toNumber(this.meta.serverOffsetMs, 0);
+  };
+
+  /**
+   * 用服务端回传的时间（word_progress.updated_at，服务端 now()）校准本机时钟偏移。
+   *
+   * 观测值 = 服务端写入时刻 − 本地收到响应的时刻 = 真实偏移 − 下行耗时，
+   * 所以观测只会偏低；取最近几次观测里最大的一个最接近真值
+   * （结果可能为负，表示本地时钟偏快）。
+   */
+  CloudSyncEngine.prototype.observeServerTime = function (serverTimeMs) {
+    var server = toNumber(serverTimeMs, 0);
+    if (!server) return;
+    var observed = server - Date.now();
+    // 超过 30 分钟的偏差说明本机系统时间本身有问题（不是普通漂移）。
+    // 这种时候宁可不校准：日界判断与 lastStudied 都用同一个基准，
+    // 强行校准反而会让「今天」的边界跟用户看到的墙上时钟错开。
+    if (!Number.isFinite(observed) || Math.abs(observed) > 30 * 60 * 1000) return;
+
+    // 滑动窗口取最大值：观测值只会因网络耗时偏低，取大的更接近真值；
+    // 用窗口而不是单个累计值，是为了让一次异常观测在几次之后自动失效
+    var samples = Array.isArray(this.meta.serverOffsetSamples)
+      ? this.meta.serverOffsetSamples.slice(-4)
+      : [];
+    samples.push(observed);
+    this.meta.serverOffsetSamples = samples;
+
+    var best = samples[0];
+    for (var i = 1; i < samples.length; i++) {
+      if (samples[i] > best) best = samples[i];
+    }
+    this.meta.serverOffsetMs = best;
+  };
+
+  /**
+   * 用本机已有数据给逻辑时间戳「打底」：取所有词条 syncUpdatedAt / lastStudied 的最大值。
+   *
+   * 用途：升级到「服务端校准时钟」后，本机历史时间戳可能比校准后的时间戳更大
+   * （例如本机时钟本来就快）。若不做这一步，本机的新操作会生成更小的时间戳，
+   * 被自己历史推上去的云端旧记录挡住 —— 表现就是「刚点的操作没生效、状态被回滚」。
+   */
+  CloudSyncEngine.prototype.seedLastStampFromLocal = async function () {
+    var words = await this.app.db.getAllWords();
+    var maxStamp = toNumber(this.meta.lastStamp, 0);
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i];
+      var s = Math.max(toNumber(w.syncUpdatedAt, 0), toNumber(w.lastStudied, 0));
+      if (s > maxStamp) maxStamp = s;
+    }
+    if (maxStamp > toNumber(this.meta.lastStamp, 0)) {
+      this.meta.lastStamp = maxStamp;
+      await this.saveMeta();
+    }
+    return maxStamp;
+  };
+
   // ---------------------------------------------------------------- 本地索引
 
-  /** 重建「dict_key → 词条」与「分类+文本 → 词条[]」两张索引表 */
+  /**
+   * 重建「dict_key → 词条[]」与「分类+文本 → 词条[]」两张索引表。
+   *
+   * 用数组而不是单个词条：词典里可能存在「分类 + 词汇 + 音标」完全相同的多条词条
+   * （同音同字但释义不同的义项）。原先只留最后一条，云端那一行就只会写到其中一条上，
+   * 两台设备各自写中的是「不同的一条」时，看起来就是「都显示已同步、内容却不同」。
+   * 现在同 key 的整组一起更新，两端必然一致。
+   */
   CloudSyncEngine.prototype.rebuildLocalIndex = async function () {
     var words = await this.app.db.getAllWords();
     var byKey = new Map();
@@ -585,7 +711,8 @@
       var word = words[i];
       var key = makeDictKey(word);
       if (!key) continue;
-      byKey.set(key, word);
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key).push(word);
 
       var textKey = makeTextKey(scopeOf(word), word.word);
       if (!byText.has(textKey)) byText.set(textKey, []);
@@ -598,21 +725,27 @@
   };
 
   /**
-   * 按 dict_key 找本地词条。
+   * 按 dict_key 找本地词条（同 key 的多条全部返回）。
    * 精确匹配失败时退化成「分类 + 文本」匹配——词典更新时音标可能被纠正，
    * 此时 dict_key 会变，但学习记录不该丢。只有当该文本在本地唯一时才敢回退，
    * 多读音字这种「同文本多条」的情况宁可放弃，也不错配。
    */
-  CloudSyncEngine.prototype.resolveLocalWord = function (dictKey) {
-    if (!this._localByKey) return null;
+  CloudSyncEngine.prototype.resolveLocalWords = function (dictKey) {
+    if (!this._localByKey) return [];
     var hit = this._localByKey.get(dictKey);
-    if (hit) return hit;
+    if (hit && hit.length > 0) return hit;
 
     var parsed = parseDictKey(dictKey);
-    if (!parsed) return null;
+    if (!parsed) return [];
     var list = this._localByText ? this._localByText.get(makeTextKey(parsed.scope, parsed.text)) : null;
-    if (list && list.length === 1) return list[0];
-    return null;
+    if (list && list.length === 1) return list;
+    return [];
+  };
+
+  /** 按 dict_key 找本地词条（取第一条，供今日会话恢复等「一个词条就够」的场景使用） */
+  CloudSyncEngine.prototype.resolveLocalWord = function (dictKey) {
+    var list = this.resolveLocalWords(dictKey);
+    return list.length > 0 ? list[0] : null;
   };
 
   // ---------------------------------------------------------------- 行数据转换
@@ -652,7 +785,14 @@
     var map = new Map();
     for (var i = 0; i < words.length; i++) {
       var row = this.rowFromWord(words[i]);
-      if (row) map.set(row.dict_key, row);
+      if (!row) continue;
+      // 同 dict_key 的多条词条（同音同字的义项）会拼出同一行：保留时间戳更大的那条。
+      // 否则「云端是否更新」的判定会随遍历顺序忽大忽小，时间戳小的会把大的盖掉，
+      // 导致本机明明有更新的记录却不被推上去。
+      var prev = map.get(row.dict_key);
+      if (!prev || toNumber(row.client_updated_at, 0) >= toNumber(prev.client_updated_at, 0)) {
+        map.set(row.dict_key, row);
+      }
     }
     return map;
   };
@@ -670,7 +810,14 @@
   CloudSyncEngine.prototype.stampWord = function (word) {
     if (!word || this._suppress || !this.isActive()) return;
 
-    var stamp = Date.now();
+    // 本机对这个词条的改动必须比它已有的记录更新：否则会被自己历史推上去的云端值挡住，
+    // 用户看到的就是「点了掌握，刷新后又被改回去」
+    var previous = Math.max(toNumber(word.syncUpdatedAt, 0), toNumber(word.lastStudied, 0));
+    var stamp = this.nextStamp();
+    if (stamp <= previous) {
+      stamp = previous + 1;
+      if (stamp > toNumber(this.meta.lastStamp, 0)) this.meta.lastStamp = stamp;
+    }
     word.syncUpdatedAt = stamp;
 
     var row = this.rowFromWord(word);
@@ -690,7 +837,15 @@
    */
   CloudSyncEngine.prototype.onSettingWritten = function (key) {
     if (this._suppress || !this.isActive()) return;
-    if (SYNCED_SETTING_KEYS.indexOf(key) >= 0 || key === 'learnProgress') {
+    if (SYNCED_SETTING_KEYS.indexOf(key) >= 0) {
+      // 记下「本机刚刚改过设置」的时刻：同步时用它和云端时间戳比较，
+      // 免得本机刚改的设置被云端的旧版本盖掉（这是「两端设置各显示各的」的另一个来源）
+      this._localSettingsTouchedAt = this.nowMs();
+      this.schedulePush();
+      return;
+    }
+    if (key === 'learnProgress') {
+      this._localSessionTouchedAt = this.nowMs();
       this.schedulePush();
     }
   };
@@ -802,6 +957,17 @@
         accepted = accepted.concat(result.data);
       }
     }
+
+    // 回传行的 updated_at 是服务端 now()（刚刚写入的时刻）→ 用它校准本机时钟偏移
+    var latestServerTime = 0;
+    for (var j = 0; j < accepted.length; j++) {
+      var row = accepted[j];
+      if (!row || !row.updated_at) continue;
+      var t = new Date(row.updated_at).getTime();
+      if (Number.isFinite(t) && t > latestServerTime) latestServerTime = t;
+    }
+    if (latestServerTime) this.observeServerTime(latestServerTime);
+
     return accepted;
   };
 
@@ -832,10 +998,51 @@
 
   // ---------------------------------------------------------------- 下行
 
-  /** 全量拉取云端学习记录（分页；不做游标，避免同一时间戳翻页漏数据） */
+  /**
+   * 全量拉取云端学习记录。
+   *
+   * 分页用主键 dict_key 而不是 client_updated_at + offset：
+   * offset 分页在「拉取过程中云端又被另一台设备写入」时会错位（重复或漏行），
+   * 按主键游标翻页则不会漏 —— 最多把一个词条拉两次，而合并是幂等的。
+   */
   CloudSyncEngine.prototype.fetchAllProgress = async function () {
     var all = [];
-    var offset = 0;
+    var cursor = null;
+
+    for (var page = 0; page < MAX_PULL_PAGES; page++) {
+      var query = this.client
+        .from('word_progress')
+        .select('dict_key,status,favorite,last_studied,review_count,client_updated_at,updated_at')
+        .eq('user_id', this.user.id)
+        .order('dict_key', { ascending: true })
+        .limit(PULL_PAGE_SIZE);
+      if (cursor !== null) query = query.gt('dict_key', cursor);
+
+      var result = await withTimeout(query, REQUEST_TIMEOUT_MS, 'TIMEOUT');
+      if (result.error) throw result.error;
+
+      var data = result.data || [];
+      all = all.concat(data);
+      if (data.length < PULL_PAGE_SIZE) break;
+      cursor = data[data.length - 1].dict_key;
+      if (!cursor) break;
+    }
+    return all;
+  };
+
+  /**
+   * 增量拉取：只取服务端 updated_at 不早于游标的行。
+   *
+   * 必须循环翻页：一次学习会话加上另一台设备的改动完全可能超过一页，
+   * 旧实现只拉一页却把游标推到「本页最后一行」，剩下的行就再也拉不回来了。
+   * 用 gte 而不是 gt：同一批 RPC 写入的行 updated_at 相同，gt 会漏掉同批的其余行；
+   * gte 只会重复拉取，而合并是幂等的。
+   */
+  CloudSyncEngine.prototype.fetchProgressSince = async function (cursor) {
+    if (!cursor) return this.fetchAllProgress();
+
+    var all = [];
+    var since = cursor;
 
     for (var page = 0; page < MAX_PULL_PAGES; page++) {
       var result = await withTimeout(
@@ -843,8 +1050,10 @@
           .from('word_progress')
           .select('dict_key,status,favorite,last_studied,review_count,client_updated_at,updated_at')
           .eq('user_id', this.user.id)
-          .order('client_updated_at', { ascending: true })
-          .range(offset, offset + PULL_PAGE_SIZE - 1),
+          .gte('updated_at', since)
+          .order('updated_at', { ascending: true })
+          .order('dict_key', { ascending: true })
+          .limit(PULL_PAGE_SIZE),
         REQUEST_TIMEOUT_MS,
         'TIMEOUT'
       );
@@ -853,29 +1062,14 @@
       var data = result.data || [];
       all = all.concat(data);
       if (data.length < PULL_PAGE_SIZE) break;
-      offset += PULL_PAGE_SIZE;
+
+      // 下一页从「本页最后一行的服务端时间」继续；同一时间戳的行会被再拉一次（幂等），
+      // 因此不会漏掉与最后一行同批写入的其它词条
+      var lastUpdatedAt = data[data.length - 1].updated_at;
+      if (!lastUpdatedAt || lastUpdatedAt === since) break; // 防死循环
+      since = lastUpdatedAt;
     }
     return all;
-  };
-
-  /** 增量拉取：只取服务端 updated_at 晚于游标的行 */
-  CloudSyncEngine.prototype.fetchProgressSince = async function (cursor) {
-    if (!cursor) return this.fetchAllProgress();
-
-    var result = await withTimeout(
-      this.client
-        .from('word_progress')
-        .select('dict_key,status,favorite,last_studied,review_count,client_updated_at,updated_at')
-        .eq('user_id', this.user.id)
-        .gte('updated_at', cursor)
-        .order('updated_at', { ascending: true })
-        .limit(PULL_PAGE_SIZE),
-      REQUEST_TIMEOUT_MS,
-      'TIMEOUT'
-    );
-
-    if (result.error) throw result.error;
-    return result.data || [];
   };
 
   /**
@@ -889,35 +1083,39 @@
 
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
-      var word = this.resolveLocalWord(row.dict_key);
-      if (!word) continue; // 本地没有这个词条（词典版本不同），跳过
+      // 同 dict_key 的多条词条（同音同字的不同义项）一起写，避免两台设备各自只更新其中一条
+      var group = this.resolveLocalWords(row.dict_key);
+      if (group.length === 0) continue; // 本地没有这个词条（词典版本不同），跳过
 
       var status = row.status === 'mastered' || row.status === 'review' ? row.status : 'new';
       var favorite = Boolean(row.favorite);
       var lastStudied = row.last_studied == null ? null : toNumber(row.last_studied, null);
       var clientUpdatedAt = toNumber(row.client_updated_at, 0);
 
-      var statusChanged = (word.status || 'new') !== status;
-      var favoriteChanged = Boolean(word.favorite) !== favorite;
-      var timeChanged =
-        lastStudied !== null && toNumber(word.lastStudied, 0) !== lastStudied;
-      var stampChanged = toNumber(word.syncUpdatedAt, 0) < clientUpdatedAt;
+      for (var g = 0; g < group.length; g++) {
+        var word = group[g];
+        var statusChanged = (word.status || 'new') !== status;
+        var favoriteChanged = Boolean(word.favorite) !== favorite;
+        var timeChanged =
+          lastStudied !== null && toNumber(word.lastStudied, 0) !== lastStudied;
+        var stampChanged = toNumber(word.syncUpdatedAt, 0) < clientUpdatedAt;
 
-      if (!statusChanged && !favoriteChanged && !timeChanged) {
-        // 内容一致，只把时间戳补齐，避免下次同步又判定为「本地待确认」
-        if (stampChanged) {
-          word.syncUpdatedAt = clientUpdatedAt;
-          pending.push(word);
+        if (!statusChanged && !favoriteChanged && !timeChanged) {
+          // 内容一致，只把时间戳补齐，避免下次同步又判定为「本地待确认」
+          if (stampChanged) {
+            word.syncUpdatedAt = clientUpdatedAt;
+            pending.push(word);
+          }
+          continue;
         }
-        continue;
-      }
 
-      if (statusChanged) word.status = status;
-      if (favoriteChanged) word.favorite = favorite;
-      if (timeChanged) word.lastStudied = lastStudied;
-      word.syncUpdatedAt = clientUpdatedAt;
-      pending.push(word);
-      changedWords.push(word);
+        if (statusChanged) word.status = status;
+        if (favoriteChanged) word.favorite = favorite;
+        if (timeChanged) word.lastStudied = lastStudied;
+        word.syncUpdatedAt = clientUpdatedAt;
+        pending.push(word);
+        changedWords.push(word);
+      }
     }
 
     if (pending.length === 0) return 0;
@@ -1010,7 +1208,17 @@
     this.meta.progressResetAt = resetAt;
     await this.saveMeta();
 
-    // 词条状态已被清零，今日累计张数也要一起归零，否则进度条会停在旧数字上
+    // 词条状态已被清零，今日统计与进度都要跟着归零。
+    // 必须先重算统计再重置进度：resetTodayDoneCount() 是「把本轮起点前移到当前今日词条数」，
+    // 若此时 todayStats 还停留在清零前的旧值，起点会被抬到旧统计上，
+    // 于是当天进度条长期为 0、每日目标永远达不成
+    if (touched.length > 0 && typeof this.app.refreshStatusCounts === 'function') {
+      try {
+        await this.app.refreshStatusCounts();
+      } catch (error) {
+        console.warn('[cloud-sync] 重置后重算统计失败:', error);
+      }
+    }
     if (typeof this.app.resetTodayDoneCount === 'function') {
       try {
         await this.app.resetTodayDoneCount();
@@ -1049,7 +1257,7 @@
 
         // 练习进度是逐题累加出来的：与本地取并集，而不是像其它设置那样整份覆盖，
         // 否则两台设备各自练过的词条会互相抹掉。合并结果比云端更全时，
-        // 调用方（_doSyncAll）会发现「本地与云端不同」并把并集推回云端。
+        // 调用方（_doSyncAll / flushDirty）会发现「本地与云端不同」并把并集推回云端。
         if (key === 'practiceProgress') {
           var merged = mergePracticeProgress(this.app.settings.practiceProgress, settings[key]);
           if (stableStringify(merged) === stableStringify(this.app.settings.practiceProgress || {})) continue;
@@ -1095,10 +1303,41 @@
         }
       }
 
-      this.meta.lastPushedSettingsJson = stableStringify(this.collectLocalSettings());
+      // 记下「云端当前是什么」而不是「本地当前是什么」：
+      // 练习进度按并集合并后本地可能比云端更全，这份差异必须在下次上行时推回云端，
+      // 若在这里记成本地内容，flushDirty 会认为「已推送过」而永远不推，两端就分叉了
+      this.meta.lastPushedSettingsJson = stableStringify(settings);
       await this.saveMeta();
     }
     return applied;
+  };
+
+  /**
+   * 练习进度按并集合并，且**不受设置 LWW 门控**。
+   *
+   * 设置整体是「时间戳大的赢」，但练习进度是逐题累加出来的、只增不减：
+   * 若也走 LWW，本机今天练过几题（本地改动时间更新）之后就再也不会吸收
+   * 另一台设备的练习进度，反而把纯本地的进度整份推上去覆盖云端 ——
+   * 结果就是两端都显示「已同步」，练习数据却永远不一样。
+   * 因此每次同步都无条件把云端的并进来（并集是幂等的、只增不减），
+   * 再由调用方按「本地是否比云端更全」决定要不要推回云端。
+   */
+  CloudSyncEngine.prototype.mergeRemotePracticeProgress = async function (settings) {
+    if (!settings || settings.practiceProgress === undefined || settings.practiceProgress === null) return false;
+
+    var local = this.app.settings.practiceProgress;
+    var merged = mergePracticeProgress(local, settings.practiceProgress);
+    if (stableStringify(merged) === stableStringify(local || {})) return false;
+
+    this._suppress = true;
+    try {
+      this.app.settings.practiceProgress = merged;
+      if (typeof this.app.initPracticeProgress === 'function') this.app.initPracticeProgress();
+      await this.app.db.setSetting('practiceProgress', merged);
+    } finally {
+      this._suppress = false;
+    }
+    return true;
   };
 
   /** 收集本地今日学习会话（只同步「今天」的，跨天的没有意义） */
@@ -1126,6 +1365,9 @@
       date: dateKey,
       currentCardIndex: toNumber(progress.currentCardIndex, 0),
       goal: toNumber(this.app.settings.dailyGoal, 0),
+      // 本轮起点：进度条 = 今日已计入统计的词条数 − 本轮起点。
+      // 带上它，另一台设备恢复今天的会话后进度条数字才与本机一致
+      roundStart: toNumber(this.app._todayRoundStart, 0),
       savedAt: savedAt,
       dictKeys: keys
     };
@@ -1152,6 +1394,16 @@
     }
 
     if (this.app.todayWords && this.app.todayWords.length > 0 && this.app.currentCardIndex > 0) return false;
+
+    // 本机在云端那份会话之后又改过今日会话（学了几张 / 跳了几张）：本地更新，不恢复云端
+    var remoteAt = options ? toNumber(options.remoteUpdatedAt, 0) : 0;
+    if (remoteAt > 0 && toNumber(this._localSessionTouchedAt, 0) > remoteAt) {
+      var touchedProgress = await this.app.db.getSetting('learnProgress', null);
+      if (touchedProgress && touchedProgress.savedAt &&
+          new Date(touchedProgress.savedAt).toDateString() === session.date) {
+        return false;
+      }
+    }
 
     var local = await this.app.db.getSetting('learnProgress', null);
     if (local && local.savedAt) {
@@ -1188,15 +1440,15 @@
     this.meta.lastPushedSessionJson = stableStringify(session);
     await this.saveMeta();
 
-    // 换设备接着背：云端会话只带「队列下标」，本地进度条按累计张数算，
-    // 因此把累计数补到不低于该下标，进度条才与卡片位置对得上
-    var localDone = toNumber(this.app.todayDoneCount, 0);
-    if (index > localDone && typeof this.app.saveTodayDoneCount === 'function') {
-      this.app.todayDoneCount = index;
+    // 换设备接着背：进度条 = 今日已计入统计的词条数 − 本轮起点，
+    // 把云端会话里的「本轮起点」一并恢复，两台设备的进度条数字才一致。
+    // （早期版本这里按「队列下标」补张数，与今日统计口径不一致，会多出 1~2 个）
+    if (session.roundStart !== undefined && session.roundStart !== null &&
+        typeof this.app.setTodayRoundStart === 'function') {
       try {
-        await this.app.saveTodayDoneCount();
+        await this.app.setTodayRoundStart(session.roundStart);
       } catch (error) {
-        console.warn('[cloud-sync] 对齐今日进度计数失败:', error);
+        console.warn('[cloud-sync] 对齐今日进度起点失败:', error);
       }
     }
 
@@ -1238,7 +1490,10 @@
     );
   };
 
-  /** 调用 push_user_state；只传想改的字段，null 表示不动 */
+  /**
+   * 调用 push_user_state；只传想改的字段，null 表示不动。
+   * 返回服务端**最终**的那一行（可能不是我们刚推上去的版本 —— 见 adoptServerUserState）。
+   */
   CloudSyncEngine.prototype.pushUserState = async function (patch) {
     var result = await withTimeout(
       this.client.rpc('push_user_state', {
@@ -1256,6 +1511,62 @@
   };
 
   /**
+   * 采纳服务端返回的用户状态行（设置 / 今日会话）。
+   *
+   * push_user_state 是**按时间戳条件更新**的：服务端已有更新的版本时，本次上行会被
+   * 静默忽略（RPC 不报错，只把云端当前值回传）。旧实现直接假定「我推的就是云端的」，
+   * 于是本地记下「已推送」、之后再也不会重推 —— 两台设备都显示「已同步」，
+   * 设置 / 今日会话却永远停在两份不同的内容上（典型现象：手机改了每日目标或练习范围，
+   * 电脑端数字却对不上）。这里用服务端返回值做最终对齐。
+   */
+  CloudSyncEngine.prototype.adoptServerUserState = async function (row, options) {
+    var result = { settings: false, session: false };
+    if (!row) return result;
+    var opts = options || {};
+
+    // ---- 设置 ----
+    if (!opts.sessionOnly) {
+      var remoteSettingsAt = toNumber(row.settings_updated_at, 0);
+      // 与全量同步同一个口径：本机刚改过的设置（_localSettingsTouchedAt）也要算进来，
+      // 否则这里会绕过「保护本机新改动」的判断，把用户刚改的设置静默还原成云端旧值
+      var localSettingsAt = Math.max(
+        toNumber(this.meta.settingsUpdatedAt, 0),
+        toNumber(this._localSettingsTouchedAt, 0)
+      );
+      if (row.settings && remoteSettingsAt > localSettingsAt) {
+        // 云端更新：应用它（练习进度在里面按并集合并，不会抹掉本机练过的题）
+        await this.applyRemoteSettings(row.settings);
+        this.meta.settingsUpdatedAt = remoteSettingsAt;
+        // 记为「云端内容」：合并出的并集若比云端更全，会在下一次上行时补推
+        this.meta.lastPushedSettingsJson = stableStringify(row.settings);
+        await this.saveMeta();
+        result.settings = true;
+      }
+    }
+
+    // ---- 今日会话 ----
+    if (!opts.settingsOnly) {
+      var remoteSessionAt = toNumber(row.session_updated_at, 0);
+      var localSessionAt = toNumber(this.meta.sessionUpdatedAt, 0);
+      if (remoteSessionAt > localSessionAt) {
+        // 记住云端版本：本机后续若还要推送，时间戳必须压过它（本机有新操作时）
+        this.meta.sessionUpdatedAt = remoteSessionAt;
+        await this.saveMeta();
+        result.session = true;
+      }
+    }
+
+    return result;
+  };
+
+  /** 推送设置/会话时使用的时间戳：既保证本机单调递增，也确保压过已知的云端版本 */
+  CloudSyncEngine.prototype.nextStateStamp = function (knownServerStamp) {
+    var base = Math.max(this.nextStamp(), toNumber(knownServerStamp, 0) + 1);
+    this.meta.lastStamp = Math.max(toNumber(this.meta.lastStamp, 0), base);
+    return base;
+  };
+
+  /**
    * 如果设置或今日会话变了就推上去。
    * 会话用「内容对比」而不是事件标记：跳过卡片之类的操作不会写 learnProgress，
    * 但队列顺序其实变了，靠内容对比才抓得住。
@@ -1268,28 +1579,59 @@
     var settingsJson = stableStringify(settings);
     if (settingsJson !== this.meta.lastPushedSettingsJson) {
       patch.settings = settings;
-      patch.settingsUpdatedAt = Date.now();
+      patch.settingsUpdatedAt = this.nextStateStamp(this.meta.settingsUpdatedAt);
     }
 
     var session = await this.collectLocalSession();
     var sessionJson = stableStringify(session);
     if (sessionJson !== this.meta.lastPushedSessionJson) {
-      if (session) {
+      // 只有「本机在已知的云端会话之后又动过今日会话」才推：
+      // 否则本机只是打开页面/刷新，就会把另一台设备正在用的队列覆盖掉，
+      // 被服务端拒绝时还会每次学习都重复上传同一份
+      var localSessionIntent = toNumber(this._localSessionTouchedAt, 0);
+      var knownRemoteSessionAt = toNumber(this.meta.sessionUpdatedAt, 0);
+      if (session && localSessionIntent > knownRemoteSessionAt) {
         patch.session = session;
-        patch.sessionUpdatedAt = Date.now();
+        patch.sessionUpdatedAt = this.nextStateStamp(this.meta.sessionUpdatedAt);
       } else {
-        // 本地今天没有有效会话（还没开始学 / 已跨天）：只记下现状，
-        // 服务端不允许把会话显式清空，跨天自然失效即可
+        // 本机没有更新的意图（或今天还没有会话）：只记下现状，云端那份才是更新的
         this.meta.lastPushedSessionJson = sessionJson;
       }
     }
 
     if (Object.keys(patch).length === 0) return false;
 
-    await this.pushUserState(patch);
+    var row = await this.pushUserState(patch);
+    if (row && row.updated_at) this.observeServerTime(new Date(row.updated_at).getTime());
 
-    if (patch.settings !== undefined) this.meta.lastPushedSettingsJson = settingsJson;
-    if (patch.session !== undefined) this.meta.lastPushedSessionJson = sessionJson;
+    // 判断「服务端是否接受了本次推送」用**内容比较**而不是时间戳大小：
+    // 时间戳相等时服务端同样不会更新内容（schema.sql 的条件是严格大于），
+    // 只比大小会把这种情况误判为「已推送」，本地与云端就此永久分叉
+    var settingsAccepted = patch.settings === undefined || !row || stableStringify(row.settings) === settingsJson;
+    var sessionAccepted = patch.session === undefined || !row || stableStringify(row.session) === sessionJson;
+
+    if (patch.settings !== undefined && settingsAccepted) {
+      this.meta.settingsUpdatedAt = patch.settingsUpdatedAt;
+      this.meta.lastPushedSettingsJson = settingsJson;
+    }
+    if (patch.session !== undefined) {
+      if (sessionAccepted) {
+        this.meta.sessionUpdatedAt = patch.sessionUpdatedAt;
+        this.meta.lastPushedSessionJson = sessionJson;
+      } else {
+        // 被服务端拒绝：云端那份才是当前版本，记下来（否则每次学习都会重复上传）
+        this.meta.sessionUpdatedAt = Math.max(
+          toNumber(this.meta.sessionUpdatedAt, 0),
+          toNumber(row.session_updated_at, 0)
+        );
+        this.meta.lastPushedSessionJson = stableStringify(row.session);
+      }
+    }
+    await this.adoptServerUserState(row, {
+      settingsOnly: patch.session === undefined,
+      sessionOnly: patch.settings === undefined
+    });
+
     await this.saveMeta();
     return true;
   };
@@ -1316,6 +1658,17 @@
     this.setStatus('syncing', '正在同步…');
 
     try {
+      // 首次同步前给逻辑时间戳打底（只做一次）：取本机所有词条里最大的时间戳，
+      // 保证之后生成的 client_updated_at 不会比本机历史上传过的记录更旧
+      if (!this._stampSeeded) {
+        this._stampSeeded = true;
+        try {
+          await this.seedLastStampFromLocal();
+        } catch (error) {
+          console.warn('[cloud-sync] 初始化逻辑时间戳失败（不影响同步）:', error);
+        }
+      }
+
       // 1) 用户状态：设置 / 今日会话 / 重置信号
       var state = await this.fetchUserState();
 
@@ -1324,6 +1677,14 @@
 
       // 3) 云端学习记录全量拉取
       var remoteRows = await this.fetchAllProgress();
+
+      // 顺手记下本次看到的服务端最大时间：同步完成后用它推进增量拉取游标，
+      // 否则下一次增量会把整份历史重新拉一遍。必须在过滤作废行之前统计
+      var maxServerUpdatedAt = 0;
+      for (var ri = 0; ri < remoteRows.length; ri++) {
+        var rowTime = new Date(remoteRows[ri].updated_at).getTime();
+        if (Number.isFinite(rowTime) && rowTime > maxServerUpdatedAt) maxServerUpdatedAt = rowTime;
+      }
 
       // 重置时间点之前的行已经作废，直接无视
       var resetAt = toNumber(this.meta.progressResetAt, 0);
@@ -1373,34 +1734,74 @@
       }
 
       // 6) 设置：云端更新就用云端，本地更新就推上去
+      // 6) 练习进度先无条件并集合并（不受设置 LWW 门控）：
+      //    它是逐题累加的，必须无条件吸收云端的，才不会被本机较新的时间戳挡住
+      await this.mergeRemotePracticeProgress(state.settings);
+
+      // 6.1) 其它设置：谁的时间戳新听谁的；推上去之后必须核对服务端返回的最终值
       var localSettingsJson = stableStringify(this.collectLocalSettings());
       var remoteSettingsJson = stableStringify(state.settings || {});
-      var remoteSettingsNewer =
-        toNumber(state.settings_updated_at, 0) > 0 && remoteSettingsJson !== localSettingsJson;
+      var remoteSettingsAt = toNumber(state.settings_updated_at, 0);
+      // 本机设置「最后一次被别人看到」的时间：已推送的时间戳，或本机刚改过的时刻
+      var localSettingsIntentAt = Math.max(
+        toNumber(this.meta.settingsUpdatedAt, 0),
+        toNumber(this._localSettingsTouchedAt, 0)
+      );
 
-      if (remoteSettingsNewer) {
+      // 云端有内容、与本地不同、且时间戳比本机这次改动更新 → 采用云端
+      if (remoteSettingsAt > 0 &&
+          remoteSettingsJson !== localSettingsJson &&
+          remoteSettingsAt > localSettingsIntentAt) {
         await this.applyRemoteSettings(state.settings);
+        this.meta.settingsUpdatedAt = remoteSettingsAt;
       }
-      // 应用完云端设置后若本地与云端仍不同，说明本地这份更新 → 推上去
+      // 对齐后若本地与云端仍不同，说明本地这份才是用户最新的意图 → 推上去
       var settingsAfterApply = this.collectLocalSettings();
       if (stableStringify(settingsAfterApply) !== remoteSettingsJson) {
-        await this.pushUserState({
+        var settingsStamp = this.nextStateStamp(this.meta.settingsUpdatedAt);
+        var settingsRow = await this.pushUserState({
           settings: settingsAfterApply,
-          settingsUpdatedAt: Date.now()
+          settingsUpdatedAt: settingsStamp
         });
-      }
-      this.meta.lastPushedSettingsJson = stableStringify(settingsAfterApply);
-
-      // 7) 今日会话：云端更新就恢复，否则把本地的推上去
-      var sessionApplied = await this.applyRemoteSession(state.session);
-      if (!sessionApplied) {
-        await this.pushStateIfChanged();
+        if (settingsRow && settingsRow.updated_at) {
+          this.observeServerTime(new Date(settingsRow.updated_at).getTime());
+        }
+        if (!(settingsRow && toNumber(settingsRow.settings_updated_at, 0) > settingsStamp)) {
+          this.meta.settingsUpdatedAt = settingsStamp;
+          this.meta.lastPushedSettingsJson = stableStringify(settingsAfterApply);
+        } else {
+          // 服务端已有更新的版本（另一台设备刚改过）：以云端为准，别让本地一直分叉
+          await this.adoptServerUserState(settingsRow, { settingsOnly: true });
+        }
       } else {
+        this.meta.lastPushedSettingsJson = stableStringify(settingsAfterApply);
+        // 内容一致时也要记下云端版本时间戳，否则本机「已知的云端版本」会长期滞后，
+        // 下次容易被更旧的时间戳判定误导
+        if (remoteSettingsAt > toNumber(this.meta.settingsUpdatedAt, 0)) {
+          this.meta.settingsUpdatedAt = remoteSettingsAt;
+        }
+      }
+
+      // 7) 今日会话：谁的时间戳新听谁的；本地没有更新就恢复云端的队列
+      var remoteSessionAt = toNumber(state.session_updated_at, 0);
+      var sessionApplied = await this.applyRemoteSession(state.session, {
+        remoteUpdatedAt: remoteSessionAt
+      });
+      if (sessionApplied) {
+        this.meta.sessionUpdatedAt = Math.max(toNumber(this.meta.sessionUpdatedAt, 0), remoteSessionAt);
         await this.saveMeta();
+      } else {
+        await this.pushStateIfChanged();
       }
 
       // 8) 刷新界面（统计口径完全由词条状态实时算出，所以同步后必须重算）
       await this.refreshLocalViews(appliedCount > 0);
+
+      // 增量拉取的游标推进到本次全量看到的最大服务端时间：否则下一次增量
+      // 会把整份历史重新拉一遍（几千行），首次同步后又慢又费流量
+      if (maxServerUpdatedAt > 0) {
+        this.meta.lastPullCursor = new Date(maxServerUpdatedAt).toISOString();
+      }
 
       this.meta.lastSyncAt = Date.now();
       this.meta.lastPullAt = Date.now();
@@ -1480,9 +1881,35 @@
         this.setStatus('synced', '已是最新');
       }
 
-      // 3) 设置与今日会话也可能在别的设备上改过
-      await this.applyRemoteSettings(state.settings);
-      await this.applyRemoteSession(state.session, { strict: true });
+      // 3) 设置与今日会话也可能在别的设备上改过。
+      //    练习进度先无条件并集合并（它是逐题累加的，不能走 LWW，见 mergeRemotePracticeProgress）；
+      //    其它设置的条件与全量同步一致：只有云端时间戳比「本机已推送 / 刚改动」的时刻更新时才采用，
+      //    否则本机刚改的设置会被云端旧值盖掉（两端就会各显示各的）。
+      //    注意这里不补推：本机与云端内容不同时，下一次 flushDirty 会把它推上去，
+      //    并且那时用的时间戳压得过云端版本。
+      await this.mergeRemotePracticeProgress(state.settings);
+      var remoteSettingsAt = toNumber(state.settings_updated_at, 0);
+      var remoteSettingsJson = stableStringify(state.settings || {});
+      var localSettingsIntentAt = Math.max(
+        toNumber(this.meta.settingsUpdatedAt, 0),
+        toNumber(this._localSettingsTouchedAt, 0)
+      );
+      if (remoteSettingsAt > 0 &&
+          remoteSettingsAt > localSettingsIntentAt &&
+          remoteSettingsJson !== stableStringify(this.collectLocalSettings())) {
+        await this.applyRemoteSettings(state.settings);
+        this.meta.settingsUpdatedAt = remoteSettingsAt;
+      }
+      var sessionApplied = await this.applyRemoteSession(state.session, {
+        strict: true,
+        remoteUpdatedAt: toNumber(state.session_updated_at, 0)
+      });
+      if (sessionApplied) {
+        this.meta.sessionUpdatedAt = Math.max(
+          toNumber(this.meta.sessionUpdatedAt, 0),
+          toNumber(state.session_updated_at, 0)
+        );
+      }
 
       this.meta.lastSyncAt = Date.now();
       await this.saveMeta();
