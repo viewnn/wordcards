@@ -73,6 +73,13 @@
   /** 同步失败后自动重试：最大次数与首次延迟（退避：5s → 10s → 20s → 40s → 60s） */
   var RETRY_MAX_TIMES = 5;
   var RETRY_BASE_DELAY_MS = 5000;
+  /**
+   * 逻辑时间戳允许超前当前时间的上限（毫秒）。
+   * 超过它的时间戳一律视为「历史脏数据」（早期版本时钟异常 / 偏移算错留下的）：
+   * 这种戳会让这台设备在冲突判定里永远赢，从而**再也接收不到另一台设备的学习记录**
+   * （现象：另一端学到 45/100，这边刷新多少次都是 0/100）。
+   */
+  var STAMP_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
   /** 单次 RPC 上行最多多少条记录 */
   var PUSH_BATCH_SIZE = 300;
   /** 下行分页大小 */
@@ -357,6 +364,8 @@
       lastPullAt: 0,
       /** 上次「全量双向同步」完成的时间：resumeSync 用它决定回到前台走全量还是增量 */
       lastFullSyncAt: 0,
+      /** 上次同步的一句说明（例如「云端有 145 条本机词库没有」），显示在设置页 */
+      lastSyncDetail: '',
       lastPullCursor: null,
       lastPushedSettingsJson: '',
       lastPushedSessionJson: '',
@@ -781,14 +790,42 @@
    * 用途：升级到「服务端校准时钟」后，本机历史时间戳可能比校准后的时间戳更大
    * （例如本机时钟本来就快）。若不做这一步，本机的新操作会生成更小的时间戳，
    * 被自己历史推上去的云端旧记录挡住 —— 表现就是「刚点的操作没生效、状态被回滚」。
+   *
+   * 顺带做一次**脏数据修复**：明显超前当前时间的 syncUpdatedAt（见
+   * STAMP_FUTURE_TOLERANCE_MS）会被拉回该词条真实的学习时间。
+   * 这类戳的危害是「这台设备永远赢」，从而再也接收不到另一台设备的学习记录 ——
+   * 用户看到的就是「电脑端 45/100，手机端怎么刷新都是 0/100」。
    */
   CloudSyncEngine.prototype.seedLastStampFromLocal = async function () {
     var words = await this.app.db.getAllWords();
-    var maxStamp = toNumber(this.meta.lastStamp, 0);
+    var nowAligned = Date.now() + toNumber(this.meta.serverOffsetMs, 0);
+    var maxStamp = 0;
+    var fixed = [];
+
     for (var i = 0; i < words.length; i++) {
       var w = words[i];
-      var s = Math.max(toNumber(w.syncUpdatedAt, 0), toNumber(w.lastStudied, 0));
+      var stamp = toNumber(w.syncUpdatedAt, 0);
+      if (stamp > nowAligned + STAMP_FUTURE_TOLERANCE_MS) {
+        w.syncUpdatedAt = toNumber(w.lastStudied, 0);
+        fixed.push(w);
+        stamp = w.syncUpdatedAt;
+      }
+      var s = Math.max(stamp, toNumber(w.lastStudied, 0));
       if (s > maxStamp) maxStamp = s;
+    }
+
+    if (fixed.length > 0) {
+      try {
+        await this.bulkWriteWords(fixed);
+        console.info('[cloud-sync] 已修正 ' + fixed.length + ' 条超前异常的同步时间戳，之后即可正常接收云端记录');
+      } catch (error) {
+        console.warn('[cloud-sync] 修正异常时间戳失败:', error);
+      }
+    }
+
+    // 元数据里的 lastStamp 也要拉回合理范围，否则接下来生成的时间戳会继续「未来」
+    if (toNumber(this.meta.lastStamp, 0) > nowAligned + STAMP_FUTURE_TOLERANCE_MS) {
+      this.meta.lastStamp = 0;
     }
     if (maxStamp > toNumber(this.meta.lastStamp, 0)) {
       this.meta.lastStamp = maxStamp;
@@ -868,8 +905,14 @@
     var lastStudied = word.lastStudied == null ? null : toNumber(word.lastStudied, null);
     var reviewCount = Math.max(toNumber(word.reviewCount, 0), 0);
 
-    // 改动时间：优先用写入时打的时间戳，老数据退化成学习时间
-    var clientUpdatedAt = Math.max(toNumber(word.syncUpdatedAt, 0), lastStudied || 0);
+    // 改动时间：优先用写入时打的时间戳，老数据退化成学习时间。
+    // 明显超前当前时间的戳按脏数据处理（见 STAMP_FUTURE_TOLERANCE_MS）：
+    // 忽略它，避免本机拿一个「未来」的版本号永远压住另一台设备的真实记录 ——
+    // 那会导致这边再也同步不到对方的进度（一直显示 0/100）。
+    var nowAligned = Date.now() + toNumber(this.meta.serverOffsetMs, 0);
+    var stamp = toNumber(word.syncUpdatedAt, 0);
+    if (stamp > nowAligned + STAMP_FUTURE_TOLERANCE_MS) stamp = 0;
+    var clientUpdatedAt = Math.max(stamp, lastStudied || 0);
 
     var hasTrace = status !== 'new' || favorite || (lastStudied !== null && lastStudied > 0);
     if (!hasTrace) return null;
@@ -1185,6 +1228,7 @@
   CloudSyncEngine.prototype.applyRowsLocally = async function (rows) {
     var changedWords = [];
     var pending = [];
+    var corrections = 0;
 
     for (var i = 0; i < rows.length; i++) {
       var row = rows[i];
@@ -1213,6 +1257,28 @@
         if (!statusChanged && !favoriteChanged && timeChanged &&
             toNumber(word.lastStudied, 0) > toNumber(lastStudied, 0)) {
           timeChanged = false;
+          // 本机保留的是更新的一份：把它重新推回云端纠正那一行。
+          // 否则云端会一直停在旧的学习时间，另一台设备（以及以后重装的设备）
+          // 都拿不到这份今天的学习记录，表现就是「那边永远 0/100」。
+          var nowAligned = Date.now() + toNumber(this.meta.serverOffsetMs, 0);
+          var cloudStampIsDirty = clientUpdatedAt > nowAligned + STAMP_FUTURE_TOLERANCE_MS;
+          var cloudStampTooFar = clientUpdatedAt > nowAligned + 24 * 60 * 60 * 1000;
+          var newStamp = this.nextStamp();
+          // 云端那行带着「未来」的脏时间戳时，必须压过它才推得上去；
+          // 但超前超过一天就放弃压过（避免把这个未来时间戳继续放大），
+          // 本机仍然靠下面的保护保留正确数据，等真实时间追上即可
+          if (cloudStampIsDirty && !cloudStampTooFar) {
+            newStamp = Math.max(newStamp, clientUpdatedAt + 1);
+          }
+          word.syncUpdatedAt = newStamp;
+          if (newStamp > toNumber(this.meta.lastStamp, 0)) this.meta.lastStamp = newStamp;
+          var corrected = this.rowFromWord(word);
+          if (corrected) {
+            corrected.client_updated_at = word.syncUpdatedAt;
+            this.dirty.set(corrected.dict_key, corrected);
+            pending.push(word);
+            corrections++;
+          }
         }
 
         if (!statusChanged && !favoriteChanged && !timeChanged) {
@@ -1239,6 +1305,11 @@
     // 界面上正在背的卡片可能就包含这些词条，把内存里的副本一起更新，
     // 否则卡片上的收藏按钮、状态标签会显示成旧值
     this.syncInMemoryCopies(changedWords);
+    // 有需要回推纠正的行时，安排一次上行（全量同步里会立刻推，其它路径走防抖）
+    if (corrections > 0) {
+      console.info('[cloud-sync] 云端有 ' + corrections + ' 条记录的学习时间比本机旧，已安排回推纠正');
+      this.schedulePush();
+    }
     return changedWords.length;
   };
 
@@ -1924,6 +1995,29 @@
       // 8) 刷新界面（统计口径完全由词条状态实时算出，所以同步后必须重算）
       await this.refreshLocalViews(appliedCount > 0);
 
+      // 8.1) 本次合并中发现「云端那份比本机旧」而需要回推纠正的行：立刻推上去，
+      //      让云端和以后的设备都能拿到正确（更晚）的学习时间
+      if (this.dirty.size > 0) {
+        try {
+          await this.flushDirty();
+        } catch (error) {
+          console.warn('[cloud-sync] 回推纠正失败，稍后会自动重试:', error);
+        }
+      }
+
+      // 8.2) 记一条简短的同步说明：云端有记录、但本机词库里根本没有这些词条时
+      //      （两端词典版本不同），在设置页「上次同步」后面直接写出来，
+      //      否则用户只会看到「两端都显示已同步、数字却不一样」而不知道差在哪
+      var unmatchedCount = 0;
+      var engine = this;
+      remoteByKey.forEach(function (row, key) {
+        if (localMap.has(key)) return;
+        if (engine.resolveLocalWords(key).length === 0) unmatchedCount++;
+      });
+      this.meta.lastSyncDetail = unmatchedCount > 0
+        ? '云端有 ' + unmatchedCount + ' 条本机词库没有'
+        : '';
+
       // 增量拉取的游标推进到本次全量看到的最大服务端时间：否则下一次增量
       // 会把整份历史重新拉一遍（几千行），首次同步后又慢又费流量
       if (maxServerUpdatedAt > 0) {
@@ -2576,8 +2670,9 @@
 
     var lastSync = $('cloudLastSyncText');
     if (lastSync) {
+      var detail = this.meta.lastSyncDetail ? '（' + this.meta.lastSyncDetail + '）' : '';
       lastSync.textContent = this.meta.lastSyncAt
-        ? '上次同步：' + new Date(this.meta.lastSyncAt).toLocaleString('zh-CN', { hour12: false })
+        ? '上次同步：' + new Date(this.meta.lastSyncAt).toLocaleString('zh-CN', { hour12: false }) + detail
         : '尚未同步过';
     }
 
