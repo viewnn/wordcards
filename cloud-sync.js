@@ -51,8 +51,18 @@
   // ==================== 可调参数 ====================
   /** 学习动作后延迟多久上行（毫秒）：合并连续操作，避免一卡一请求 */
   var AUTO_PUSH_DEBOUNCE_MS = 2500;
-  /** 页面切回前台时，距上次拉取超过多久才真正拉取（毫秒） */
-  var FOCUS_PULL_MIN_INTERVAL_MS = 30 * 1000;
+  /**
+   * 切回前台/窗口重新获得焦点时的最小拉取间隔（毫秒）。
+   * 刻意取小值：「打开就能看到最新数据」比省这点请求重要；
+   * 同一秒内的连续 focus/visibility 抖动仍会被挡掉。
+   */
+  var FOCUS_PULL_MIN_INTERVAL_MS = 5 * 1000;
+  /**
+   * 距上次「全量同步」超过该时长时，回到前台直接做一次全量双向同步。
+   * 增量拉取虽然轻，但依赖游标；全量能顺带把设置、今日会话、练习进度一起对齐，
+   * 是「多端最终一致」的兜底。
+   */
+  var RESUME_FULL_SYNC_MIN_INTERVAL_MS = 5 * 60 * 1000;
   /**
    * 应用停留前台时，多久自动检查一次云端更新（毫秒）。
    * 用来覆盖「另一台设备一直开着不动」的场景——只靠切前台触发的话，
@@ -60,6 +70,9 @@
    * 用的是增量拉取，没有变化时服务端只返回空数组，开销很小。
    */
   var AUTO_PULL_INTERVAL_MS = 60 * 1000;
+  /** 同步失败后自动重试：最大次数与首次延迟（退避：5s → 10s → 20s → 40s → 60s） */
+  var RETRY_MAX_TIMES = 5;
+  var RETRY_BASE_DELAY_MS = 5000;
   /** 单次 RPC 上行最多多少条记录 */
   var PUSH_BATCH_SIZE = 300;
   /** 下行分页大小 */
@@ -342,6 +355,8 @@
       autoSync: CONFIG.autoSync !== false,
       lastSyncAt: 0,
       lastPullAt: 0,
+      /** 上次「全量双向同步」完成的时间：resumeSync 用它决定回到前台走全量还是增量 */
+      lastFullSyncAt: 0,
       lastPullCursor: null,
       lastPushedSettingsJson: '',
       lastPushedSessionJson: '',
@@ -478,8 +493,22 @@
     });
     this._unsubscribeAuth = authResult && authResult.data ? authResult.data.subscription : null;
 
-    var sessionResult = await this.client.auth.getSession();
+    var sessionResult = await this.client.auth.getSession().catch(function () {
+      // getSession 本身也可能因网络异常抛错：当作「暂时取不到」，走下面的刷新兜底
+      return null;
+    });
     var session = sessionResult && sessionResult.data ? sessionResult.data.session : null;
+
+    if (!session || !session.user) {
+      // 兜底再试一次显式刷新：access token 过期但 refresh token 还有效时，
+      // 这里能免去用户重新输密码。手机端长期挂在后台后重新打开时最常见。
+      try {
+        var refreshed = await withTimeout(this.client.auth.refreshSession(), AUTH_TIMEOUT_MS, 'TIMEOUT');
+        session = refreshed && refreshed.data ? refreshed.data.session : null;
+      } catch (error) {
+        session = null;
+      }
+    }
 
     if (!session || !session.user) {
       this.user = null;
@@ -532,6 +561,13 @@
         this.saveMeta().catch(function () {});
       }
       this.syncAll(event === 'SIGNED_IN' ? 'sign-in' : 'session-restore').catch(function () {});
+      return;
+    }
+
+    // token 自动续期成功（长时间挂后台后很常见）：顺手确认一次云端是否有更新，
+    // 这样「手机放了一晚再打开」也能立刻拿到电脑端最新的学习记录
+    if (event === 'TOKEN_REFRESHED') {
+      this.resumeSync('token-refreshed').catch(function () {});
     }
   };
 
@@ -550,21 +586,24 @@
       self.setStatus('offline', '当前离线，恢复网络后会自动同步');
     });
 
+    // 页面切到后台：立刻把待上行的改动推出去，避免「手机锁屏后这边的学习记录没上传」
     document.addEventListener('visibilitychange', function () {
       if (!self.isActive()) return;
-
       if (document.visibilityState === 'hidden') {
-        // 页面被切走/关闭前尽量把待上行数据推出去
+        // 关掉「自动同步」后不做任何自动上传（与设置页的说明一致）
+        if (!self.isAutoSyncOn()) return;
         self.flushDirty().catch(function () {});
         return;
       }
+      // 切回前台：先补传本机改动，再拉取云端更新（详见 resumeSync）
+      self.resumeSync('visible').catch(function () {});
+    });
 
-      // 切回前台：先补传本机改动，再拉取云端更新
-      self.flushDirty().catch(function () {});
-      var now = Date.now();
-      if (now - self.meta.lastPullAt > FOCUS_PULL_MIN_INTERVAL_MS) {
-        self.pullAndMerge().catch(function () {});
-      }
+    // 桌面端切到别的窗口再切回来（只切窗口、标签页一直可见时不会触发 visibilitychange）
+    global.addEventListener('focus', function () {
+      if (!self.isActive()) return;
+      if (document.visibilityState === 'hidden') return;
+      self.resumeSync('focus').catch(function () {});
     });
 
     // 应用一直停在前台时的兜底轮询。浏览器在后台会把定时器节流到分钟级，
@@ -573,9 +612,75 @@
     this._pullTimer = setInterval(function () {
       if (document.visibilityState !== 'visible') return;
       if (!self.isActive() || !self.isAutoSyncOn()) return;
-      if (self._syncPromise) return; // 已有同步在跑，别叠加
+      if (self._syncPromise || self._pullPromise) return; // 已有同步在跑，别叠加
       self.pullAndMerge().catch(function () {});
     }, AUTO_PULL_INTERVAL_MS);
+  };
+
+  /**
+   * 「打开 / 切回前台」时的同步入口 —— 这是多端一致性的主要保障。
+   *
+   *   1) 先把本机待上传的改动推出去（不然云端的旧记录可能先落地，让人以为没同步）；
+   *   2) 距上次**全量**同步超过 RESUME_FULL_SYNC_MIN_INTERVAL_MS（或从未同步过）
+   *      → 走一次全量双向同步：学习记录、设置、今日会话、练习进度一起收敛；
+   *   3) 否则走轻量增量拉取（节流 5 秒），频繁切换窗口时不会反复请求。
+   *
+   * 之所以不是每次都全量：几千条记录的全量拉取在弱网下要几秒；
+   * 而增量 + 5 分钟一次全量兜底，既快又能保证最终一致。
+   */
+  CloudSyncEngine.prototype.resumeSync = async function (reason) {
+    if (!this.isActive()) return false;
+    if (!this.isAutoSyncOn()) return false;
+
+    try {
+      await this.flushDirty();
+    } catch (error) {
+      // 上传失败不影响下面拉取云端最新数据
+      console.warn('[cloud-sync] 回到前台时上传失败，继续拉取云端:', error);
+    }
+
+    var now = Date.now();
+    var lastFullSync = toNumber(this.meta.lastFullSyncAt, 0);
+    if (!lastFullSync || now - lastFullSync > RESUME_FULL_SYNC_MIN_INTERVAL_MS) {
+      return this.syncAll(reason || 'resume');
+    }
+    if (now - toNumber(this.meta.lastPullAt, 0) < FOCUS_PULL_MIN_INTERVAL_MS) {
+      return false; // 刚刚拉过，别重复请求
+    }
+    return this.pullAndMerge();
+  };
+
+  /**
+   * 同步失败后的自动重试（指数退避：5s → 10s → 20s → 40s → 60s，最多 5 次）。
+   *
+   * 没有它的话，打开应用那一刻网络恰好不通（手机刚联网、隧道里、Supabase 抖动）就会
+   * 停在「同步异常」上，用户得手动点同步 —— 而这正是「打开另一端却看不到最新数据」的常见原因。
+   * 离线时不排重试，交给 online 事件。
+   */
+  CloudSyncEngine.prototype.scheduleSyncRetry = function () {
+    if (!this.isActive() || !this.isAutoSyncOn()) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+
+    this._retryCount = (this._retryCount || 0) + 1;
+    if (this._retryCount > RETRY_MAX_TIMES) return;
+
+    var delay = Math.min(60000, RETRY_BASE_DELAY_MS * Math.pow(2, this._retryCount - 1));
+    var self = this;
+    if (this._retryTimer) clearTimeout(this._retryTimer);
+    this._retryTimer = setTimeout(function () {
+      self._retryTimer = null;
+      self.syncAll('retry').catch(function () {});
+    }, delay);
+    console.info('[cloud-sync] 同步失败，' + Math.round(delay / 1000) + ' 秒后自动重试（第 ' + this._retryCount + ' 次）');
+  };
+
+  /** 同步成功：清掉重试计数与待重试定时器 */
+  CloudSyncEngine.prototype.clearSyncRetry = function () {
+    this._retryCount = 0;
+    if (this._retryTimer) {
+      clearTimeout(this._retryTimer);
+      this._retryTimer = null;
+    }
   };
 
   // ---------------------------------------------------------------- 状态判定
@@ -1577,7 +1682,11 @@
 
     var settings = this.collectLocalSettings();
     var settingsJson = stableStringify(settings);
-    if (settingsJson !== this.meta.lastPushedSettingsJson) {
+    // 本机「从没推送过设置」且「从没同步过」（例如换设备后第一次打开）时，
+    // 不要拿本地这份默认/旧设置去推 —— 那会用更新的时间戳把另一台设备刚改的设置覆盖掉。
+    // 交给紧随其后的首次全量同步判断方向：云端有就用云端的，云端没有才推本地的。
+    var settingsUntouched = !this.meta.lastPushedSettingsJson && !toNumber(this.meta.lastFullSyncAt, 0);
+    if (settingsJson !== this.meta.lastPushedSettingsJson && !settingsUntouched) {
       patch.settings = settings;
       patch.settingsUpdatedAt = this.nextStateStamp(this.meta.settingsUpdatedAt);
     }
@@ -1733,7 +1842,6 @@
         appliedCount += remoteWins;
       }
 
-      // 6) 设置：云端更新就用云端，本地更新就推上去
       // 6) 练习进度先无条件并集合并（不受设置 LWW 门控）：
       //    它是逐题累加的，必须无条件吸收云端的，才不会被本机较新的时间戳挡住
       await this.mergeRemotePracticeProgress(state.settings);
@@ -1766,7 +1874,10 @@
         if (settingsRow && settingsRow.updated_at) {
           this.observeServerTime(new Date(settingsRow.updated_at).getTime());
         }
-        if (!(settingsRow && toNumber(settingsRow.settings_updated_at, 0) > settingsStamp)) {
+        // 用内容比较判断服务端是否接受了本次推送（时间戳相等时服务端同样不更新内容）
+        var settingsAccepted = !settingsRow ||
+          stableStringify(settingsRow.settings) === stableStringify(settingsAfterApply);
+        if (settingsAccepted) {
           this.meta.settingsUpdatedAt = settingsStamp;
           this.meta.lastPushedSettingsJson = stableStringify(settingsAfterApply);
         } else {
@@ -1804,6 +1915,9 @@
       }
 
       this.meta.lastSyncAt = Date.now();
+      // 单独记「上次全量同步」：resumeSync 用它决定回到前台是全量还是增量，
+      // 而 lastSyncAt 会被增量拉取刷新，只能用于界面显示
+      this.meta.lastFullSyncAt = Date.now();
       this.meta.lastPullAt = Date.now();
       await this.saveMeta();
 
@@ -1819,22 +1933,40 @@
         summary = '已是最新';
       }
       this.setStatus('synced', summary);
+      this.clearSyncRetry();
       return true;
     } catch (error) {
       var offline = !navigator.onLine || /Failed to fetch|NetworkError|Load failed/i.test(String(error && error.message));
       this.setStatus(offline ? 'offline' : 'error', offline ? '当前离线，联网后会自动同步' : humanizeError(error));
       console.warn('[cloud-sync] 同步失败(' + (reason || 'manual') + '):', error);
+      // 打开应用那一刻网络恰好不通时，靠自动重试补上（离线交给 online 事件）
+      if (!offline) this.scheduleSyncRetry();
       throw error;
     }
   };
 
   /**
-   * 增量拉取（切回前台时用）：只取服务端 updated_at 变化过的行 + 用户状态。
+   * 增量拉取（切回前台 / 前台轮询时用）：只取服务端 updated_at 变化过的行 + 用户状态。
    * 比 syncAll 轻，适合频繁调用。
+   *
+   * 并发保护：
+   *   - 正在全量同步时直接复用它的 Promise（全量本身就包含增量要做的所有事），
+   *     避免两个流程同时写本地、互相覆盖；
+   *   - 已在增量拉取时复用同一个 Promise，避免轮询与切前台撞在一起。
    */
-  CloudSyncEngine.prototype.pullAndMerge = async function () {
-    if (!this.isActive()) return false;
+  CloudSyncEngine.prototype.pullAndMerge = function () {
+    if (!this.isActive()) return Promise.resolve(false);
+    if (this._syncPromise) return this._syncPromise;
+    if (this._pullPromise) return this._pullPromise;
 
+    var self = this;
+    this._pullPromise = this._doPullAndMerge().finally(function () {
+      self._pullPromise = null;
+    });
+    return this._pullPromise;
+  };
+
+  CloudSyncEngine.prototype._doPullAndMerge = async function () {
     try {
       // 1) 用户状态：重置信号必须最先处理，否则会把已作废的记录又拉回本地
       var state = await this.fetchUserState();
@@ -1913,10 +2045,14 @@
 
       this.meta.lastSyncAt = Date.now();
       await this.saveMeta();
+      this.clearSyncRetry();
       return true;
     } catch (error) {
       console.warn('[cloud-sync] 增量拉取失败:', error);
-      this.setStatus(navigator.onLine ? 'error' : 'offline', humanizeError(error));
+      var offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      this.setStatus(offline ? 'offline' : 'error', humanizeError(error));
+      // 增量失败同样安排一次退避重试，避免「打开时拉取失败」后再也自动不试
+      if (!offline) this.scheduleSyncRetry();
       return false;
     }
   };

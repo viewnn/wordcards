@@ -1294,27 +1294,10 @@ class VocabApp {
   }
 
   /**
-   * 本轮进度条的分母（本轮目标）。
-   *
-   * = min(每日目标, 本轮已完成的 + 队列里「今天还没学过」的剩余张数)
-   *
-   * 不直接用每日目标的原因：当前范围内的可学词条可能少于每日目标
-   * （例如 20 条短语 / 目标 100，或今天已经把范围内所有词条都学过一遍）。
-   * 此时分母跟着缩到实际可学数，于是
-   *   「进度条数字」=「今日已掌握 + 今日待复习」− 本轮起点
-   * 依旧成立，目标也能正常达成，而不是让进度条永远停在 20/100。
-   *
-   * 返回 0 表示本轮已经没有「今天还没学过」的词条了（纯复习轮）：
-   * 这时进度条显示每日目标口径、不再增长，界面会给出说明。
+   * 今日队列里（当前卡之后，含当前卡）还有多少「今天还没计入统计」的词条。
+   * 只用于判断「今天可学的词条是不是已经学完」以及完成页文案，
+   * **不参与进度条分母** —— 上方的目标数值永远只等于设置页里的每日目标。
    */
-  progressGoal() {
-    const goal = Math.max(0, Number(this.settings.dailyGoal) || 0);
-    if (goal <= 0) return 0;
-    const done = Math.max(0, Number(this.todayDoneCount) || 0);
-    return Math.min(goal, done + this.remainingFreshInQueue());
-  }
-
-  /** 今日队列里（当前卡之后，含当前卡）还有多少「今天还没计入统计」的词条 */
   remainingFreshInQueue() {
     if (!Array.isArray(this.todayWords) || this.todayWords.length === 0) return 0;
     const start = Math.max(0, Math.min(Number(this.currentCardIndex) || 0, this.todayWords.length));
@@ -2907,14 +2890,14 @@ class VocabApp {
     const restoredAllInActiveScope =
       restoredTodayWords.length > 0 && restoredTodayWords.every((w) => this.isWordInActiveScope(w));
 
-    // 只有保存的队列能完整对上库里的词条、整体属于当前范围、且长度仍等于当前队列容量时才恢复进度。
-    // 用 queueCapacity 而不是直接比每日目标：否则「词条数 < 每日目标」时队列天生短一截，
-    // 每次刷新/切页都会被判为不匹配而重新抽词，进度被清零。
+    // 只有保存的队列能完整对上库里的词条、整体属于当前范围、且长度不超过本轮容量时才恢复进度。
+    // 用「不超过」而不是「等于」：今天可学词条不足每日目标时，队列本来就会短一截
+    // （例如只补今天还没学过的词），要求相等的话每次刷新都会重抽队列、把进度丢掉。
     const shouldRestoreProgress = savedProgress && 
                                   savedProgress.todayWords && 
                                   restoredAllInActiveScope &&
                                   restoredTodayWords.length === savedProgress.todayWords.length &&
-                                  savedProgress.todayWords.length === queueCapacity &&
+                                  savedProgress.todayWords.length <= queueCapacity &&
                                   this.currentCardIndex === 0;
 
     // 保存的进度属于别的词典范围（切换过「词典导入」）或词条已不存在：
@@ -2927,6 +2910,8 @@ class VocabApp {
       // 恢复之前的学习进度，并使用数据库中的最新词条内容，避免旧快照覆盖词典更新
       this.todayWords = restoredTodayWords;
       this.currentCardIndex = savedProgress.currentCardIndex;
+      // 队列容量记成实际长度，供切页时的快照恢复判断使用
+      this._queueCapacity = this.todayWords.length;
       // 恢复出来的队列里还有没有「今天还没学过」的词条（纯复习轮时界面要给出说明）
       this._queueHasFreshWords = this.todayWords.some((w) => !this.isWordCountedToday(w));
       
@@ -3006,25 +2991,25 @@ class VocabApp {
 
     const goal = Math.max(0, Number(this.settings.dailyGoal) || 0);
     let todayWords;
-    if (this._isReviewRound) {
-      // 复习轮：availableWords 已按「最久没学」升序，先取今天还没学过的，再用今天学过的补足
+    if (untouchedWords.length === 0) {
+      // 今天该范围已经没有没学过的词条了：组一轮「纯复习」队列，保证永远有卡可背。
+      // 复习的词条今天已计入统计，所以这一轮不会让进度条和上方数字增长（界面会说明）
+      todayWords = this.settings.learnMode === 'random'
+        ? this.pickRandomSpreadByCategory(alreadyTodayWords, goal)
+        : alreadyTodayWords.slice(0, goal);
+    } else if (this._isReviewRound) {
+      // 复习轮：availableWords 已按「最久没学」升序，今天还没学过的排在前面（它们才会计入进度）
       todayWords = [...untouchedWords, ...alreadyTodayWords].slice(0, goal);
     } else if (this.settings.learnMode === 'random') {
       todayWords = this.pickRandomSpreadByCategory(untouchedWords, goal);
-      if (todayWords.length < goal) {
-        todayWords = todayWords.concat(
-          this.pickRandomSpreadByCategory(alreadyTodayWords, goal - todayWords.length)
-        );
-      }
     } else {
-      todayWords = [
-        ...orderSequential(untouchedWords),
-        ...orderSequential(alreadyTodayWords)
-      ].slice(0, goal);
+      todayWords = orderSequential(untouchedWords).slice(0, goal);
     }
-    // 队列里已经没有「今天还没学过」的词条了：接下来只能复习今天已学过的词，
-    // 进度条不会再往前涨（口径使然），提示一下，免得用户以为是卡住了
+    // 队列里已经没有「今天还没学过」的词条了：整轮都是复习，进度不会再往前涨
     this._queueHasFreshWords = untouchedWords.length > 0;
+    // 队列容量记成实际长度：刷新/切页后按它判断能否恢复这份进度
+    // （今天可学词条不足每日目标时，队列本来就会短一截）
+    this._queueCapacity = todayWords.length > 0 ? todayWords.length : this._queueCapacity;
 
     this.todayWords = todayWords;
     this.currentCardIndex = 0;
@@ -3035,7 +3020,7 @@ class VocabApp {
       this.showEmptyState();
     } else if (this.isDailyGoalReached()) {
       // 今日目标已达标：不再展示卡片（例如刷新页面后进度还在、队列是新的），
-      // 用户点【继续学习】会先重置进度，再开始新一轮
+      // 用户点【继续学习】会先把本轮起点前移，再开始新一轮
       this.showComplete();
     } else {
       this.showCard(this.currentCardIndex);
@@ -3866,10 +3851,8 @@ class VocabApp {
     // 本轮完成数 +1。掌握/陌生且该词条今天还没计入统计时算一个；「跳过」不算
     // （countsTowardProgress=false），重复学习同一词条也不算 —— 口径与今日统计一致。
     if (countsTowardProgress) this.todayDoneCount++;
-    // 队列背完、或者今日累计已经达到每日目标，都立刻收卡显示完成页。
-    // 第二个条件不可少：词条数不整除每日目标时（例如 30 条短语 / 目标 100，
-    // 第四轮学到第 10 张就满 100），队列里还剩着卡片，若不拦住就会继续展示卡片、
-    // 让用户以为「进度已满还能一直学」。
+    // 队列背完、或本轮完成数达到每日目标时，收卡显示完成页。
+    // 第二个条件不可少：队列里还剩着卡片但目标已满时若不拦住，用户会以为「进度满了还能一直学」。
     if (this.currentCardIndex >= this.todayWords.length || this.isDailyGoalReached()) {
       this.showComplete();
       this.updateProgress();
@@ -4109,20 +4092,18 @@ class VocabApp {
    * 是同一口径，因此两者永远相等（早期版本按“点过的卡片张数”算，同一词条学两次会多算，
    * 学完 100 张时上方两数之和只有 98/99）。
    *
-   * 分母是本轮目标（progressGoal）：范围内可学词条不足每日目标时自动缩小，
-   * 保证目标能达成；纯复习轮（没有今天没学过的词条）时为 0，此时按每日目标显示、进度不再增长。
+   * 分母永远是设置页里的每日目标，**不会自己变化**：
+   * 上方显示的就是「已完成 / 每日目标」，只有用户在设置页改目标时它才变
+   * （改目标会同时把本轮起点前移，进度从 0 开始）。
    */
   updateProgress() {
     const goal = Math.max(0, Number(this.settings.dailyGoal) || 0);
     const done = Math.max(0, Number(this.todayDoneCount) || 0);
-    const roundGoal = this.progressGoal();
-    // roundGoal 为 0 = 本轮没有可新学的词条（纯复习），退回每日目标口径显示
-    const displayGoal = roundGoal > 0 ? roundGoal : goal;
-    const shown = displayGoal > 0 ? Math.min(done, displayGoal) : done;
-    const progress = displayGoal > 0 ? Math.round((shown / displayGoal) * 100) : 0;
+    const shown = goal > 0 ? Math.min(done, goal) : done;
+    const progress = goal > 0 ? Math.round((shown / goal) * 100) : 0;
 
     document.getElementById('progressFill').style.width = `${progress}%`;
-    document.getElementById('progressText').textContent = `${shown}/${displayGoal}`;
+    document.getElementById('progressText').textContent = `${shown}/${goal}`;
 
     // 今日统计 = 今天学习且当前状态为掌握/待复习的词条数
     document.getElementById('statMastered').textContent = this.todayStats.mastered;
@@ -4199,18 +4180,16 @@ class VocabApp {
   }
 
   /**
-   * 本轮目标是否已达成（用于判断「该收卡显示完成页了」）。
+   * 今日目标是否已达成（进度条走到 100%）。
    *
-   * 判定用本轮目标 progressGoal()，而不是每日目标本身：
-   *   - 可学词条充足时两者相同（例如目标 100、队列里 100 个新词）；
-   *   - 可学词条不足时（20 条短语 / 目标 100）本轮目标就是 20，
-   *     学完 20 张即算完成，不会让进度条永远停在 20/100；
-   *   - 纯复习轮（今天没有没学过的词条）返回 0，此时不算达成，用户仍可继续复习。
+   * 判定就是「本轮完成数 ≥ 设置页里的每日目标」—— 分母与它同源，
+   * 目标数值只在设置页改动时才变。
+   * 若今天可学的词条已经学完但还没到目标，进度条就停在真实数字上（不虚增、也不改分母），
+   * 完成页会写明「今日可学词条已全部学完」。
    */
   isDailyGoalReached() {
-    const roundGoal = this.progressGoal();
-    if (roundGoal <= 0) return false;
-    return Math.max(0, Number(this.todayDoneCount) || 0) >= roundGoal;
+    const goal = Math.max(0, Number(this.settings.dailyGoal) || 0);
+    return goal > 0 && Math.max(0, Number(this.todayDoneCount) || 0) >= goal;
   }
 
   // 显示完成页面
@@ -4224,19 +4203,21 @@ class VocabApp {
     // document.getElementById('completeMastered').textContent = this.todayStats.mastered;
     // document.getElementById('completeReview').textContent = this.todayStats.review;
 
-    // 「今日目标已完成」只在真正做到每日目标时才说；可学词条不足目标时
-    // 说的是「本轮已完成（x/y）」—— y 是本轮实际可学数，与进度条一致，
-    // 不会出现「进度条显示 20/20、文案却说 20/100」这种自相矛盾
+    // 文案：
+    //   - 真正达到每日目标 → 「今日学习目标已完成」；
+    //   - 今天可学的词条已学完但没到目标（例如范围内只剩 20 条）→ 说明原因，
+    //     并且不写成分数，免得看起来像目标被改小了（目标始终是设置页里的那个数）。
     const goal = Math.max(0, Number(this.settings.dailyGoal) || 0);
     const done = Math.max(0, Number(this.todayDoneCount) || 0);
-    const roundGoal = this.progressGoal();
-    const displayGoal = roundGoal > 0 ? roundGoal : goal;
-    const shown = displayGoal > 0 ? Math.min(done, displayGoal) : done;
     const subtitle = document.querySelector('.complete-subtitle');
     if (subtitle) {
-      subtitle.textContent = goal > 0 && done >= goal
-        ? '今日学习目标已完成'
-        : `本轮已完成（${shown}/${displayGoal}）`;
+      if (goal > 0 && done >= goal) {
+        subtitle.textContent = '今日学习目标已完成';
+      } else if (this.remainingFreshInQueue() === 0) {
+        subtitle.textContent = `今日可学词条已全部学完（已完成 ${Math.min(done, goal)}）`;
+      } else {
+        subtitle.textContent = `本轮已完成（${Math.min(done, goal)}/${goal}）`;
+      }
     }
   }
 
@@ -4252,14 +4233,13 @@ class VocabApp {
   /**
    * 继续学习 / 再来一轮。
    *
-   * 关键点：只有「本轮已经达到每日目标」时才把本轮起点前移（进度归零），否则原样保留。
-   * 进度条 = 今日已计入统计的词条数 − 本轮起点，因此：
-   *   - 达标后点【继续学习】→ 起点前移到当前今日词条数 → 进度从 0 重新开始；
-   *   - 没达标（今日还能学新词条）→ 起点不动 → 进度接着往上走。
+   * 关键点：只有「本轮完成数已经达到每日目标」时才把本轮起点前移（进度归零），否则原样保留 ——
+   * 进度条 = 今日已计入统计的词条数 − 本轮起点，所以没达标时它会接着往上走；
+   * 「今天可学词条已学完但没到目标」的情况不清零，进度数字保持稳定，完成页会说明原因。
    */
   async restartLearn() {
     if (this.isDailyGoalReached()) {
-      // 本轮目标已达成：起点前移，进度归零，开始新的一轮
+      // 目标已达成：起点前移，进度归零，开始新的一轮（分母仍是设置页里的每日目标）
       await this.resetTodayDoneCount();
     }
     // 重置当前卡片索引为0
