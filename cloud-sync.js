@@ -2076,13 +2076,16 @@
   // ---------------------------------------------------------------- 同步诊断
 
   /**
-   * 同步诊断：把云端学习记录与本机逐条对比，回答「为什么两端的数字不一样」。
+   * 同步诊断（只在浏览器控制台使用，界面上没有入口）：
+   * 把云端学习记录与本机逐条对比，回答「为什么两端的数字不一样」。
    *
    * 结果分三类（每类都带具体词条，能直接定位到是哪个词）：
    *   1) 仅本机有 —— 这些记录没上传成功（未登录时学的、或上次推送失败），点一次「同步」即可补上；
    *   2) 仅云端有 —— 本机词典里没有这个词条。词典（dict.xlsx）本身不参与同步，
    *      两端词条集合不同时，统计只会算本机存在的词条，累计数字必然不同；
    *   3) 状态/时间不同 —— 同一 dict_key 两端不一致，点一次「同步」就会按时间戳收敛。
+   *
+   * 用法：await CloudSyncDebug.diagnose() / CloudSyncDebug.printDiagnosis(结果)
    */
   CloudSyncEngine.prototype.diagnose = async function () {
     if (!this.isActive()) return null;
@@ -2185,39 +2188,6 @@
     lines.push('  统计只算本机存在的词条。请在两端确认「词库更新」时间一致（更新词典后各刷新一次页面）。');
     lines.push('* 「仅本机有」点一次「同步」即可补传；「状态/时间不一致」也会在同步后自动收敛。');
     console.log(lines.join('\n'));
-  };
-
-  /** 设置页「诊断」按钮：跑一次诊断，弹摘要，详细清单打到控制台 */
-  CloudSyncEngine.prototype.runDiagnosis = async function () {
-    var btn = document.getElementById('cloudSyncDiagBtn');
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = '诊断中…';
-    }
-    try {
-      var result = await this.diagnose();
-      if (!result) {
-        this.app.showToast('未登录云同步，无法诊断');
-        return null;
-      }
-      this.printDiagnosis(result);
-      var localTotal = result.local.total.mastered + result.local.total.review;
-      this.app.showToast(
-        '本机 ' + localTotal + ' 条 / 云端 ' + result.cloud.rows + ' 条；' +
-        '仅本机 ' + result.onlyLocal.length + '、仅云端 ' + result.onlyRemote.length +
-        '、状态差异 ' + result.differing.length + '（详情见控制台）'
-      );
-      return result;
-    } catch (error) {
-      console.warn('[cloud-sync] 诊断失败:', error);
-      this.app.showToast('诊断失败：' + humanizeError(error));
-      return null;
-    } finally {
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = '诊断';
-      }
-    }
   };
 
   /**
@@ -2338,16 +2308,6 @@
         self.saveMeta().catch(function () {});
         self.app.showToast(self.meta.autoSync ? '已开启自动同步' : '已关闭自动同步（仍可手动同步）');
         if (self.meta.autoSync) self.schedulePush();
-      });
-    }
-
-    // 「同步诊断」：对比本机与云端的记录，列出不一致的条目（详情输出到控制台）
-    var diagBtn = $('cloudSyncDiagBtn');
-    if (diagBtn) {
-      diagBtn.addEventListener('click', function () {
-        self.runDiagnosis().catch(function (error) {
-          console.warn('[cloud-sync] 诊断异常:', error);
-        });
       });
     }
 

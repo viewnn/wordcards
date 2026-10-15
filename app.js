@@ -499,6 +499,9 @@ class VocabApp {
       // 先导入词典（字+短语全量常驻并标注分类），再加载按分类归档的统计，
       // 保证首次升级时迁移能按现有词条分类拆分历史累计记录
       await this.autoLoadDict();
+      // 给旧数据里的收藏补上「收藏时间」—— 没有它收藏列表只能退化成按学习时间排，
+      // 看起来就是「顺序乱的」，而用户期望的是最近收藏的排在最上面
+      await this.backfillFavoriteAt();
       await this.loadTodayStats();
       // 恢复「今日累计完成张数」：进度条按这个数走，跨天自动归零
       await this.loadTodayDoneCount();
@@ -2698,20 +2701,24 @@ class VocabApp {
         this.syncTodayDoneFromStats();
         const emptyState = document.getElementById('learnEmptyState');
         if (emptyState) emptyState.style.display = 'none';
-        
-        // 检查是否已经完成所有单词学习（或今日目标已达标：达标后也不再展示卡片）
-        if (this.currentCardIndex >= this.todayWords.length || this.isDailyGoalReached()) {
-          // 显示完成页面
+
+        // 与页面加载同一套规则：【继续学习】只在「今日目标已完成」时出现；
+        // 队列已背完但没达标时直接重抽一轮，不要停在完成页误导用户
+        if (this.isDailyGoalReached()) {
           this.showComplete();
+          this.updateProgress();
+        } else if (this.currentCardIndex >= this.todayWords.length) {
+          this._learnSessionSnapshot = null;
+          this.prepareLearnSession().catch((error) => {
+            console.error('[learn] 重建今日学习队列失败:', error);
+          });
         } else {
-          // 继续显示当前卡片
           this.showCard(this.currentCardIndex);
           document.querySelector('.card-stack').style.display = 'flex';
           document.querySelector('.complete-container').style.display = 'none';
           this.schedulePhoneticReadAfterCardSwitch();
+          this.updateProgress();
         }
-        
-        this.updateProgress();
       } else {
         // 重建队列是异步的，这里兜住异常，避免个别统计/渲染失败变成未捕获的 Promise 异常
         this.prepareLearnSession().catch((error) => {
@@ -2946,32 +2953,39 @@ class VocabApp {
       this._queueCapacity = this.todayWords.length;
       // 恢复出来的队列里还有没有「今天还没学过」的词条（纯复习轮时界面要给出说明）
       this._queueHasFreshWords = this.todayWords.some((w) => !this.isWordCountedToday(w));
-      
-      // 更新统计数据
-      this.todayStats.total = this.todayWords.length;
-      await this.db.setSetting('todayStats', this.todayStats);
-      
-      if (this.todayWords.length > 0) {
-        const emptyState = document.getElementById('learnEmptyState');
-        if (emptyState) emptyState.style.display = 'none';
-        
-        // 检查是否已经完成所有单词学习（或今日目标已达标：达标后也不再展示卡片）
-        if (this.currentCardIndex >= this.todayWords.length || this.isDailyGoalReached()) {
-          // 显示完成页面
-          this.showComplete();
-        } else {
-          // 继续显示当前卡片
-          this.showCard(this.currentCardIndex);
-          document.querySelector('.card-stack').style.display = 'flex';
-          document.querySelector('.complete-container').style.display = 'none';
-        }
-      } else {
-        this.showEmptyState();
+
+      const emptyState = document.getElementById('learnEmptyState');
+      if (emptyState) emptyState.style.display = 'none';
+
+      // 【继续学习】按钮只在「今日目标已完成、且用户还没开始新一轮」时出现：
+      //   达标 → 完成页 + 继续学习（用户点它才会开始新一轮）；
+      //   未达标 → 不显示完成页，哪怕队列已经背完也直接重抽一轮继续学，
+      //            避免用户以为「学完了」而误点【继续学习】。
+      if (this.isDailyGoalReached()) {
+        this.todayStats.total = this.todayWords.length;
+        await this.db.setSetting('todayStats', this.todayStats);
+        this.showComplete();
+        this.updateProgress();
+        this.refreshGoalSliderLockedState();
+        return;
       }
-      
-      this.updateProgress();
-      this.refreshGoalSliderLockedState();
-      return;
+
+      if (this.currentCardIndex < this.todayWords.length) {
+        this.todayStats.total = this.todayWords.length;
+        await this.db.setSetting('todayStats', this.todayStats);
+        this.showCard(this.currentCardIndex);
+        document.querySelector('.card-stack').style.display = 'flex';
+        document.querySelector('.complete-container').style.display = 'none';
+        this.updateProgress();
+        this.refreshGoalSliderLockedState();
+        return;
+      }
+
+      // 队列已背完、但今日目标还没达成：丢弃这份收尾的进度，落到下面重新抽词
+      this.todayWords = [];
+      this.currentCardIndex = 0;
+      this._learnSessionSnapshot = null;
+      await this.db.setSetting('learnProgress', null);
     }
 
     // 根据重复频率筛选单词
@@ -3659,10 +3673,40 @@ class VocabApp {
     }
   }
   
+  /**
+   * 给旧数据的收藏补上「收藏时间」(favoriteAt)。
+   *
+   * 收藏列表按 favoriteAt 倒序（最近收藏的在最上面）；旧版本没有这个字段，
+   * 只能退化成按学习时间排，列表看起来就是乱的。
+   * 这里用「最近学习时间 → 本机写入时间 → 词条创建时间」依次兜底，
+   * favoriteAt 只存在本机（不上云），所以用 sync:false 写库、不触发上传。
+   */
+  async backfillFavoriteAt() {
+    let words;
+    try {
+      words = await this.db.getAllWords();
+    } catch (error) {
+      return 0;
+    }
+    let updated = 0;
+    for (const word of words) {
+      if (!word.favorite || Number(word.favoriteAt)) continue;
+      const fallback = Number(word.lastStudied) || Number(word.syncUpdatedAt) ||
+        (word.createdAt ? new Date(word.createdAt).getTime() : 0) || 0;
+      word.favoriteAt = fallback;
+      await this.db.updateWord(word, { sync: false });
+      updated++;
+    }
+    if (updated > 0) {
+      console.info(`[收藏] 已为 ${updated} 条旧收藏补上收藏时间，收藏列表按最近收藏排序`);
+    }
+    return updated;
+  }
+
   // 切换收藏状态
   async toggleFavorite(wordId) {
     let word;
-    
+
     if (wordId) {
       // 根据id查找单词
       const words = await this.db.getAllWords();
