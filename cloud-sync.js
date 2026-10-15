@@ -1205,6 +1205,16 @@
           lastStudied !== null && toNumber(word.lastStudied, 0) !== lastStudied;
         var stampChanged = toNumber(word.syncUpdatedAt, 0) < clientUpdatedAt;
 
+        // 状态与收藏都一致、只有学习时间不同时，保留较晚的那个。
+        //
+        // 「学习时间倒退」几乎总是另一端用旧记录覆盖了新记录（例如词典更新时误盖了时间戳），
+        // 而真正的「清除记录」会同时把状态改回 new，不会被这里挡住；
+        // 不做这个保护的话，就会出现「手机上学到 12/100，重新打开变回 0/100」。
+        if (!statusChanged && !favoriteChanged && timeChanged &&
+            toNumber(word.lastStudied, 0) > toNumber(lastStudied, 0)) {
+          timeChanged = false;
+        }
+
         if (!statusChanged && !favoriteChanged && !timeChanged) {
           // 内容一致，只把时间戳补齐，避免下次同步又判定为「本地待确认」
           if (stampChanged) {
@@ -1249,7 +1259,7 @@
     });
   };
 
-  /** 同步 app 内存中「今日队列 / 会话快照」里对应词条的状态 */
+  /** 同步 app 内存中「今日队列 / 会话快照 / 跳过补牌缓存」里对应词条的状态 */
   CloudSyncEngine.prototype.syncInMemoryCopies = function (words) {
     if (!words || words.length === 0) return;
     var byId = new Map();
@@ -1258,6 +1268,11 @@
     var lists = [this.app.todayWords];
     if (this.app._learnSessionSnapshot && this.app._learnSessionSnapshot.todayWords) {
       lists.push(this.app._learnSessionSnapshot.todayWords);
+    }
+    // 「跳过」的补牌候选来自 _scopePoolCache：不同步的话，补进来的词条会带着旧状态，
+    // 之后一写库就把刚同步下来的收藏/状态覆盖回旧值
+    if (Array.isArray(this.app._scopePoolCache)) {
+      lists.push(this.app._scopePoolCache);
     }
 
     for (var l = 0; l < lists.length; l++) {
@@ -1270,6 +1285,7 @@
         list[k].favorite = fresh.favorite;
         list[k].lastStudied = fresh.lastStudied;
         list[k].syncUpdatedAt = fresh.syncUpdatedAt;
+        list[k].favoriteAt = fresh.favoriteAt;
       }
     }
   };

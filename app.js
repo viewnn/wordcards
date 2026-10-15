@@ -186,13 +186,36 @@ class VocabDB {
     });
   }
 
-  /** 按 id 整体覆盖更新一条词条（put：有则更新、无则新增） */
-  async updateWord(word) {
-    // 【云同步钩子 1】写库之前先让 CloudSync 给词条盖上变更时间戳（syncUpdatedAt），
-    // 并记入待上传队列。时间戳必须跟着词条一起落库，否则刷新页面后
-    // 就无法判断「本地改动」和「云端改动」谁更新。
-    // 未登录 / 未配置 Supabase 时 CloudSync.stampWord 立即返回，行为与改造前完全一致。
-    window.CloudSync?.stampWord?.(word);
+  /**
+   * 按 id 整体覆盖更新一条词条（put：有则更新、无则新增）。
+   *
+   * 【云同步钩子 1】只有「学习状态真的变了」（status / favorite / lastStudied 任一变化）
+   * 才让 CloudSync 盖上变更时间戳并记入上行队列。
+   *
+   * 这一点非常关键：像「词典纠错 / 重新导入词典」这类**只改词典字段**的写入，
+   * 旧实现也会顺手盖一个「现在」的时间戳，于是这些词条在本机与云端的冲突判定里
+   * 变成「最新版本」，把它们**本机较旧的学习状态**（甚至是没学过）推上云，
+   * 覆盖掉另一台设备刚学的记录 —— 现象就是「手机上学到 12/100，重开之后变回 0/100」。
+   *
+   * options.sync === false 时完全不参与云同步（例如批量导入词条内容）。
+   *
+   * 未登录 / 未配置 Supabase 时 CloudSync.stampWord 立即返回，行为与改造前完全一致。
+   */
+  async updateWord(word, options = {}) {
+    if (options.sync !== false) {
+      let learningChanged = true;
+      try {
+        const prev = await this.getWord(word.id);
+        learningChanged = !prev ||
+          (prev.status || 'new') !== (word.status || 'new') ||
+          Boolean(prev.favorite) !== Boolean(word.favorite) ||
+          Number(prev.lastStudied || 0) !== Number(word.lastStudied || 0);
+      } catch (error) {
+        // 读不到旧值就按原来的行为走：宁可多推一次，也不能漏掉学习记录
+        learningChanged = true;
+      }
+      if (learningChanged) window.CloudSync?.stampWord?.(word);
+    }
 
     return new Promise((resolve, reject) => {
       const transaction = this.db.transaction(['words'], 'readwrite');
@@ -751,7 +774,9 @@ class VocabApp {
 
       if (updateWords.length > 0) {
         for (const w of updateWords) {
-          await this.db.updateWord(w);
+          // sync: false —— 这里只是在同步词典内容（音标/释义/分类等），
+          // 不能给词条盖变更时间戳，否则会把本机较旧的学习状态当成「最新」推上云
+          await this.db.updateWord(w, { sync: false });
         }
         console.log(`更新了 ${updateWords.length} 个单词的字段/分类标注`);
       }
@@ -3650,16 +3675,26 @@ class VocabApp {
     }
     
     word.favorite = !word.favorite;
-    await this.db.updateWord(word);
-
-    this.todayWords.forEach((w) => {
-      if (w.id === word.id) w.favorite = word.favorite;
-    });
-    if (this._learnSessionSnapshot?.todayWords) {
-      this._learnSessionSnapshot.todayWords.forEach((w) => {
-        if (w.id === word.id) w.favorite = word.favorite;
-      });
+    if (word.favorite) {
+      // 记下收藏时间：收藏列表按它倒序，刚收藏的词立刻排在最上面。
+      // 不能用 lastStudied 排序 —— 刚收藏但很久没学过的词会沉到列表末尾，
+      // 看起来就像「收藏没生效 / 跳过后收藏丢了」。
+      word.favoriteAt = this.nowMs();
+    } else {
+      delete word.favoriteAt;
     }
+
+    try {
+      await this.db.updateWord(word);
+    } catch (error) {
+      console.error('保存收藏状态失败:', error);
+      word.favorite = !word.favorite; // 回滚内存状态，避免界面与库不一致
+      this.showToast('收藏保存失败，请重试');
+      return;
+    }
+
+    // 同步到内存中的所有副本（今日队列 / 会话快照 / 跳过补牌缓存 / 同词分组）
+    this.syncWordCopies(word);
 
     const shouldRefreshFavoriteUi =
       !wordId ||
@@ -4568,27 +4603,33 @@ class VocabApp {
       word.status = status;
       word.lastStudied = studiedAt;
       await this.db.updateWord(word);
-      this.syncMemoryWordCopy(word);
+      this.syncWordCopies(word);
       updated++;
     }
     return updated;
   }
 
-  /** 把某个词条的最新状态同步到内存中的今日队列 / 会话快照（避免卡片显示旧状态） */
-  syncMemoryWordCopy(word) {
+  /** 把某个词条的最新状态同步到内存中的今日队列 / 会话快照 / 补牌缓存 / 同词分组 */
+  syncWordCopies(word) {
     if (!word) return;
     const lists = [this.todayWords];
     if (this._learnSessionSnapshot && this._learnSessionSnapshot.todayWords) {
       lists.push(this._learnSessionSnapshot.todayWords);
     }
+    // 「跳过」的补牌候选来自这份快照：不同步的话，补进来的词条会带着旧收藏状态，
+    // 之后一旦写库就会把用户刚收藏的状态覆盖回去
+    if (Array.isArray(this._scopePoolCache)) lists.push(this._scopePoolCache);
+    const group = this._dictKeyIndex ? this._dictKeyIndex.get(this.dictKeyOf(word)) : null;
+    if (Array.isArray(group)) lists.push(group);
+
     for (const list of lists) {
       if (!Array.isArray(list)) continue;
       for (const item of list) {
-        if (item && item.id === word.id) {
-          item.status = word.status;
-          item.lastStudied = word.lastStudied;
-          item.favorite = word.favorite;
-        }
+        if (!item || item.id !== word.id) continue;
+        item.favorite = word.favorite;
+        item.favoriteAt = word.favoriteAt;
+        item.status = word.status;
+        item.lastStudied = word.lastStudied;
       }
     }
   }
@@ -5144,6 +5185,42 @@ class VocabApp {
     return words;
   }
 
+  /**
+   * 词库列表的排序。
+   *
+   * 「待复习 / 已掌握 / 收藏」按时间倒序（最近的在最上面）；
+   * 「全部 / 新词」保持原来「同分类的词连续排列」的顺序，不改变用户熟悉的样子。
+   *
+   * 收藏用的是**收藏时间**（favoriteAt）：刚在学习页点了收藏的词要立刻出现在收藏列表顶端。
+   * 若沿用学习时间排序，刚收藏但很久没学过（甚至从没学过，时间为 0）的词会沉到列表最末尾，
+   * 看起来就像「收藏没生效」或「跳过之后收藏丢了」。
+   */
+  orderLibraryWords(words, effectiveStatus) {
+    const TIME_SORTED_TABS = ['review', 'mastered', 'favorite'];
+    if (!TIME_SORTED_TABS.includes(effectiveStatus)) {
+      const grouped = new Map();
+      words.forEach((word) => {
+        const cat = word.category || '未分类';
+        if (!grouped.has(cat)) grouped.set(cat, []);
+        grouped.get(cat).push(word);
+      });
+      const ordered = [];
+      grouped.forEach((list) => { ordered.push(...list); });
+      return ordered;
+    }
+
+    const timeOf = (w) => effectiveStatus === 'favorite'
+      ? (Number(w.favoriteAt) || Number(w.lastStudied) || 0)
+      : (Number(w.lastStudied) || 0);
+
+    return words.slice().sort((a, b) => {
+      const ta = timeOf(a);
+      const tb = timeOf(b);
+      if (tb !== ta) return tb - ta;                      // 最近的在前
+      return (Number(a.id) || 0) - (Number(b.id) || 0);   // 时间相同按 id 稳定排序
+    });
+  }
+
   async renderLibrary() {
     // 先刷新顶部范围统计行（数量可能因词典范围切换/词条状态变更而变）
     await this.updateDictTypeSelectLabels();
@@ -5180,32 +5257,12 @@ class VocabApp {
 
     this._librarySpeakWordsById = new Map(words.map((w) => [w.id, w]));
 
-    // ---- 决定列表顺序 ----
-    // 「待复习 / 已掌握 / 收藏」按最近学习时间倒序，最近学过的排最上面；
-    // 「全部 / 新词」保持原来「同分类的词连续排列」的顺序，不改变用户熟悉的样子。
+    // ---- 决定列表顺序 ----（规则见 orderLibraryWords）
     const effectiveStatus = this._libraryTodayOnly
       ? (this._libraryTodayKind || this.filterStatus)
       : this.filterStatus;
-    const TIME_SORTED_TABS = ['review', 'mastered', 'favorite'];
 
-    let orderedWords;
-    if (TIME_SORTED_TABS.includes(effectiveStatus)) {
-      orderedWords = words.slice().sort((a, b) => {
-        const ta = Number(a.lastStudied) || 0;
-        const tb = Number(b.lastStudied) || 0;
-        if (tb !== ta) return tb - ta;                      // 最近学过的在前
-        return (Number(a.id) || 0) - (Number(b.id) || 0);   // 时间相同按 id 稳定排序
-      });
-    } else {
-      const grouped = new Map();
-      words.forEach((word) => {
-        const cat = word.category || '未分类';
-        if (!grouped.has(cat)) grouped.set(cat, []);
-        grouped.get(cat).push(word);
-      });
-      orderedWords = [];
-      grouped.forEach((list) => { orderedWords.push(...list); });
-    }
+    const orderedWords = this.orderLibraryWords(words, effectiveStatus);
     
     // 每个分类的小标题（原来的「aa (12)」）已取消，数量改到分类下拉选项里显示
     // 「显示释义」关闭时，卡片上只保留单词本身（单词下方那行释义不渲染）；
