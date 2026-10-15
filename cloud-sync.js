@@ -500,21 +500,14 @@
     });
     this._unsubscribeAuth = authResult && authResult.data ? authResult.data.subscription : null;
 
-    var sessionResult = await this.client.auth.getSession().catch(function () {
-      // getSession 本身也可能因网络异常抛错：当作「暂时取不到」，走下面的刷新兜底
-      return null;
-    });
-    var session = sessionResult && sessionResult.data ? sessionResult.data.session : null;
+    var session = await this.readSessionOnce();
 
     if (!session || !session.user) {
-      // 兜底再试一次显式刷新：access token 过期但 refresh token 还有效时，
-      // 这里能免去用户重新输密码。手机端长期挂在后台后重新打开时最常见。
-      try {
-        var refreshed = await withTimeout(this.client.auth.refreshSession(), AUTH_TIMEOUT_MS, 'TIMEOUT');
-        session = refreshed && refreshed.data ? refreshed.data.session : null;
-      } catch (error) {
-        session = null;
-      }
+      // token 正在后台刷新时，getSession 可能**短暂**返回空。若在这里直接判成「未登录」，
+      // 用户看到的就是「第一次打开停在旧数据 / 不显示已登录，刷新一次才正常」。
+      // 稍等一下再取一次，能挡掉大部分这类时序问题。
+      await new Promise(function (resolve) { setTimeout(resolve, 800); });
+      session = await this.readSessionOnce();
     }
 
     if (!session || !session.user) {
@@ -526,6 +519,26 @@
     this.user = session.user;
     this.setStatus('idle', '等待同步');
     await this.syncAll('bootstrap');
+  };
+
+  /**
+   * 取一次登录会话：先 getSession，取不到再显式 refreshSession 兜底
+   * （access token 过期但 refresh token 还有效时，能免去重新输密码）。
+   */
+  CloudSyncEngine.prototype.readSessionOnce = async function () {
+    var result = await this.client.auth.getSession().catch(function () {
+      // getSession 本身也可能因网络异常抛错：当作「暂时取不到」，走下面的刷新兜底
+      return null;
+    });
+    var session = result && result.data ? result.data.session : null;
+    if (session && session.user) return session;
+
+    try {
+      var refreshed = await withTimeout(this.client.auth.refreshSession(), AUTH_TIMEOUT_MS, 'TIMEOUT');
+      return refreshed && refreshed.data ? refreshed.data.session : null;
+    } catch (error) {
+      return null;
+    }
   };
 
   /** 登录态变化处理 */
@@ -612,6 +625,19 @@
       if (document.visibilityState === 'hidden') return;
       self.resumeSync('focus').catch(function () {});
     });
+
+    // 窗口 load 之后再补一次同步：兜住「attach 那一刻网络 / 登录态 / 本地库还没完全就绪」
+    // 的情况，避免第一次打开停在旧数据上、要再刷新一次才同步过来。
+    // 与启动时的 bootstrap 同步共用同一个 Promise，不会重复请求。
+    var kickAfterLoad = function () {
+      if (!self.isActive()) return;
+      self.resumeSync('window-load').catch(function () {});
+    };
+    if (document.readyState === 'complete') {
+      setTimeout(kickAfterLoad, 0);
+    } else {
+      global.addEventListener('load', kickAfterLoad);
+    }
 
     // 应用一直停在前台时的兜底轮询。浏览器在后台会把定时器节流到分钟级，
     // 所以这里再显式判断一次可见性，避免在后台空跑。
