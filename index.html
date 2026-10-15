@@ -467,7 +467,7 @@
             <!-- 情况一：还没在 supabase-config.js 里填地址和 key（默认显示，JS 起来后按真实状态切换） -->
             <div class="cloud-config-missing" id="cloudConfigMissing">
               <p class="cloud-setup-title" id="cloudConfigMissingText">云同步尚未启用</p>
-              <p class="cloud-setup-desc">启用后，手机和电脑登录同一个邮箱即可共用学习进度、收藏和设置。</p>
+              <p class="cloud-setup-desc">登录后，同个邮箱不同终端可共用学习进度、设置等</p>
               <!-- 此处注销了登录提示：请勿删除 -->
               <!-- <ol class="cloud-setup-steps">
                 <li>在 <a href="https://supabase.com" target="_blank" rel="noopener noreferrer">supabase.com</a>
@@ -475,8 +475,8 @@
                 <li>进项目的 <strong>SQL Editor</strong>，执行本目录下的 <code>supabase/schema.sql</code></li>
                 <li>把项目的 <strong>Project URL</strong> 和 <strong>anon key</strong> 填进
                     <code>supabase-config.js</code> 的 <code>url</code> 与 <code>anonKey</code></li>
-              </ol> -->
-              <p class="cloud-setup-note">填好后刷新页面，进行「登录」（账号在Supabase后台添加）</p>
+              </ol> 
+              <p class="cloud-setup-note">填好后刷新页面，进行「登录」（账号在Supabase后台添加）</p> -->
             </div>
 
             <!-- 情况二：已配置但未登录 -->
@@ -484,7 +484,7 @@
               <div class="setting-item">
                 <div class="setting-info">
                   <h4>同步记录</h4>
-                  <p>多台设备间共用一份进度、收藏与设置</p>
+                  <p>多台设备间共用一份进度、设置等</p>
                 </div>
                 <button class="cloud-action-btn" id="cloudSignInBtn" type="button">登录</button>
               </div>  
