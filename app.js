@@ -435,6 +435,11 @@ class VocabApp {
     this._practiceSolvedValue = '';
     /** 练习进度索引 { word:Set, phrase:Set }，与 settings.practiceProgress 保持同步，便于 O(1) 查询 */
     this._practiceDone = { word: new Set(), phrase: new Set() };
+    /**
+     * 「dict_key → 同一个词的全部词条」索引（refreshStatusCounts 时重建）。
+     * 用于让同音同字的多条词条（义项）学习状态保持一致 —— 云端一行 dict_key 代表整组。
+     */
+    this._dictKeyIndex = null;
     /** 当前练习范围内「可练习词条」的总数（进度条分母） */
     this._practiceScopeTotal = 0;
     /** 手机端软键盘是否处于弹出状态（由 initKeyboardViewport 维护，配合 body.keyboard-open） */
@@ -1245,6 +1250,8 @@ class VocabApp {
     const run = async () => {
       const allWords = await this.db.getAllWords();
       const scoped = allWords.filter((w) => this.isWordInActiveScope(w));
+      // 顺手重建「同一个词」的分组索引，供学习动作把状态同步给同词的其它义项
+      this.rebuildDictKeyIndex(allWords);
       // 「今天」的判断与词条 lastStudied 用同一时间基准（同步可用时是服务端校准时间）
       const now = new Date(this.nowMs());
       const today = this._emptyScopeStats();
@@ -3809,6 +3816,9 @@ class VocabApp {
   async _persistStudyAction(word) {
     if (!word) return;
     await this.db.updateWord(word);
+    // 同一个词（分类+词汇+音标相同）的词条可能有多条：状态必须整组一致，
+    // 否则云端那一行只会代表其中一条，另一条的学习记录同步不出去、两端统计对不上
+    await this.applyStatusToWordGroup(word, word.status, word.lastStudied);
     // 保存学习进度
     await this.saveLearnProgress();
     // 按最新词条状态重算今日/累计统计（含学习页与词库页显示）
@@ -4500,6 +4510,87 @@ class VocabApp {
     const text = norm(word.word);
     if (!text) return '';
     return `${this.practiceScopeKeyOf(word)}|${text}|${norm(word.phonetic)}`;
+  }
+
+  /** 词条的跨设备标识（与云同步的 dict_key、练习进度用的是同一套规则） */
+  dictKeyOf(word) {
+    return this.practiceDictKey(word);
+  }
+
+  /**
+   * 重建「dict_key → 同一个词的全部词条」索引。
+   *
+   * 词典里可能存在「分类 + 词汇 + 音标」完全相同的多条词条（同音同字的义项）。
+   * 云端一行 dict_key 代表整组，所以组内的学习状态必须保持一致，否则：
+   *   本机组内一条 mastered、一条 review → 上行只会推其中一条 →
+   *   另一条永远同步不出去 → 两端的累计统计差出几个。
+   * 在 refreshStatusCounts()（每次学习动作后都会跑）里顺手重建，成本可忽略。
+   */
+  rebuildDictKeyIndex(words) {
+    const list = Array.isArray(words) ? words : [];
+    const map = new Map();
+    for (const w of list) {
+      const key = this.dictKeyOf(w);
+      if (!key) continue;
+      let group = map.get(key);
+      if (!group) {
+        group = [];
+        map.set(key, group);
+      }
+      group.push(w);
+    }
+    this._dictKeyIndex = map;
+    return map;
+  }
+
+  /**
+   * 把一次学习动作同步到「同一个词」的其它词条上（分类+词汇+音标都相同）。
+   * 只有组内确实有多条、且状态/学习时间不同时才写库。
+   */
+  async applyStatusToWordGroup(sourceWord, status, studiedAt) {
+    const key = this.dictKeyOf(sourceWord);
+    if (!key) return 0;
+    // 索引还没建（例如刚启动、还没跑过统计）时现场建一次，避免漏掉同词的其它义项
+    if (!this._dictKeyIndex) {
+      try {
+        this.rebuildDictKeyIndex(await this.db.getAllWords());
+      } catch (error) {
+        return 0;
+      }
+    }
+    const group = this._dictKeyIndex.get(key);
+    if (!group || group.length <= 1) return 0;
+
+    let updated = 0;
+    for (const word of group) {
+      if (word.id === sourceWord.id) continue;
+      if (word.status === status && Number(word.lastStudied) === Number(studiedAt)) continue;
+      word.status = status;
+      word.lastStudied = studiedAt;
+      await this.db.updateWord(word);
+      this.syncMemoryWordCopy(word);
+      updated++;
+    }
+    return updated;
+  }
+
+  /** 把某个词条的最新状态同步到内存中的今日队列 / 会话快照（避免卡片显示旧状态） */
+  syncMemoryWordCopy(word) {
+    if (!word) return;
+    const lists = [this.todayWords];
+    if (this._learnSessionSnapshot && this._learnSessionSnapshot.todayWords) {
+      lists.push(this._learnSessionSnapshot.todayWords);
+    }
+    for (const list of lists) {
+      if (!Array.isArray(list)) continue;
+      for (const item of list) {
+        if (item && item.id === word.id) {
+          item.status = word.status;
+          item.lastStudied = word.lastStudied;
+          item.favorite = word.favorite;
+        }
+      }
+    }
   }
 
   /** 该条目是不是旧版遗留的「词条 id」进度（数字） */
@@ -5218,6 +5309,8 @@ class VocabApp {
           word.status = newStatus;
           word.lastStudied = this.nowMs();
           await this.db.updateWord(word);
+          // 同一个词的多条词条（同音同字的义项）状态保持一致，云端那一行才代表完整记录
+          await this.applyStatusToWordGroup(word, newStatus, word.lastStudied);
           
           // 更新学习页面的状态数据
           if (this.todayWords && this.todayWords.length > 0) {

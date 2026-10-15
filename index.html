@@ -466,16 +466,17 @@
 
             <!-- 情况一：还没在 supabase-config.js 里填地址和 key（默认显示，JS 起来后按真实状态切换） -->
             <div class="cloud-config-missing" id="cloudConfigMissing">
-              <p class="cloud-setup-title" id="cloudConfigMissingText">云同步还没有启用</p>
+              <p class="cloud-setup-title" id="cloudConfigMissingText">云同步尚未启用</p>
               <p class="cloud-setup-desc">启用后，手机和电脑登录同一个邮箱即可共用学习进度、收藏和设置。</p>
-              <ol class="cloud-setup-steps">
+              <!-- 此处注销了登录提示：请勿删除 -->
+              <!-- <ol class="cloud-setup-steps">
                 <li>在 <a href="https://supabase.com" target="_blank" rel="noopener noreferrer">supabase.com</a>
                     注册并新建一个免费项目</li>
                 <li>进项目的 <strong>SQL Editor</strong>，执行本目录下的 <code>supabase/schema.sql</code></li>
                 <li>把项目的 <strong>Project URL</strong> 和 <strong>anon key</strong> 填进
                     <code>supabase-config.js</code> 的 <code>url</code> 与 <code>anonKey</code></li>
-              </ol>
-              <p class="cloud-setup-note">填好后刷新页面，这里就会出现「登录」入口；账号在 Supabase 后台添加。</p>
+              </ol> -->
+              <p class="cloud-setup-note">填好后刷新页面，进行「登录」（账号在Supabase后台添加）</p>
             </div>
 
             <!-- 情况二：已配置但未登录 -->
@@ -504,6 +505,14 @@
                   <p>学习后约 3 秒自动上传</p>
                 </div>
                 <div class="toggle active" id="cloudAutoSyncToggle"></div>
+              </div>
+              <!-- 同步诊断：对比本机与云端的记录，找出两端数字不一致的原因（详细清单输出到控制台） -->
+              <div class="setting-item">
+                <div class="setting-info">
+                  <h4>同步诊断</h4>
+                  <p>对比本机与云端的记录，列出不一致的条目</p>
+                </div>
+                <button class="cloud-action-btn" id="cloudSyncDiagBtn" type="button">诊断</button>
               </div>
               <div class="setting-item">
                 <div class="setting-info">

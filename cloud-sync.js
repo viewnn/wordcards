@@ -2057,6 +2057,153 @@
     }
   };
 
+  // ---------------------------------------------------------------- 同步诊断
+
+  /**
+   * 同步诊断：把云端学习记录与本机逐条对比，回答「为什么两端的数字不一样」。
+   *
+   * 结果分三类（每类都带具体词条，能直接定位到是哪个词）：
+   *   1) 仅本机有 —— 这些记录没上传成功（未登录时学的、或上次推送失败），点一次「同步」即可补上；
+   *   2) 仅云端有 —— 本机词典里没有这个词条。词典（dict.xlsx）本身不参与同步，
+   *      两端词条集合不同时，统计只会算本机存在的词条，累计数字必然不同；
+   *   3) 状态/时间不同 —— 同一 dict_key 两端不一致，点一次「同步」就会按时间戳收敛。
+   */
+  CloudSyncEngine.prototype.diagnose = async function () {
+    if (!this.isActive()) return null;
+    var app = this.app;
+
+    var words = await app.db.getAllWords();
+    var localByKey = new Map();
+    for (var i = 0; i < words.length; i++) {
+      var row = this.rowFromWord(words[i]);
+      if (!row) continue;
+      var prev = localByKey.get(row.dict_key);
+      if (!prev || toNumber(row.client_updated_at, 0) >= toNumber(prev.client_updated_at, 0)) {
+        localByKey.set(row.dict_key, row);
+      }
+    }
+
+    var remoteRows = await this.fetchAllProgress();
+    var remoteByKey = new Map();
+    for (var j = 0; j < remoteRows.length; j++) remoteByKey.set(remoteRows[j].dict_key, remoteRows[j]);
+
+    var todayKey = typeof app.todayKey === 'function' ? app.todayKey() : new Date().toDateString();
+    var describe = function (row) {
+      var statusLabel = row.status === 'mastered' ? '已掌握'
+        : (row.status === 'review' ? '待复习' : '新词');
+      var t = row.last_studied == null ? 0 : toNumber(row.last_studied, 0);
+      var when = t
+        ? (new Date(t).toDateString() === todayKey ? '今天学过' : new Date(t).toLocaleDateString('zh-CN') + ' 学过')
+        : '没有学习时间';
+      return statusLabel + ' · ' + when;
+    };
+    var sameRow = function (l, r) {
+      var lStatus = l.status === 'mastered' || l.status === 'review' ? l.status : 'new';
+      var rStatus = r.status === 'mastered' || r.status === 'review' ? r.status : 'new';
+      return lStatus === rStatus &&
+        Boolean(l.favorite) === Boolean(r.favorite) &&
+        toNumber(l.last_studied, 0) === toNumber(r.last_studied, 0);
+    };
+
+    var onlyLocal = [];
+    var onlyRemote = [];
+    var differing = [];
+    localByKey.forEach(function (l, key) {
+      var r = remoteByKey.get(key);
+      if (!r) {
+        onlyLocal.push({ key: key, local: describe(l) });
+        return;
+      }
+      if (!sameRow(l, r)) differing.push({ key: key, local: describe(l), remote: describe(r) });
+    });
+    remoteByKey.forEach(function (r, key) {
+      if (!localByKey.has(key)) onlyRemote.push({ key: key, remote: describe(r) });
+    });
+
+    return {
+      local: {
+        wordCount: words.length,
+        scopedWordCount: words.filter(function (w) { return app.isWordInActiveScope(w); }).length,
+        scope: app.settings.dictImportType || 'all',
+        today: { mastered: app.todayStats.mastered, review: app.todayStats.review },
+        total: { mastered: app.totalStats.mastered, review: app.totalStats.review },
+        dictUpdateTime: await app.db.getSetting('dictUpdateTime', null)
+      },
+      cloud: {
+        rows: remoteRows.length,
+        usableRows: remoteRows.length - onlyRemote.length
+      },
+      onlyLocal: onlyLocal,
+      onlyRemote: onlyRemote,
+      differing: differing
+    };
+  };
+
+  /** 把诊断结果打到控制台（含「怎么看」的说明） */
+  CloudSyncEngine.prototype.printDiagnosis = function (r) {
+    if (!r) return;
+    var localTotal = r.local.total.mastered + r.local.total.review;
+    var lines = [];
+    lines.push('==== WordCards 同步诊断 ====');
+    lines.push('本机词条：' + r.local.wordCount + '（当前词典范围：' + r.local.scope +
+      '，范围内 ' + r.local.scopedWordCount + ' 条）');
+    lines.push('本机今天：已掌握 ' + r.local.today.mastered + ' / 待复习 ' + r.local.today.review);
+    lines.push('本机累计：已掌握 ' + r.local.total.mastered + ' / 待复习 ' + r.local.total.review +
+      '（合计 ' + localTotal + '）');
+    lines.push('云端记录：' + r.cloud.rows + ' 行（其中本机词典里能找到的 ' + r.cloud.usableRows + ' 行）');
+    lines.push('');
+    lines.push('—— 仅本机有（没上传成功）：' + r.onlyLocal.length + ' 条');
+    r.onlyLocal.slice(0, 30).forEach(function (x) { lines.push('   ' + x.key + '   ' + x.local); });
+    lines.push('—— 仅云端有（本机词典里没有这个词条，通常是两端词典版本不同）：' + r.onlyRemote.length + ' 条');
+    r.onlyRemote.slice(0, 30).forEach(function (x) { lines.push('   ' + x.key + '   ' + x.remote); });
+    lines.push('—— 状态/时间不一致（点一次「同步」会按较晚的一次收敛）：' + r.differing.length + ' 条');
+    r.differing.slice(0, 30).forEach(function (x) {
+      lines.push('   ' + x.key + '   本机 ' + x.local + ' / 云端 ' + x.remote);
+    });
+    if (r.onlyLocal.length > 30 || r.onlyRemote.length > 30 || r.differing.length > 30) {
+      lines.push('（清单只显示前 30 条）');
+    }
+    lines.push('');
+    lines.push('【怎么看】');
+    lines.push('* 「仅云端有」是两端累计数字不同的主要原因：词典不上云，两端词条集合不同时');
+    lines.push('  统计只算本机存在的词条。请在两端确认「词库更新」时间一致（更新词典后各刷新一次页面）。');
+    lines.push('* 「仅本机有」点一次「同步」即可补传；「状态/时间不一致」也会在同步后自动收敛。');
+    console.log(lines.join('\n'));
+  };
+
+  /** 设置页「诊断」按钮：跑一次诊断，弹摘要，详细清单打到控制台 */
+  CloudSyncEngine.prototype.runDiagnosis = async function () {
+    var btn = document.getElementById('cloudSyncDiagBtn');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '诊断中…';
+    }
+    try {
+      var result = await this.diagnose();
+      if (!result) {
+        this.app.showToast('未登录云同步，无法诊断');
+        return null;
+      }
+      this.printDiagnosis(result);
+      var localTotal = result.local.total.mastered + result.local.total.review;
+      this.app.showToast(
+        '本机 ' + localTotal + ' 条 / 云端 ' + result.cloud.rows + ' 条；' +
+        '仅本机 ' + result.onlyLocal.length + '、仅云端 ' + result.onlyRemote.length +
+        '、状态差异 ' + result.differing.length + '（详情见控制台）'
+      );
+      return result;
+    } catch (error) {
+      console.warn('[cloud-sync] 诊断失败:', error);
+      this.app.showToast('诊断失败：' + humanizeError(error));
+      return null;
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '诊断';
+      }
+    }
+  };
+
   /**
    * 同步后刷新本地界面：统计数字、学习页、词库页。
    * rebuildLearnQueue 为 true 时（本地确实被云端改写了）还要让今日队列失效：
@@ -2175,6 +2322,16 @@
         self.saveMeta().catch(function () {});
         self.app.showToast(self.meta.autoSync ? '已开启自动同步' : '已关闭自动同步（仍可手动同步）');
         if (self.meta.autoSync) self.schedulePush();
+      });
+    }
+
+    // 「同步诊断」：对比本机与云端的记录，列出不一致的条目（详情输出到控制台）
+    var diagBtn = $('cloudSyncDiagBtn');
+    if (diagBtn) {
+      diagBtn.addEventListener('click', function () {
+        self.runDiagnosis().catch(function (error) {
+          console.warn('[cloud-sync] 诊断异常:', error);
+        });
       });
     }
 
@@ -2421,8 +2578,8 @@
       var missingText = $('cloudConfigMissingText');
       if (missingText) {
         missingText.textContent = this.statusDetail
-          ? '云同步还没有启用（' + this.statusDetail + '）'
-          : '云同步还没有启用';
+          ? '云同步尚未启用（' + this.statusDetail + '）'
+          : '云同步尚未启用';
       }
       paintBadge('disabled', '未启用', this.statusDetail || '云同步未启用，点击查看开启方法');
       return;
@@ -2478,6 +2635,9 @@
     withTimeout: withTimeout,
     rowFromWord: function (word) { return global.CloudSync.rowFromWord(word); },
     stableStringify: stableStringify,
-    humanizeError: humanizeError
+    humanizeError: humanizeError,
+    /** 同步诊断：对比本机与云端的记录差异。用法：await CloudSyncDebug.diagnose() */
+    diagnose: function () { return global.CloudSync.diagnose(); },
+    printDiagnosis: function (result) { return global.CloudSync.printDiagnosis(result); }
   };
 })(window);
