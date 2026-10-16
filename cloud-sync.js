@@ -2120,10 +2120,10 @@
           // 不重建今日队列，免得正在背单词时卡片突然换成另一张
           await this.refreshLocalViews(false);
           this.setStatus('synced', '已从云端更新 ' + changed + ' 条记录');
-          // 正在背单词时不弹提示打扰，顶部徽标已经能说明状态
-          if (this.app.currentPage !== 'learn') {
-            this.app.showToast('已同步云端学习记录（' + changed + ' 条）');
-          }
+          // 刻意**不弹轻提示**：另一端改个状态、学几张卡都会走到这里，
+          // 每次弹一条会一直打断使用。顶部云徽标已经能说明状态，
+          // 需要细节时看徽标或控制台（只有「更新词典」才弹提示）。
+          console.info('[cloud-sync] 已从云端更新 ' + changed + ' 条学习记录（不弹提示）');
         } else {
           this.setStatus('synced', '已是最新');
         }
