@@ -1465,6 +1465,7 @@
 
     var applied = 0;
     var rangeChanged = false;
+    var goalChanged = false;
     this._suppress = true;
     try {
       for (var i = 0; i < SYNCED_SETTING_KEYS.length; i++) {
@@ -1487,6 +1488,7 @@
         if (this.app.settings[key] === settings[key]) continue;
         this.app.settings[key] = settings[key];
         if (key === 'dictImportType') rangeChanged = true;
+        if (key === 'dailyGoal') goalChanged = true;
         await this.app.db.setSetting(key, settings[key]);
         applied++;
       }
@@ -1503,19 +1505,26 @@
         console.warn('[cloud-sync] 应用云端设置后刷新界面失败:', error);
       }
 
-      // 云端改过「词典导入」范围：本地今日队列必须按新范围重建，
-      // 否则学习页会继续展示旧范围（如「字」）的卡片
-      if (rangeChanged) {
+      // 云端改过「词典导入」范围或「每日目标」：本地学习队列必须按新设置重建，
+      // 否则学习页会继续展示旧范围（如「字」）的卡片，或停在旧目标的进度的完成页上
+      if (rangeChanged || goalChanged) {
         try {
           this.app._learnSessionSnapshot = null;
-          this.app.todayWords = [];
-          this.app.currentCardIndex = 0;
-          if (typeof this.app.clearCardDisplay === 'function') this.app.clearCardDisplay();
+          if (rangeChanged) {
+            this.app.todayWords = [];
+            this.app.currentCardIndex = 0;
+            if (typeof this.app.clearCardDisplay === 'function') this.app.clearCardDisplay();
+          }
+          if (goalChanged) {
+            // 目标换了，「今天已完成过目标」按新目标重新判定
+            this.app._todayGoalReachedDate = '';
+            await this.app.db.setSetting('todayGoalReached', null);
+          }
           await this.app.db.setSetting('learnProgress', null);
           await this.app.prepareLearnSession();
           if (this.app.currentPage === 'library') await this.app.renderLibrary();
         } catch (error) {
-          console.warn('[cloud-sync] 应用云端词典范围后重建学习队列失败:', error);
+          console.warn('[cloud-sync] 应用云端设置后重建学习队列失败:', error);
         }
       }
 

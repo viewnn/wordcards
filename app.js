@@ -374,6 +374,21 @@ class VocabApp {
      */
     this._todayGoalReachedDate = '';
     /**
+     * 还没落库完成的学习动作数量。
+     *
+     * 点「掌握 / 陌生」时卡片立刻切走，写库与统计重算是后台异步做的。
+     * 这期间若有更早触发的统计重算先跑完，它读到的是「少一张」的旧快照，
+     * 会把界面上的进度从 100 回退成 99 —— 用户看到的就是
+     * 「学完了却停在 99/100，点一下【继续学习】才变 100」。
+     * 所以只要还有动作在排队，就不允许统计把进度往回改。
+     */
+    this._pendingPersistCount = 0;
+    /**
+     * 统计快照是否曾经落后于乐观值（发生过「不回退」保护）。
+     * 只有它成立时，学习动作全部落库后才需要再校准一次统计。
+     */
+    this._statsMayBeStale = false;
+    /**
      * 当前队列里是否还有「今天还没计入统计」的词条。
      * 为 false 时这一轮是纯复习：进度条与今日统计都不会再增长，界面会给出提示。
      */
@@ -1340,6 +1355,8 @@ class VocabApp {
       this._scopeTotal = total;
       this.syncActiveStatsMirrors();
       this._statsReady = true;
+      // 这一次统计是刚读完库算出来的新快照，之前的「可能落后」标记作废
+      this._statsMayBeStale = false;
       // 累计统计 = 当前词典范围内各状态的真实词条数（与词库页筛选结果一致）。
       // 取镜像值而不是把两个分类相加，否则「沿用」的另一个分类会被算进来
       this._cachedStatusCounts = {
@@ -1802,13 +1819,15 @@ class VocabApp {
     return out;
   }
 
-  /** 学习页已有进度或已完成当日队列时，锁定每日目标滑块 */
+  /**
+   * 每日目标是否禁止修改。
+   *
+   * 以前学习进行中会锁住滑块，结果用户想改目标却改不了，学习页还停在旧目标上
+   * （甚至冒出【继续学习】）。现在改为随时可改：改完立即按新目标重建队列，
+   * 学习页的分母与目标文案都跟着设置页走。
+   */
   isDailyGoalSliderLocked() {
-    return (
-      Array.isArray(this.todayWords) &&
-      this.todayWords.length > 0 &&
-      (this.currentCardIndex > 0 || this.currentCardIndex >= this.todayWords.length)
-    );
+    return false;
   }
 
   /** 按 isDailyGoalSliderLocked() 的结果启用/禁用每日目标滑块，并同步显示数值 */
@@ -1886,34 +1905,28 @@ class VocabApp {
       goalValue.textContent = goalSlider.value;
     });
     goalSlider.addEventListener('change', async () => {
-      if (self.isDailyGoalSliderLocked()) {
-        self.showToast('学习进行中，无法修改每日目标');
+      const nextGoal = Math.max(1, parseInt(goalSlider.value) || 100);
+      if (nextGoal === self.settings.dailyGoal) {
         self.refreshGoalSliderLockedState();
         return;
       }
-      
-      self.settings.dailyGoal = parseInt(goalSlider.value);
-      await self.db.setSetting('dailyGoal', self.settings.dailyGoal);
-      // 清除之前保存的学习进度，确保新目标从全新的状态开始
+
+      self.settings.dailyGoal = nextGoal;
+      await self.db.setSetting('dailyGoal', nextGoal);
+
+      // 目标换了，「今天已完成过目标」的判定要按新目标重来
+      self._todayGoalReachedDate = '';
+      await self.db.setSetting('todayGoalReached', null);
+
+      // 队列长度跟着新目标变：丢掉旧进度与切页快照，按新目标重建队列。
+      // 本轮起点保持不变 —— 已经学过的进度不丢，只是分母变大/变小，
+      // 学习页上方的目标数字立即变成设置页里的新值。
+      self._learnSessionSnapshot = null;
       await self.db.setSetting('learnProgress', null);
-      // 目标变了，累计口径也跟着重来（否则新目标会一上来就显示旧目标的进度）
-      await self.resetTodayDoneCount();
-      self.showToast('每日目标已更新');
-      
-      // 立即更新进度条UI
-      if (document.getElementById('progressFill')) {
-        document.getElementById('progressFill').style.width = '0%';
-      }
-      if (document.getElementById('progressText')) {
-        document.getElementById('progressText').textContent = `0/${self.settings.dailyGoal}`;
-      }
-      
-      // 如果当前在学习页面，重新准备学习会话并更新进度
-      if (self.currentPage === 'learn') {
-        await self.prepareLearnSession();
-        self.showCard(self.currentCardIndex);
-        self.updateProgress();
-      }
+      await self.prepareLearnSession();
+      self.updateProgress();
+      self.refreshGoalSliderLockedState();
+      self.showToast('每日目标已更新为 ' + nextGoal);
     });
     
     // 监听页面切换，更新滑块状态
@@ -2900,7 +2913,16 @@ class VocabApp {
       this.saveTodayDoneCount().catch(() => {});
     }
 
-    this.todayDoneCount = Math.max(0, counted - this._todayRoundStart);
+    const computed = Math.max(0, counted - this._todayRoundStart);
+
+    // 还有学习动作没落库完成时，统计快照可能还「少一张」：
+    // 不许用它把进度改小，否则学完最后一张会停在 99/100（要点一次【继续学习】才变 100）
+    if (this._pendingPersistCount > 0 && computed < this.todayDoneCount) {
+      this._statsMayBeStale = true;   // 记下来：等全部落库后要校准一次
+      return this.todayDoneCount;
+    }
+
+    this.todayDoneCount = computed;
 
     // 「今天已经完成过目标」时保住完成态：
     // 达成之后统计可能因为数据变化少 1~2 条（更新词典删掉了一个今天学过的词条、
@@ -3852,6 +3874,10 @@ class VocabApp {
     word.status = 'review';
     word.lastStudied = this.nowMs(); // 记录学习时间（同步可用时用服务端基准，避免两端时钟偏差）
 
+    // 乐观更新今日统计：写库是异步的，等它回来之前上方数字也要立刻 += 1，
+    // 否则完成页会短暂显示 99/100（与进度条同源，所以两者一起改，始终一致）
+    if (countsTowardProgress) this.bumpTodayStatsOptimistically('review');
+
     // 切卡动画与落库解耦：先同步推进卡片（与「跳过」一致立即开始滑出/滑入动画），
     // 再把写库、写统计、刷新累计统计放到后台执行，避免 IO 期间卡片停在画外造成卡顿
     this._sequenceCard('right', releaseOffset, countsTowardProgress);
@@ -3958,12 +3984,30 @@ class VocabApp {
     word.status = 'mastered';
     word.lastStudied = this.nowMs(); // 记录学习时间（同步可用时用服务端基准）
 
+    // 乐观更新今日统计（理由见 markDifficult）
+    if (countsTowardProgress) this.bumpTodayStatsOptimistically('mastered');
+
     // 同 markDifficult：先同步切卡，落库在后台进行。
     // 这样左滑（已掌握）与右滑（跳过）的动画时序完全一致，不再出现中途闪烁。
     this._sequenceCard('left', releaseOffset, countsTowardProgress);
     this._persistStudyAction(word).catch((err) => {
       console.error('保存「已掌握」状态失败:', err);
     });
+  }
+
+  /**
+   * 乐观地把今日统计 +1（掌握 / 待复习）。
+   *
+   * 点「掌握 / 陌生」后卡片立即切走，真正的统计要等写库完成才重算；
+   * 这一小段时间里上方数字与进度条都应当立刻更新，否则学完最后一张会
+   * 短暂显示 99/100（用户以为最后一张没被统计）。
+   * 随后的 refreshStatusCounts 会用库里的真实值覆盖，两者最终必然一致。
+   */
+  bumpTodayStatsOptimistically(kind) {
+    const key = kind === 'review' ? 'review' : 'mastered';
+    if (!this.todayStats) this.todayStats = { mastered: 0, review: 0, total: 0 };
+    this.todayStats[key] = Math.max(0, Number(this.todayStats[key]) || 0) + 1;
+    this.syncActiveStatsMirrors();
   }
 
   /**
@@ -3979,14 +4023,33 @@ class VocabApp {
    */
   async _persistStudyAction(word) {
     if (!word) return;
-    await this.db.updateWord(word);
-    // 同一个词（分类+词汇+音标相同）的词条可能有多条：状态必须整组一致，
-    // 否则云端那一行只会代表其中一条，另一条的学习记录同步不出去、两端统计对不上
-    await this.applyStatusToWordGroup(word, word.status, word.lastStudied);
-    // 保存学习进度
-    await this.saveLearnProgress();
-    // 按最新词条状态重算今日/累计统计（含学习页与词库页显示）
-    await this.refreshStatusCounts();
+    this._pendingPersistCount = (this._pendingPersistCount || 0) + 1;
+    try {
+      await this.db.updateWord(word);
+      // 同一个词（分类+词汇+音标相同）的词条可能有多条：状态必须整组一致，
+      // 否则云端那一行只会代表其中一条，另一条的学习记录同步不出去、两端统计对不上
+      await this.applyStatusToWordGroup(word, word.status, word.lastStudied);
+      // 保存学习进度
+      await this.saveLearnProgress();
+      // 按最新词条状态重算今日/累计统计（含学习页与词库页显示）
+      await this.refreshStatusCounts();
+    } catch (error) {
+      // 写库失败：刚才的乐观 +1 不再可靠，标记需要校准
+      this._statsMayBeStale = true;
+      throw error;
+    } finally {
+      this._pendingPersistCount = Math.max(0, (this._pendingPersistCount || 1) - 1);
+      if (this._pendingPersistCount === 0 && this._statsMayBeStale) {
+        // 之前有统计快照落后于乐观值（被「不回退」保护挡下过）：
+        // 现在所有动作都已落库，用真实统计校准一次
+        this._statsMayBeStale = false;
+        try {
+          await this.refreshStatusCounts();
+        } catch (error) {
+          console.warn('[learn] 收尾统计刷新失败:', error);
+        }
+      }
+    }
   }
 
   /**
