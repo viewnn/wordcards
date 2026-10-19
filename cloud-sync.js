@@ -1659,7 +1659,14 @@
     // 换设备接着背：进度条 = 今日已计入统计的词条数 − 本轮起点，
     // 把云端会话里的「本轮起点」一并恢复，两台设备的进度条数字才一致。
     // （早期版本这里按「队列下标」补张数，与今日统计口径不一致，会多出 1~2 个）
-    if (session.roundStart !== undefined && session.roundStart !== null &&
+    //
+    // 但只在「本机今天还没开始过新一轮」时采纳远端起点：
+    // 起点代表这台设备自己的轮次。一旦本机已经开始了（起点 > 0 或今天已完成过目标），
+    // 用另一台设备的起点覆盖会让进度凭空差 1~2 个 —— 典型现象就是
+    // 「明明完成了 100/100，重开却变成 99/100」（另一端统计差 1 时它的起点是 101）。
+    var localStart = toNumber(this.app._todayRoundStart, 0);
+    var localRoundStarted = localStart > 0 || Boolean(this.app._todayGoalReachedDate);
+    if (!localRoundStarted && session.roundStart !== undefined && session.roundStart !== null &&
         typeof this.app.setTodayRoundStart === 'function') {
       try {
         await this.app.setTodayRoundStart(session.roundStart);

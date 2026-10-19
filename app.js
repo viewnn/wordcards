@@ -365,6 +365,15 @@ class VocabApp {
      */
     this._learnView = 'card';
     /**
+     * 「今日目标已达成」的日期。
+     *
+     * 达成过之后，即使今日统计因为数据变化少了 1~2 条（例如更新词典时删掉了一个
+     * 今天学过的词条、或另一台设备把某条改成了非今日），也不该让「已完成」退回 99/100 ——
+     * 用户确实完成过今天的目标，这个事实要保住。点【继续学习】、改每日目标、
+     * 清除记录都会清掉它；跨天自动失效。
+     */
+    this._todayGoalReachedDate = '';
+    /**
      * 当前队列里是否还有「今天还没计入统计」的词条。
      * 为 false 时这一轮是纯复习：进度条与今日统计都不会再增长，界面会给出提示。
      */
@@ -2811,6 +2820,10 @@ class VocabApp {
       ? Math.max(0, Math.floor(Number(saved.count) || 0))
       : 0;
 
+    // 「今天已完成过目标」的标记（跨天自动失效）
+    const reached = await this.db.getSetting('todayGoalReached', null);
+    this._todayGoalReachedDate = (reached && reached.date === today) ? today : '';
+
     this._todayRoundDate = today;
     this._roundStartReady = true;
     this.syncTodayDoneFromStats();
@@ -2854,6 +2867,9 @@ class VocabApp {
       this._todayRoundStart = 0;
       this._roundStartReady = true;   // 跨天归零是有意义的，允许落库
       this.todayDoneCount = 0;
+      // 跨天：昨天「已完成目标」的标记作废，今天重新开始
+      this._todayGoalReachedDate = '';
+      this.db.setSetting('todayGoalReached', null).catch(() => {});
       this.saveTodayDoneCount().catch(() => {});
       return true;
     }
@@ -2885,6 +2901,27 @@ class VocabApp {
     }
 
     this.todayDoneCount = Math.max(0, counted - this._todayRoundStart);
+
+    // 「今天已经完成过目标」时保住完成态：
+    // 达成之后统计可能因为数据变化少 1~2 条（更新词典删掉了一个今天学过的词条、
+    // 或另一台设备把某条改成了非今日），这时不该让「已完成」退回 99/100。
+    // 做法是把本轮起点相应下调相同的数量，于是 done 回到每日目标，
+    // 「进度 = 今日统计 − 起点」依然严格成立（不会出现数字互相矛盾）。
+    const goal = Math.max(0, Number(this.settings.dailyGoal) || 0);
+    if (this._statsReady && goal > 0 &&
+        this._todayGoalReachedDate === this.todayKey() &&
+        this.todayDoneCount < goal) {
+      const deficit = goal - this.todayDoneCount;
+      // 只兜小波动（≤5 条）：差得多说明是别的问题，不能靠调起点掩盖
+      if (deficit <= 5 && this._todayRoundStart >= deficit) {
+        console.info('[learn] 今日目标已达成，统计回落了 ' + deficit +
+          ' 条（可能是词典更新删词或同步改动），保持完成状态');
+        this._todayRoundStart -= deficit;
+        this.todayDoneCount = goal;
+        this.saveTodayDoneCount().catch(() => {});
+      }
+    }
+
     return this.todayDoneCount;
   }
 
@@ -2909,6 +2946,11 @@ class VocabApp {
     this._todayRoundStart = this.currentTodayStudyCount();
     this._roundStartReady = true;
     this.todayDoneCount = 0;
+    // 开始新一轮：清掉「今日已完成」标记，之后要重新学满目标才算完成
+    if (this._todayGoalReachedDate) {
+      this._todayGoalReachedDate = '';
+      this.db.setSetting('todayGoalReached', null).catch(() => {});
+    }
     await this.saveTodayDoneCount();
   }
 
@@ -4332,6 +4374,16 @@ class VocabApp {
     // 完成页与空状态互斥：否则「还没有可学习的单词」会和【继续学习】按钮同时出现在屏幕上
     const emptyState = document.getElementById('learnEmptyState');
     if (emptyState) emptyState.style.display = 'none';
+
+    // 真正达成今日目标时记下日期：之后统计万一少 1~2 条（词典更新删词 / 另一端改动），
+    // 也不会让「已完成」退回 99/100
+    if (this.isDailyGoalReached()) {
+      const today = this.todayKey();
+      if (this._todayGoalReachedDate !== today) {
+        this._todayGoalReachedDate = today;
+        this.db.setSetting('todayGoalReached', { date: today }).catch(() => {});
+      }
+    }
 
     // document.getElementById('completeMastered').textContent = this.todayStats.mastered;
     // document.getElementById('completeReview').textContent = this.todayStats.review;
