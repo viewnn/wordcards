@@ -1764,7 +1764,8 @@ select {
 .slider-container {
   display: flex;
   align-items: center;
-  gap: 12px;
+  /* gap: 12px; */
+  
 }
 
 .slider {
@@ -1774,6 +1775,7 @@ select {
   background: var(--bg-primary);
   border-radius: 3px;
   outline: none;
+  width: 112px;
 }
 
 .slider::-webkit-slider-thumb {
@@ -1795,7 +1797,7 @@ select {
 }
 
 .slider-value {
-  min-width: 40px;
+  min-width: 30px;
   text-align: right;
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
