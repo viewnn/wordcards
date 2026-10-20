@@ -19,10 +19,8 @@
  *               → 更新进度条与统计(updateProgress)
  *     - 词库页：搜索、状态筛选（全部/新词/待复习/已掌握/收藏）、
  *               分类多选下拉、按分类分组渲染(renderLibrary)
- *     - 设置页：每日目标、学习模式（随机/顺序）、语音朗读、音效、
- *               音标渐显、重复频率、词典范围等
- *     - 语音：使用浏览器自带的 Web Speech API（speechSynthesis），
- *             按词条语种（英语 / 普通话 / 粤语）挑选合适的系统音色朗读
+ *     - 设置页：每日目标、学习模式（随机/顺序）、音标渐显、重复频率、
+ *               词典范围等
  *
  * 关键概念：
  *   - dictScope：词条的词典归属，'word'=字、'phrase'=短语。两类词条始终
@@ -320,7 +318,7 @@ class VocabDB {
 // ==================== 主应用类（应用层） ====================
 /**
  * 应用层类：持有全部运行状态，负责页面渲染、事件交互、学习流程、
- * 词库管理、设置读写与语音朗读。全局唯一实例为 window.app。
+ * 词库管理与设置读写。全局唯一实例为 window.app。
  */
 class VocabApp {
   constructor() {
@@ -412,9 +410,6 @@ class VocabApp {
     this.settings = {
       dailyGoal: 100,                 // 每日目标（每天学习多少张卡片）
       fontSize: 'medium',             // 字号（预留）
-      soundEnabled: false,            // 翻到释义面后自动朗读例句/释义
-      speechEnabled: false,           // 总开关：语音朗读（关闭后喇叭按钮不可用）
-      phoneticAutoRead: false,        // 切换卡片后自动朗读音标两遍
       /** 默认先展示释义面；点击后翻到词汇面 */
       cardDefinitionFirst: false,
       learnMode: 'random',            // 学习模式：random 随机 / sequential 顺序
@@ -476,9 +471,6 @@ class VocabApp {
     this._cardTouchLongPress = false;
     /** 卡片“滑出→滑入”过场动画是否进行中；用于防止动画期间重复触发导致索引与动画错位 */
     this._cardAnimating = false;
-    this._phoneticReadTimer = null;
-/** 词库列表当前展示的词条 id → 对象，避免点击喇叭时 await IndexedDB 导致用户手势失效而无法发声 */
-    this._librarySpeakWordsById = new Map();
     /** 离开学习页时保存的会话快照，用于返回学习页时恢复进度条与队列（不可仅用 switchPage 局部变量） */
     this._learnSessionSnapshot = null;
     /** 当前词典范围内各状态的词条数缓存 { mastered, review }，与词库页筛选结果一致 */
@@ -515,7 +507,7 @@ class VocabApp {
   /**
    * 应用启动入口（DOMContentLoaded 后调用一次）。
    * 流程：测量滚动条 → 打开数据库 → 读取设置 → 首次使用默认词典范围为「字」
-   * → 注册 Service Worker（离线缓存）→ 绑定全部事件 → 预加载语音音色
+   * → 注册 Service Worker（离线缓存）→ 绑定全部事件
    * → 自动导入 dict.xlsx → 加载/迁移学习统计 → 首次渲染。
    * 任何一步失败都会走 recoverFromError() 兜底重建。
    */
@@ -536,7 +528,6 @@ class VocabApp {
       this.initServiceWorker();
       this.bindEvents();
       this.initKeyboardViewport();
-      this.primeSpeechSynthesis();
 
       // 先导入词典（字+短语全量常驻并标注分类），再加载按分类归档的统计，
       // 保证首次升级时迁移能按现有词条分类拆分历史累计记录
@@ -1050,9 +1041,6 @@ class VocabApp {
   /** 从数据库读取全部设置项覆盖默认值；getSetting 第二参数即“用户从未设置时”的默认值 */
   async loadSettings() {
     this.settings.dailyGoal = await this.db.getSetting('dailyGoal', 100);
-    this.settings.speechEnabled = await this.db.getSetting('speechEnabled', false);
-    this.settings.soundEnabled = await this.db.getSetting('soundEnabled', false);
-    this.settings.phoneticAutoRead = await this.db.getSetting('phoneticAutoRead', false);
     this.settings.cardDefinitionFirst = await this.db.getSetting('cardDefinitionFirst', false);
     this.settings.categoryDisplay = await this.db.getSetting('categoryDisplay', false);
     this.settings.meaningDisplay = await this.db.getSetting('meaningDisplay', true);
@@ -1409,7 +1397,7 @@ class VocabApp {
   /**
    * 绑定全局事件（只在启动时绑定一次）：
    * 底部导航切换、弹窗关闭、首页统计数字点击、保存单词按钮、
-   * 卡片点击翻面、喇叭发音/收藏按钮（同时监听 click 与 touchstart 并去重）、
+   * 卡片点击翻面、收藏按钮（同时监听 click 与 touchstart 并去重）、
    * 卡片滑动手势、学习页三个操作按钮；设置页与词库页的事件分别委托给
    * bindSettingsEvents() / bindLibraryEvents()。
    */
@@ -1513,34 +1501,36 @@ class VocabApp {
       }
     });
     
-    // 发音 / 收藏：移动端会先 touchstart 再合成 click；document 默认 passive 导致 preventDefault 无效，
-    // 会连续触发两次。用 passive:false + 短时间忽略紧随其后的 click。
-    let lastSpeakTouchTs = 0;
-    let lastFavoriteTouchTs = 0;
+    // 学习页快捷键：Y = 掌握 / N = 陌生 / P = 跳过（不区分大小写）。
+    // 只看学习页，避免和练习页的字母输入冲突；输入框 / 可编辑区域里不抢键。
+    document.addEventListener('keydown', (e) => {
+      if (self.currentPage !== 'learn') return;
+      if (e.repeat || e.isComposing) return;            // 长按、输入法组合中不触发
+      if (e.ctrlKey || e.metaKey || e.altKey) return;   // 不拦 Ctrl+Y 这类浏览器快捷键
+      const target = e.target;
+      const tag = target && target.tagName ? target.tagName.toLowerCase() : '';
+      const editing = (tag === 'input' && !target.readOnly) ||
+        tag === 'textarea' ||
+        Boolean(target && target.isContentEditable);
+      if (editing) return;
 
-    document.addEventListener('click', handleSpeakClick);
-    document.addEventListener('touchstart', handleSpeakClick, { passive: false });
-
-    function handleSpeakClick(e) {
-      if (!self.settings.speechEnabled) return;
-      const btn = e.target.closest('.speak-btn');
-      if (!btn) return;
-      const isVisible = window.getComputedStyle(btn).display !== 'none';
-      if (!isVisible) return;
-
-      e.stopPropagation();
-      if (e.type === 'click') {
-        if (Date.now() - lastSpeakTouchTs < 450) {
-          if (e.cancelable) e.preventDefault();
-          return;
-        }
-        self.speakCurrentWord();
-        return;
+      // 用 key 的小写形式判断：Y / y 都算（Shift+Y 也一样）
+      const key = String(e.key || '').toLowerCase();
+      if (key === 'y') {
+        e.preventDefault();
+        self.markMastered();
+      } else if (key === 'n') {
+        e.preventDefault();
+        self.markDifficult();
+      } else if (key === 'p') {
+        e.preventDefault();
+        self.skipCard();
       }
-      lastSpeakTouchTs = Date.now();
-      if (e.cancelable) e.preventDefault();
-      self.speakCurrentWord();
-    }
+    });
+
+    // 收藏按钮：移动端会先 touchstart 再合成 click；document 默认 passive 导致 preventDefault 无效，
+    // 会连续触发两次。用 passive:false + 短时间忽略紧随其后的 click。
+    let lastFavoriteTouchTs = 0;
 
     document.addEventListener('click', handleFavoriteClick);
     document.addEventListener('touchstart', handleFavoriteClick, { passive: false });
@@ -1844,27 +1834,6 @@ class VocabApp {
     goalValue.textContent = String(this.settings.dailyGoal);
   }
 
-  /** 语音朗读开关影响例句朗读和音标朗读的可用状态 */
-  refreshSpeechDependentToggles() {
-    const speechOn = this.settings.speechEnabled;
-    const soundToggle = document.getElementById('soundToggle');
-    const phoneticToggle = document.getElementById('phoneticReadToggle');
-    if (soundToggle) {
-      soundToggle.style.opacity = speechOn ? '1' : '0.4';
-      soundToggle.style.cursor = speechOn ? 'pointer' : 'not-allowed';
-    }
-    if (phoneticToggle) {
-      phoneticToggle.style.opacity = speechOn ? '1' : '0.4';
-      phoneticToggle.style.cursor = speechOn ? 'pointer' : 'not-allowed';
-    }
-    document.querySelectorAll('.speak-btn').forEach(btn => {
-      btn.classList.toggle('disabled', !speechOn);
-    });
-    document.querySelectorAll('.library-speak-btn').forEach(btn => {
-      btn.classList.toggle('disabled', !speechOn);
-    });
-  }
-
   /** 词典导入/范围切换后：分类下拉勾选当前展示分类下的全部真实分类（等同于「全部」） */
   async syncLibraryCategoryFilterToDictType() {
     const words = (await this.db.getAllWords()).filter((w) => this.isWordInActiveScope(w));
@@ -1872,7 +1841,7 @@ class VocabApp {
     this.selectedCategories = [...userCats];
   }
 
-  /** language 列标明粤语时，音标朗读优先粤拼 */
+  /** language 列标明粤语时，卡片音标优先展示粤拼 */
   isImportedCantoneseLanguage(word) {
     const raw = String(word?.language || '').trim();
     if (!raw) return false;
@@ -1887,8 +1856,8 @@ class VocabApp {
 
   /**
    * 设置页事件绑定：每日目标滑块、学习模式、
-   * 语音朗读总开关 / 例句自动朗读 / 音标自动朗读（后两者依赖总开关）、
-   * 卡片释义优先、分类显示、音标渐显时长、重复频率、清除进度、词典范围切换。
+   * 卡片释义优先、分类显示、显示释义、音标渐显时长、重复频率、
+   * 清除进度、词典范围切换、练习设置。
    * 每个开关改动后都会立即写入数据库（setSetting），并按需刷新当前界面。
    */
   bindSettingsEvents() {
@@ -1948,67 +1917,6 @@ class VocabApp {
       // 立即按当前模式重建当日队列（含随机打散），不依赖进度是否为 0
       await self.prepareLearnSession();
       self.showToast(self.settings.learnMode === 'random' ? '已切换为随机模式' : '已切换为顺序模式');
-    }
-
-    // 音效开关
-    const speechToggle = document.getElementById('speechToggle');
-    if (speechToggle) {
-      speechToggle.addEventListener('click', handleSpeechToggle);
-      speechToggle.addEventListener('touchstart', handleSpeechToggle);
-    }
-
-    async function handleSpeechToggle(e) {
-      e.preventDefault();
-      const toggle = document.getElementById('speechToggle');
-      toggle.classList.toggle('active');
-      self.settings.speechEnabled = toggle.classList.contains('active');
-      await self.db.setSetting('speechEnabled', self.settings.speechEnabled);
-      if (!self.settings.speechEnabled) {
-        self.settings.soundEnabled = false;
-        self.settings.phoneticAutoRead = false;
-        await self.db.setSetting('soundEnabled', false);
-        await self.db.setSetting('phoneticAutoRead', false);
-        const st = document.getElementById('soundToggle');
-        if (st) st.classList.remove('active');
-        const pt = document.getElementById('phoneticReadToggle');
-        if (pt) pt.classList.remove('active');
-      }
-      self.refreshSpeechDependentToggles();
-      self.applySettings();
-    }
-
-    const soundToggle = document.getElementById('soundToggle');
-    soundToggle.addEventListener('click', handleSoundToggle);
-    soundToggle.addEventListener('touchstart', handleSoundToggle);
-    
-    async function handleSoundToggle(e) {
-      if (!self.settings.speechEnabled) {
-        self.showToast('请先开启「语音朗读」');
-        return;
-      }
-      e.preventDefault();
-      const toggle = document.getElementById('soundToggle');
-      toggle.classList.toggle('active');
-      self.settings.soundEnabled = toggle.classList.contains('active');
-      await self.db.setSetting('soundEnabled', self.settings.soundEnabled);
-    }
-
-    const phoneticReadToggle = document.getElementById('phoneticReadToggle');
-    if (phoneticReadToggle) {
-      phoneticReadToggle.addEventListener('click', handlePhoneticReadToggle);
-      phoneticReadToggle.addEventListener('touchstart', handlePhoneticReadToggle);
-    }
-
-    async function handlePhoneticReadToggle(e) {
-      if (!self.settings.speechEnabled) {
-        self.showToast('请先开启「语音朗读」');
-        return;
-      }
-      e.preventDefault();
-      const toggle = document.getElementById('phoneticReadToggle');
-      toggle.classList.toggle('active');
-      self.settings.phoneticAutoRead = toggle.classList.contains('active');
-      await self.db.setSetting('phoneticAutoRead', self.settings.phoneticAutoRead);
     }
 
     const cardDefinitionFirstToggle = document.getElementById('cardDefinitionFirstToggle');
@@ -2078,9 +1986,7 @@ class VocabApp {
       self.settings.cardDefinitionFirst = toggle.classList.contains('active');
       await self.db.setSetting('cardDefinitionFirst', self.settings.cardDefinitionFirst);
       if (self.currentPage === 'learn' && self.todayWords.length > 0) {
-        self.cancelScheduledPhoneticRead();
         self.showCard(self.currentCardIndex);
-        self.schedulePhoneticReadAfterCardSwitch();
       }
     }
 
@@ -2092,9 +1998,7 @@ class VocabApp {
       self.settings.categoryDisplay = toggle.classList.contains('active');
       await self.db.setSetting('categoryDisplay', self.settings.categoryDisplay);
       if (self.currentPage === 'learn' && self.todayWords.length > 0) {
-        self.cancelScheduledPhoneticRead();
         self.showCard(self.currentCardIndex);
-        self.schedulePhoneticReadAfterCardSwitch();
       }
     }
 
@@ -2192,9 +2096,8 @@ class VocabApp {
     updateGoalSliderState();
   }
 
-  /** 把当前设置应用到界面：语音相关控件可用状态、字号等 */
+  /** 把当前设置应用到界面：练习设置控件、练习进度、字号等 */
   applySettings() {
-    this.refreshSpeechDependentToggles();
     // 设置页「练习设置」的控件取库里的设置值
     this.refreshPracticeSettingsControls();
     // 云同步可能刚合并了练习进度：进度条跟着刷新（总数由进入练习页时算好）
@@ -2237,11 +2140,10 @@ class VocabApp {
     };
 
     card.addEventListener('touchstart', (e) => {
-      // 检查是否点击了收藏按钮或发音按钮
+      // 检查是否点击了收藏按钮
       const target = e.target;
       if (
         target.closest('.favorite-btn') ||
-        target.closest('.speak-btn') ||
         target.closest('.language-badge')
       ) {
         isDragging = false;
@@ -2588,7 +2490,6 @@ class VocabApp {
   /** 卡片上的按钮与角标：点它们不翻面，也不应触发文字选中 */
   _isCardControl(target) {
     return !!(target && target.closest && (
-      target.closest('.speak-btn') ||
       target.closest('.favorite-btn') ||
       target.closest('.language-badge')
     ));
@@ -2687,10 +2588,6 @@ class VocabApp {
       };
     }
 
-    if (page !== 'learn') {
-      this.cancelScheduledPhoneticRead();
-    }
-
     // 离开练习页时取消「自动下一题」，避免在别的页面上把练习题悄悄翻过去
     if (page !== 'practice') {
       this.cancelPracticeAdvance();
@@ -2759,7 +2656,6 @@ class VocabApp {
           this.showCard(this.currentCardIndex);
           document.querySelector('.card-stack').style.display = 'flex';
           document.querySelector('.complete-container').style.display = 'none';
-          this.schedulePhoneticReadAfterCardSwitch();
           this.updateProgress();
         }
       } else {
@@ -3004,7 +2900,6 @@ class VocabApp {
    * 开始重新组一轮队列，保证【继续学习】永远有卡可背，而不是卡在空状态上。
    */
   async prepareLearnSession() {
-    this.cancelScheduledPhoneticRead();
     this._learnSessionSnapshot = null;
     // 新一轮会话开始：清掉上一次的「已跳过」内存名单（跳过本身不写学习记录）
     this._skippedWordIds.clear();
@@ -3210,9 +3105,8 @@ class VocabApp {
   }
 
   /**
-   * 渲染指定下标的卡片：拼接正反面 HTML（正面=词汇+音标+收藏/喇叭，
-   * 背面=释义+例句），按“释义优先”设置决定初始朝向，处理音标渐显定时，
-   * 并在开启音效且背面朝上时延迟自动朗读。
+   * 渲染指定下标的卡片：拼接正反面 HTML（正面=词汇+音标+收藏，
+   * 背面=释义+例句），按“释义优先”设置决定初始朝向，并处理音标渐显定时。
    */
   showCard(index) {
     if (index >= this.todayWords.length) {
@@ -3243,12 +3137,10 @@ class VocabApp {
     cardInner.innerHTML = `
       <div class="flashcard-front">
         ${badgeRowHtml}
-        <div class="flashcard-corner-tr">
-          <button class="speak-btn" id="speakBtn">
-          <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.74 2.5-2.26 2.5-4.02zM14 3.23v2.06c2.89 1.19 5 3.65 5 6.71s-2.11 5.52-5 6.71v2.06c4.01-1.29 7-4.95 7-9.77s-2.99-8.48-7-9.77z"/></svg>
-        </button>
-        </div>
         <button class="favorite-btn ${word.favorite ? 'active' : ''}" id="favoriteBtn">
+          <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+        </button>
+        <button class="favorite-btn favorite-btn-right ${word.favorite ? 'active' : ''}" id="favoriteBtnRight">
           <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
         </button>
         <div class="card-content">
@@ -3259,11 +3151,6 @@ class VocabApp {
         <div class="tap-hint">点击查看释义（Shift）</div>
       </div>
       <div class="flashcard-back">
-        <div class="flashcard-corner-tr">
-          <button class="speak-btn" id="speakBtnBack">
-          <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.74 2.5-2.26 2.5-4.02zM14 3.23v2.06c2.89 1.19 5 3.65 5 6.71s-2.11 5.52-5 6.71v2.06c4.01-1.29 7-4.95 7-9.77s-2.99-8.48-7-9.77z"/></svg>
-        </button>
-        </div>
         <button class="favorite-btn ${word.favorite ? 'active' : ''}" id="favoriteBtnBack">
           <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
         </button>
@@ -3311,16 +3198,9 @@ class VocabApp {
         phoneticText.style.visibility = 'visible';
       }
     }
-
-    if (this.settings.soundEnabled && this.isFlipped) {
-      setTimeout(() => {
-        this.speakCurrentWord();
-      }, 2000);
-    }
-    this.refreshSpeechDependentToggles();
   }
 
-  /** 翻转卡片（正面↔背面）；翻到背面且开启音效时 2 秒后自动朗读例句 */
+  /** 翻转卡片（正面↔背面） */
   flipCard() {
     const card = document.getElementById('flashcard');
     if (!card) {
@@ -3329,18 +3209,6 @@ class VocabApp {
     }
     card.classList.toggle('flipped');
     this.isFlipped = !this.isFlipped;
-    
-    // 如果开启了自动朗读，并且翻到释义面，2秒后自动朗读例句/释义
-    if (this.isFlipped && this.settings.soundEnabled) {
-      setTimeout(() => {
-        this.speakCurrentWord();
-      }, 2000);
-    }
-
-    // 释义优先：翻到词汇面时再触发音标自动朗读（切换卡片时若停在释义面则不会误触发）
-    if (!this.isFlipped && this.settings.cardDefinitionFirst) {
-      this.schedulePhoneticReadAfterCardSwitch();
-    }
   }
 
   /** 格式化时间为 YYYY-MM-DD HH:mm 格式，如 2026-09-11 23:45 */
@@ -3456,7 +3324,8 @@ class VocabApp {
   }
 
   /**
-   * 朗读用语种：english（含 legacy mandarin 英词卡）、cantonese、mandarin（普通话汉字）
+   * 词条语种归类：english（含 legacy mandarin 英词卡）、cantonese、mandarin（普通话汉字）。
+   * 用于语言角标、粤拼优先展示等。
    */
   getSpeechKind(word) {
     if (!word) return 'english';
@@ -3524,262 +3393,11 @@ class VocabApp {
     return `${badgeHtml}${badgeHtml && categoryHtml ? '&nbsp;&nbsp;' : ''}${categoryHtml}`;
   }
 
-  /** 该词条是否按粤语处理（决定音标优先粤拼、朗读用 zh-HK 音色） */
+  /** 该词条是否按粤语处理（决定音标优先展示粤拼） */
   isCantoneseWord(word) {
     return this.getSpeechKind(word) === 'cantonese';
   }
 
-  /** 按语种设置语速、音高（英语略接近自然语流，减轻生硬感） */
-  applyUtteranceProsody(utterance, lang) {
-    const low = (lang || '').toLowerCase();
-    utterance.volume = 1;
-    if (low.startsWith('en')) {
-      utterance.rate = 0.94;
-      utterance.pitch = 1;
-    } else if (low.startsWith('zh-hk')) {
-      utterance.rate = 0.88;
-      utterance.pitch = 1;
-    } else {
-      utterance.rate = 0.85;
-      utterance.pitch = 1;
-    }
-  }
-
-  /**
-   * 在可用音色中选择较自然的美式英语（优先 en-US、高质量/神经网络等命名）
-   */
-  pickBestEnglishVoice(voices) {
-    if (!voices || voices.length === 0) return null;
-    const candidates = voices.filter((v) => (v.lang || '').toLowerCase().startsWith('en'));
-    if (candidates.length === 0) return null;
-
-    const rank = (v) => {
-      const n = (v.name || '').toLowerCase();
-      const l = (v.lang || '').toLowerCase();
-      let s = 0;
-      if (l === 'en-us') s += 100;
-      else if (l.startsWith('en-us')) s += 95;
-      else if (l === 'en-gb') s += 72;
-      else if (l.startsWith('en-gb')) s += 68;
-      else s += 45;
-
-      try {
-        if (v.localService === true) s += 12;
-      } catch (e) {
-        /* ignore */
-      }
-
-      if (n.includes('google') && (n.includes('us') || n.includes('english'))) s += 38;
-      else if (n.includes('google')) s += 22;
-      if (n.includes('natural')) s += 30;
-      if (n.includes('neural')) s += 30;
-      if (n.includes('premium')) s += 18;
-      if (n.includes('microsoft')) s += 14;
-      if (n.includes('enhanced')) s += 14;
-      if (n.includes('samantha') || n.includes('aaron') || n.includes('ava')) s += 10;
-      if (n.includes('compact')) s -= 28;
-      if (n.includes('embedded')) s -= 18;
-      return s;
-    };
-
-    let best = candidates[0];
-    let bestScore = rank(best);
-    for (let i = 1; i < candidates.length; i++) {
-      const sc = rank(candidates[i]);
-      if (sc > bestScore) {
-        best = candidates[i];
-        bestScore = sc;
-      }
-    }
-    return best;
-  }
-  
-  /** 尽早枚举语音；部分浏览器需 voiceschanged 后才填充列表 */
-  primeSpeechSynthesis() {
-    if (!('speechSynthesis' in window)) return;
-    try {
-      window.speechSynthesis.getVoices();
-    } catch (e) {
-      /* ignore */
-    }
-  }
-
-  /**
-   * 朗读一段文本（发音功能入口）。
-   * 先取消正在播放的语音，再创建 SpeechSynthesisUtterance；
-   * 部分浏览器音色列表是异步加载的，这里用 voiceschanged 事件 +
-   * 两个超时兜底（120ms / 1800ms）确保最终一定能开口朗读。
-   */
-  speakWord(text, lang = 'zh-CN') {
-    if (!text) return;
-
-    const synth = window.speechSynthesis;
-    if (!synth) return;
-
-    synth.cancel();
-
-    try {
-      if (synth.paused) synth.resume();
-    } catch (e) {
-      /* ignore */
-    }
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = lang;
-    this.applyUtteranceProsody(utterance, lang);
-
-    let spoken = false;
-    let tShort = null;
-    let tFallback = null;
-    const cleanup = () => {
-      synth.removeEventListener('voiceschanged', onVoices);
-      if (tShort != null) {
-        clearTimeout(tShort);
-        tShort = null;
-      }
-      if (tFallback != null) {
-        clearTimeout(tFallback);
-        tFallback = null;
-      }
-    };
-    const speakNow = (voices) => {
-      if (spoken) return;
-      spoken = true;
-      cleanup();
-      this.trySpeakWithVoice(utterance, lang, voices || []);
-    };
-    function onVoices() {
-      const v = synth.getVoices();
-      if (v.length > 0) speakNow(v);
-    }
-
-    let voices = synth.getVoices();
-    if (voices.length > 0) {
-      speakNow(voices);
-      return;
-    }
-
-    synth.addEventListener('voiceschanged', onVoices);
-    synth.getVoices();
-
-    tShort = setTimeout(() => {
-      const v = synth.getVoices();
-      if (v.length > 0) speakNow(v);
-    }, 120);
-
-    tFallback = setTimeout(() => {
-      speakNow(synth.getVoices());
-    }, 1800);
-  }
-  
-  /**
-   * 在系统可用音色列表里为目标语言（en / zh-CN / zh-HK）挑选最合适的音色并朗读：
-   * 粤语严格匹配 zh-HK / Cantonese（避免错用普通话）；英语用 pickBestEnglishVoice 打分；
-   * 普通话优先 zh-CN；都找不到时退而求其次用同语种前缀或英语音色。
-   */
-  trySpeakWithVoice(utterance, lang, voices) {
-    if (!voices || voices.length === 0) {
-      window.speechSynthesis.speak(utterance);
-      return;
-    }
-    const want = (lang || '').toLowerCase();
-    let voice = null;
-
-    // 粤语必须用 zh-HK / Cantonese 音色；勿用「首个 zh」以免落到普通话
-    if (want === 'zh-hk' || want.startsWith('zh-hk')) {
-      const nameHints = (v) => {
-        const n = (v.name || '').toLowerCase();
-        const l = (v.lang || '').toLowerCase();
-        return (
-          l === 'zh-hk' ||
-          l.startsWith('zh-hk') ||
-          l.endsWith('-hk') ||
-          n.includes('cantonese') ||
-          n.includes('hong kong') ||
-          n.includes('hongkong') ||
-          n.includes('香港') ||
-          n.includes('粤语') ||
-          n.includes('粵語')
-        );
-      };
-      voice = voices.find(v => (v.lang || '').toLowerCase() === 'zh-hk') ||
-        voices.find(v => (v.lang || '').toLowerCase().startsWith('zh-hk')) ||
-        voices.find(nameHints);
-      if (!voice) {
-        const txt = (utterance.text || '').trim();
-        const latinJyutpingLike =
-          txt.length > 0 &&
-          !/[\u4e00-\u9fff]/.test(txt) &&
-          /[a-z]{1,6}[1-6]/i.test(txt);
-        if (latinJyutpingLike) {
-          utterance.lang = 'en-US';
-          this.applyUtteranceProsody(utterance, 'en-US');
-          voice = this.pickBestEnglishVoice(voices);
-        } else {
-          voice = voices.find(v => (v.lang || '').toLowerCase().startsWith('zh'));
-        }
-      }
-    } else if (want.startsWith('en')) {
-      voice = this.pickBestEnglishVoice(voices);
-    } else if (want.startsWith('zh')) {
-      voice =
-        voices.find(v => (v.lang || '').toLowerCase() === want) ||
-        voices.find(v => (v.lang || '').toLowerCase().startsWith(want.split('-')[0] + '-' + (want.split('-')[1] || ''))) ||
-        voices.find(v => (v.lang || '').toLowerCase() === 'zh-cn') ||
-        voices.find(v => (v.lang || '').toLowerCase().startsWith('zh-cn')) ||
-        voices.find(v => (v.lang || '').toLowerCase().startsWith('zh'));
-    } else {
-      voice =
-        voices.find(v => (v.lang || '').toLowerCase() === want) ||
-        voices.find(v => (v.lang || '').toLowerCase().startsWith(want.split('-')[0]));
-    }
-
-    if (!voice) {
-      voice =
-        voices.find(v => (v.lang || '').toLowerCase().startsWith(want.split('-')[0])) ||
-        voices.find(v => (v.lang || '').toLowerCase().startsWith('en'));
-    }
-
-    if (voice) utterance.voice = voice;
-    window.speechSynthesis.speak(utterance);
-  }
-  
-  /** 与学习卡正面一致：按词条语言朗读词汇（依据语种 / 音标对应的发音逻辑） */
-  speakWordEntryFront(word) {
-    if (!word) return;
-    const kind = this.getSpeechKind(word);
-    let text;
-    let lang = 'en-US';
-    if (kind === 'cantonese') {
-      text = (word.cantonese || word.word || '').trim();
-      lang = 'zh-HK';
-    } else if (kind === 'mandarin') {
-      text = (word.word || '').trim();
-      lang = 'zh-CN';
-    } else {
-      text = this.getEnglishLemmaForSpeech(word);
-      lang = 'en-US';
-    }
-    if (!text) return;
-    this.speakWord(text, lang);
-  }
-
-  // 朗读单词
-  speakCurrentWord() {
-    if (this.currentCardIndex >= this.todayWords.length) return;
-    const word = this.todayWords[this.currentCardIndex];
-    const kind = this.getSpeechKind(word);
-    
-    if (this.isFlipped) {
-      // 卡片背面：优先播放例句，没有例句时播放释义
-      const text = (word.example || '').trim() || word.definition || word.meaning || '';
-      const lang = kind === 'cantonese' ? 'zh-HK' : 'zh-CN';
-      this.speakWord(text, lang);
-    } else {
-      this.speakWordEntryFront(word);
-    }
-  }
-  
   /**
    * 给旧数据的收藏补上「收藏时间」(favoriteAt)。
    *
@@ -4144,7 +3762,6 @@ class VocabApp {
         setTimeout(slideIn, 16);
       }
       this._cardAnimating = false;
-      this.schedulePhoneticReadAfterCardSwitch();
     }, exitMs);
 
     this.updateProgress();
@@ -4172,154 +3789,6 @@ class VocabApp {
     const rect = stack.getBoundingClientRect();
     // 词卡在 card-stack 内左右各留 padding，卡片宽度之外的这部分就是画外余量
     return Math.max(0, (rect.width - this._getCardWidth()) / 2) || CARD_STACK_GUTTER_PX;
-  }
-
-  /** 取消尚未触发的“自动朗读音标”定时器（切页/重建队列时调用，避免对着旧卡片朗读） */
-  cancelScheduledPhoneticRead() {
-    if (this._phoneticReadTimer != null) {
-      clearTimeout(this._phoneticReadTimer);
-      this._phoneticReadTimer = null;
-    }
-  }
-
-  /** 切换卡片约 0.5 秒后自动朗读音标两遍（需开启「音标朗读」） */
-  schedulePhoneticReadAfterCardSwitch() {
-    if (!this.settings.phoneticAutoRead) return;
-    if (this.currentPage !== 'learn') return;
-    if (this.settings.cardDefinitionFirst && this.isFlipped) return;
-
-    this.cancelScheduledPhoneticRead();
-
-    this._phoneticReadTimer = setTimeout(() => {
-      this._phoneticReadTimer = null;
-      if (!this.settings.phoneticAutoRead || this.currentPage !== 'learn') return;
-      if (this.currentCardIndex >= this.todayWords.length) return;
-      const word = this.todayWords[this.currentCardIndex];
-      this.speakPhoneticTwice(word);
-    }, 500);
-  }
-
-  /** 自动朗读音标时选用的系统 TTS 语言（须随词条语种切换，不能仅靠音标是否为拉丁字母判断） */
-  getLangForPhoneticAutoRead(word, phoneticText) {
-    const kind = this.getSpeechKind(word);
-    if (kind === 'cantonese' || this.isImportedCantoneseLanguage(word)) return 'zh-HK';
-    if (kind === 'mandarin') return 'zh-CN';
-    if (/[\u4e00-\u9fff]/.test(phoneticText || '')) return 'zh-CN';
-    return 'en-US';
-  }
-
-  /**
-   * 自动朗读用的文本：粤语词条优先「粤拼」列，避免仍读英语音标列；
-   * 其它语种优先 phonetic，其次 jyutping。
-   */
-  getPhoneticAutoReadRaw(word) {
-    if (!word) return '';
-    const jp = (word.jyutping || '').trim();
-    const ph = (word.phonetic || '').trim();
-    const cantoneseLang =
-      this.getSpeechKind(word) === 'cantonese' || this.isImportedCantoneseLanguage(word);
-    if (cantoneseLang) {
-      return jp || ph;
-    }
-    return ph || jp;
-  }
-
-  /**
-   * 是否为常见英语 IPA 书写形式。浏览器 TTS 无法按音标朗读，只能读「单词拼写」才相对标准。
-   */
-  looksLikeEnglishIPA(s) {
-    const t = String(s || '');
-    if (!t.trim()) return false;
-    if (/^\s*\/.+\/\s*$/.test(t.replace(/\s/g, ''))) return true;
-    if (/^\s*\//.test(t) || /\/\s*$/.test(t)) return true;
-    return /[ˈˌəɛɪʊɔæɑɒɝθðʃʒŋːˑ]/.test(t);
-  }
-
-  /**
-   * 英语手动朗读（与学习卡正面一致）：优先读词条正文；
-   * 若正文误写成 IPA，则尝试读「音标」列里非 IPA 的拼写提示。
-   */
-  getEnglishLemmaForSpeech(word) {
-    let t = (word.word || '').trim();
-    if (!t) return '';
-    if (!this.looksLikeEnglishIPA(t)) return t;
-    const ph = (word.phonetic || '').trim();
-    if (ph && !this.looksLikeEnglishIPA(ph)) {
-      const cleaned = ph.replace(/^\/+|\/+$/g, '').trim();
-      return cleaned || ph;
-    }
-    return t;
-  }
-
-  /** 粤拼拉丁串加分音节空格，便于 TTS 分拍（仅粤语罗马字形态时处理） */
-  normalizeCantoneseRomanizationForSpeech(text) {
-    let t = String(text || '')
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, ' ');
-    if (!t || /[\u4e00-\u9fff]/.test(t)) return String(text || '').trim();
-    if (!t.includes(' ')) {
-      const parts = t.match(/[a-z]+[1-6]/g);
-      const compact = t.replace(/[^a-z0-9]/gi, '');
-      if (parts && parts.join('') === compact) {
-        t = parts.join(' ');
-      }
-    }
-    return t;
-  }
-
-  /** 朗读音标/粤拼字符串两遍；无内容则跳过 */
-  speakPhoneticTwice(word) {
-    if (!word || !this.settings.phoneticAutoRead) return;
-    const raw = this.getPhoneticAutoReadRaw(word);
-    if (!raw) return;
-
-    let text = raw.replace(/^\/+|\/+$/g, '').trim();
-    if (!text) text = raw;
-
-    const kind = this.getSpeechKind(word);
-    const cantonesePhonetic =
-      kind === 'cantonese' || this.isImportedCantoneseLanguage(word);
-    if (!cantonesePhonetic && kind === 'english' && this.looksLikeEnglishIPA(raw)) {
-      const lemma = this.getEnglishLemmaForSpeech(word);
-      if (lemma) text = lemma;
-    }
-
-    if (cantonesePhonetic) {
-      text = this.normalizeCantoneseRomanizationForSpeech(text);
-    }
-
-    window.speechSynthesis.cancel();
-
-    const lang = this.getLangForPhoneticAutoRead(word, text);
-
-    let started = false;
-    const run = () => {
-      if (started) return;
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length === 0) return;
-      started = true;
-      window.speechSynthesis.onvoiceschanged = null;
-
-      const u1 = new SpeechSynthesisUtterance(text);
-      u1.lang = lang;
-      this.applyUtteranceProsody(u1, lang);
-      u1.onend = () => {
-        const u2 = new SpeechSynthesisUtterance(text);
-        u2.lang = lang;
-        this.applyUtteranceProsody(u2, lang);
-        this.trySpeakWithVoice(u2, lang, window.speechSynthesis.getVoices());
-      };
-      this.trySpeakWithVoice(u1, lang, voices);
-    };
-
-    let voices = window.speechSynthesis.getVoices();
-    if (voices.length === 0) {
-      window.speechSynthesis.onvoiceschanged = run;
-      setTimeout(run, 100);
-    } else {
-      run();
-    }
   }
 
   /**
@@ -4508,7 +3977,7 @@ class VocabApp {
   // 与学习页的区别：只看词汇写出粤拼音标，不写任何学习记录（不改 status/收藏/今日统计）。
   //   1) 范围可单独选（全部 / 短语 / 字），与设置页的「词典导入」互不影响；
   //   2) 输入模式可选「含调值 / 不含调值」，决定音标里的声调数字要不要一起输入；
-  //   3) 卡片只保留翻转，去掉滑动、收藏、喇叭与三个操作按钮；
+  //   3) 卡片只保留翻转，去掉滑动、收藏与三个操作按钮；
   //   4) 卡片下方是输入框：每音节输入正确自动补空格，错误标红，整条正确标绿。
 
   /** 练习页事件绑定：卡片翻面、输入框、键盘开关、再练一轮（范围与调值开关在设置页） */
@@ -5445,7 +4914,6 @@ class VocabApp {
     const container = document.getElementById('libraryWords');
     
     if (words.length === 0) {
-      this._librarySpeakWordsById = new Map();
       container.innerHTML = `
         <div class="empty-state">
           <div class="empty-icon">
@@ -5458,8 +4926,6 @@ class VocabApp {
       document.getElementById('pagination')?.remove();
       return;
     }
-
-    this._librarySpeakWordsById = new Map(words.map((w) => [w.id, w]));
 
     // ---- 决定列表顺序 ----（规则见 orderLibraryWords）
     const effectiveStatus = this._libraryTodayOnly
@@ -5477,23 +4943,22 @@ class VocabApp {
         ${orderedWords.map(word => `
                 <div class="word-item" data-id="${word.id}">
                   <div class="word-info">
-                    <h3>${word.word}${word.favorite ? ' ' : ''}</h3>
+                    <h3>${word.word}</h3>
                     ${showMeaningInCard ? `<p>${word.definition || word.meaning}</p>` : ''}
                   </div>
                   <div class="word-status">
-                    ${this.filterStatus === 'favorite' ? `
+                    ${effectiveStatus === 'favorite' ? `
                       <div class="word-actions">
-                        <button type="button" class="word-action-btn library-speak-btn" data-id="${word.id}" title="发音" aria-label="发音">
-                          <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.74 2.5-2.26 2.5-4.02zM14 3.23v2.06c2.89 1.19 5 3.65 5 6.71s-2.11 5.52-5 6.71v2.06c4.01-1.29 7-4.95 7-9.77s-2.99-8.48-7-9.77z"/></svg>
-                        </button>
-                        <button type="button" class="word-action-btn unfavorite-btn" data-id="${word.id}">
+                        <button type="button" class="word-action-btn unfavorite-btn" data-id="${word.id}" title="取消收藏" aria-label="取消收藏">
                           <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
                         </button>
                       </div>
                     ` : `
                       ${word.favorite ? `
-                        <span class="favorite-badge">★</span>
-                      ` : ''}
+                        <span class="favorite-badge" title="已收藏">已收藏</span>
+                      ` : `
+                        <span class="status-switch favorite-switch" data-id="${word.id}" title="添加到收藏">➔收藏</span>
+                      `}
                       ${word.status === 'mastered' ? `
                         <span class="status-switch to-review" data-id="${word.id}" data-status="review">➔陌生</span>
                       ` : ''}
@@ -5507,13 +4972,7 @@ class VocabApp {
                         word.status === 'mastered' ? '已掌握' : 
                         word.status === 'review' ? '待复习' : '新词'
                       }</span>
-                      <div class="word-actions">
-                        <button type="button" class="word-action-btn library-speak-btn" data-id="${word.id}" title="发音" aria-label="发音">
-                          <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.74 2.5-2.26 2.5-4.02zM14 3.23v2.06c2.89 1.19 5 3.65 5 6.71s-2.11 5.52-5 6.71v2.06c4.01-1.29 7-4.95 7-9.77s-2.99-8.48-7-9.77z"/></svg>
-                        </button>
-
-                    </div>
-                  `}
+                    `}
                   </div>
                 </div>
         `).join('')}
@@ -5521,20 +4980,6 @@ class VocabApp {
     `;
     
     container.innerHTML = html;
-
-    // 渲染完成后同步喇叭按钮的可用状态（语音开关关闭时置灰）
-    this.refreshSpeechDependentToggles();
-
-    // 绑定编辑和删除事件
-    container.querySelectorAll('.library-speak-btn').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        if (!this.settings.speechEnabled) return;
-        e.stopPropagation();
-        const id = parseInt(btn.dataset.id, 10);
-        const word = this._librarySpeakWordsById.get(id);
-        if (word && this.settings.speechEnabled) this.speakWordEntryFront(word);
-      });
-    });
 
     container.querySelectorAll('.view-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -5557,8 +5002,18 @@ class VocabApp {
       });
     });
 
-    // 状态转换标签事件
-    container.querySelectorAll('.status-switch').forEach(span => {
+    // 「➔收藏」标签：点一下即把该单词加入收藏，收藏列表按收藏时间倒序
+    container.querySelectorAll('.favorite-switch').forEach(span => {
+      span.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = parseInt(span.dataset.id, 10);
+        await this.toggleFavorite(id);
+        await this.renderLibrary();
+      });
+    });
+
+    // 状态转换标签事件（只绑定带 data-status 的标签，避免误伤「➔收藏」）
+    container.querySelectorAll('.status-switch[data-status]').forEach(span => {
       span.addEventListener('click', async (e) => {
         e.stopPropagation();
         const id = parseInt(span.dataset.id);
@@ -5664,16 +5119,6 @@ class VocabApp {
       opt.classList.toggle('active', opt.dataset.mode === this.settings.learnMode);
     });
     
-    document.getElementById('soundToggle').classList.toggle('active', this.settings.soundEnabled);
-    const speechToggle = document.getElementById('speechToggle');
-    if (speechToggle) {
-      speechToggle.classList.toggle('active', this.settings.speechEnabled);
-    }
-    this.refreshSpeechDependentToggles();
-    const phoneticReadToggle = document.getElementById('phoneticReadToggle');
-    if (phoneticReadToggle) {
-      phoneticReadToggle.classList.toggle('active', this.settings.phoneticAutoRead);
-    }
     const cardDefinitionFirstToggle = document.getElementById('cardDefinitionFirstToggle');
     if (cardDefinitionFirstToggle) {
       cardDefinitionFirstToggle.classList.toggle('active', this.settings.cardDefinitionFirst);

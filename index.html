@@ -78,10 +78,10 @@
             <div class="flashcard" id="flashcard">
               <div class="flashcard-inner">
                 <div class="flashcard-front">
-                  <button class="speak-btn" id="speakBtn">
-                    <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.74 2.5-2.26 2.5-4.02zM14 3.23v2.06c2.89 1.19 5 3.65 5 6.71s-2.11 5.52-5 6.71v2.06c4.01-1.29 7-4.95 7-9.77s-2.99-8.48-7-9.77z"/></svg>
-                  </button>
                   <button class="favorite-btn" id="favoriteBtn">
+                    <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+                  </button>
+                  <button class="favorite-btn favorite-btn-right" id="favoriteBtnRight">
                     <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
                   </button>
                   <div class="card-content">
@@ -102,15 +102,15 @@
             <div class="card-actions">
               <button class="action-btn skip" id="btnSkip">
                 <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
-                <span>跳过</span>
+                <span>跳过（P）</span>
               </button>
               <button class="action-btn mastered" id="btnMastered">
                 <svg viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
-                <span>掌握</span>
+                <span>掌握（Y）</span>
               </button>
               <button class="action-btn difficult" id="btnDifficult">
                 <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
-                <span>陌生</span>
+                <span>陌生（N）</span>
               </button>
             </div>
           </div>
@@ -431,32 +431,6 @@
             </div>
           </div>
 
-          <!-- 朗读设置 -->
-          <div class="settings-section">
-            <h3 class="settings-section-title">朗读设置</h3>
-            <div class="setting-item">
-              <div class="setting-info">
-                <h4>语音朗读</h4>
-                <p>开启后，才能开启例句朗读、音标朗读</p>
-              </div>
-              <div class="toggle" id="speechToggle"></div>
-            </div>
-            <div class="setting-item">
-              <div class="setting-info">
-                <h4>例句朗读</h4>
-                <p>显示释义时，2秒钟后朗读例句</p>
-              </div>
-              <div class="toggle" id="soundToggle"></div>
-            </div>
-            <div class="setting-item">
-              <div class="setting-info">
-                <h4>音标朗读</h4>
-                <p>卡片翻转时，自动朗读音标2遍</p>
-              </div>
-              <div class="toggle" id="phoneticReadToggle"></div>
-            </div>
-          </div>    
-
           <!-- 账号与同步 -->
           <div class="settings-section" id="cloudSection">
             <h3 class="settings-section-title cloud-title">
@@ -509,7 +483,7 @@
               <div class="setting-item">
                 <div class="setting-info">
                   <h4>退出登录</h4>
-                  <p>学习记录会保留，重新登录可继续同步</p>
+                  <p>学习记录会保留，重登录可继续同步</p>
                 </div>
                 <button class="cloud-action-btn is-ghost" id="cloudSignOutBtn" type="button">退出</button>
               </div>

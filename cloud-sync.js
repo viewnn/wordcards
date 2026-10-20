@@ -109,9 +109,6 @@
     'cardDefinitionFirst',
     'categoryDisplay',
     'meaningDisplay',
-    'soundEnabled',
-    'speechEnabled',
-    'phoneticAutoRead',
     // 练习页的范围与调值开关：两端不一致时进度条的分母、题目难度都不同，
     // 用户会以为是「练习数据没同步」，所以一起同步
     'practiceScope',
@@ -434,7 +431,7 @@
     if (!global.supabase || typeof global.supabase.createClient !== 'function') {
       this.sdkReady = false;
       this.status = 'disabled';
-      this.statusDetail = 'Supabase SDK 未加载，请检查网络或 CDN 地址';
+      this.statusDetail = 'Supabase SDK 未加载';
       this.renderUi();
       console.warn('[cloud-sync] 未检测到 supabase-js SDK，云同步停用。');
       return;

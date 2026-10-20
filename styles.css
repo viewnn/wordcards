@@ -450,80 +450,6 @@ select {
   pointer-events: auto;
 }
 
-.flashcard-corner-tr {
-  position: absolute;
-  top: 10px;
-  right: 6px;
-  z-index: 2;
-  display: flex;
-  flex-direction: row-reverse;
-  align-items: center;
-  gap: 8px;
-}
-
-.flashcard-corner-tr .speak-btn {
-  position: static;
-}
-
-.speak-btn {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 44px;
-  height: 44px;
-  border: none;
-  background: rgba(74, 144, 217, 0.1);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.speak-btn:active {
-  transform: scale(0.9);
-  background: rgba(74, 144, 217, 0.2);
-}
-
-.speak-btn.disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
-.speak-btn.disabled svg {
-  fill: var(--text-light);
-}
-
-.library-speak-btn.disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
-.library-speak-btn.disabled svg {
-  fill: var(--text-light);
-}
-
-.speak-btn svg {
-  width: 28px;
-  height: 28px;
-  fill: var(--primary);
-}
-
-.flashcard-back .speak-btn svg {
-  fill: white;
-}
-
-.flashcard-back .speak-btn {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.flashcard-back .speak-btn:active {
-  background: rgba(255, 255, 255, 0.3);
-}
-
 .favorite-btn {
   position: absolute;
   top: 10px;
@@ -538,6 +464,12 @@ select {
   justify-content: center;
   cursor: pointer;
   transition: all 0.2s;
+}
+
+/* 右侧收藏按钮：与左上角的收藏按钮左右对称，状态由同一套逻辑同步 */
+.favorite-btn-right {
+  left: auto;
+  right: 6px;
 }
 
 .favorite-btn:active {
@@ -830,7 +762,7 @@ select {
 }
 
 /* ==================== 练习页面 ==================== */
-/* 练习页 = 学习页的“精简版”：去掉进度条、左右滑动提示、收藏/喇叭与三个操作按钮，
+/* 练习页 = 学习页的“精简版”：去掉进度条、左右滑动提示、收藏与三个操作按钮，
    保留卡片翻转；卡片下方换成音标输入框。 */
 .practice-container {
   width: 100%;
@@ -1419,6 +1351,16 @@ select {
 
 .status-switch.to-mastered:hover {
   background: #D3E0C9;
+}
+
+/* 「➔收藏」标签：与「➔陌生 / ➔掌握」同样的形态，用收藏色区分 */
+.status-switch.favorite-switch {
+  background: #F7EEDA;
+  color: #C08A2E;
+}
+
+.status-switch.favorite-switch:hover {
+  background: #F0E1C4;
 }
 
 .word-actions {
