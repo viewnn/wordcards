@@ -1557,6 +1557,7 @@
           if (goalChanged) {
             // 目标换了，「今天已完成过目标」按新目标重新判定
             this.app._todayGoalReachedDate = '';
+            this.app._todayGoalReachedGoal = 0;
             await this.app.db.setSetting('todayGoalReached', null);
           }
           await this.app.db.setSetting('learnProgress', null);

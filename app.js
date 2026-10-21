@@ -372,6 +372,15 @@ class VocabApp {
      */
     this._todayGoalReachedDate = '';
     /**
+     * 「今日目标已达成」时使用的每日目标值。
+     *
+     * 只记日期不够：目标从 10 改成 15 后，如果还按「已完成」的旧标记补足差额，
+     * 会把 10/15 硬抬成 15/15（补足上限 5 恰好覆盖这次差值），
+     * 手机上表现为「电脑端 10/15，手机一打开就是 15/15」。
+     * 因此目标变了就不再沿用旧的完成态。
+     */
+    this._todayGoalReachedGoal = 0;
+    /**
      * 还没落库完成的学习动作数量。
      *
      * 点「掌握 / 陌生」时卡片立刻切走，写库与统计重算是后台异步做的。
@@ -1938,6 +1947,7 @@ class VocabApp {
 
       // 目标换了，「今天已完成过目标」的判定要按新目标重来
       self._todayGoalReachedDate = '';
+      self._todayGoalReachedGoal = 0;
       await self.db.setSetting('todayGoalReached', null);
 
       // 队列长度跟着新目标变：丢掉旧进度与切页快照，按新目标重建队列。
@@ -2801,9 +2811,19 @@ class VocabApp {
       ? Math.max(0, Math.floor(Number(saved.count) || 0))
       : 0;
 
-    // 「今天已完成过目标」的标记（跨天自动失效）
+    // 「今天已完成过目标」的标记（跨天自动失效；同时记录达成时的目标值，
+    // 目标改过之后旧完成态不再生效，避免把 10/15 补成 15/15）
     const reached = await this.db.getSetting('todayGoalReached', null);
-    this._todayGoalReachedDate = (reached && reached.date === today) ? today : '';
+    const reachedToday = Boolean(reached && reached.date === today);
+    // 旧版本只存了 { date }，没有 goal：无法判断是不是改目标之前留下的完成态，
+    // 按「不沿用」处理，避免把 10/15 补成 15/15。新版本达成时会同时写入 goal。
+    const reachedGoal = reachedToday && reached.goal != null
+      ? Math.max(0, Number(reached.goal) || 0)
+      : 0;
+    const currentGoal = Math.max(0, Number(this.settings.dailyGoal) || 0);
+    const reachedStillValid = reachedToday && reachedGoal > 0 && reachedGoal === currentGoal;
+    this._todayGoalReachedDate = reachedStillValid ? today : '';
+    this._todayGoalReachedGoal = reachedStillValid ? reachedGoal : 0;
 
     this._todayRoundDate = today;
     this._roundStartReady = true;
@@ -2850,6 +2870,7 @@ class VocabApp {
       this.todayDoneCount = 0;
       // 跨天：昨天「已完成目标」的标记作废，今天重新开始
       this._todayGoalReachedDate = '';
+      this._todayGoalReachedGoal = 0;
       this.db.setSetting('todayGoalReached', null).catch(() => {});
       this.saveTodayDoneCount().catch(() => {});
       return true;
@@ -2900,6 +2921,7 @@ class VocabApp {
     const goal = Math.max(0, Number(this.settings.dailyGoal) || 0);
     if (this._statsReady && goal > 0 &&
         this._todayGoalReachedDate === this.todayKey() &&
+        this._todayGoalReachedGoal === goal &&
         this.todayDoneCount < goal) {
       const deficit = goal - this.todayDoneCount;
       // 只兜小波动（≤5 条）：差得多说明是别的问题，不能靠调起点掩盖
@@ -2939,6 +2961,7 @@ class VocabApp {
     // 开始新一轮：清掉「今日已完成」标记，之后要重新学满目标才算完成
     if (this._todayGoalReachedDate) {
       this._todayGoalReachedDate = '';
+      this._todayGoalReachedGoal = 0;
       this.db.setSetting('todayGoalReached', null).catch(() => {});
     }
     await this.saveTodayDoneCount();
@@ -3996,13 +4019,17 @@ class VocabApp {
     const emptyState = document.getElementById('learnEmptyState');
     if (emptyState) emptyState.style.display = 'none';
 
-    // 真正达成今日目标时记下日期：之后统计万一少 1~2 条（词典更新删词 / 另一端改动），
-    // 也不会让「已完成」退回 99/100
+    // 真正达成今日目标时记下日期与目标值：之后统计万一少 1~2 条
+    // （词典更新删词 / 另一端改动），也不会让「已完成」退回 99/100。
+    // 记录目标值是为了区分「同一个目标下的统计回落」和「目标被改过了」：
+    // 后者不能再沿用旧完成态，否则 10/15 会被补成 15/15。
+    const goal = Math.max(0, Number(this.settings.dailyGoal) || 0);
     if (this.isDailyGoalReached()) {
       const today = this.todayKey();
-      if (this._todayGoalReachedDate !== today) {
+      if (this._todayGoalReachedDate !== today || this._todayGoalReachedGoal !== goal) {
         this._todayGoalReachedDate = today;
-        this.db.setSetting('todayGoalReached', { date: today }).catch(() => {});
+        this._todayGoalReachedGoal = goal;
+        this.db.setSetting('todayGoalReached', { date: today, goal }).catch(() => {});
       }
     }
 
@@ -4013,7 +4040,6 @@ class VocabApp {
     //   - 真正达到每日目标 → 「今日学习目标已完成」；
     //   - 今天可学的词条已学完但没到目标（例如范围内只剩 20 条）→ 说明原因，
     //     并且不写成分数，免得看起来像目标被改小了（目标始终是设置页里的那个数）。
-    const goal = Math.max(0, Number(this.settings.dailyGoal) || 0);
     const done = Math.max(0, Number(this.todayDoneCount) || 0);
     const subtitle = document.querySelector('.complete-subtitle');
     if (subtitle) {
