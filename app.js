@@ -1143,6 +1143,26 @@ class VocabApp {
   }
 
   /**
+   * 恢复今日队列时，把「当前卡片下标」推进到第一张今天还没学过的卡。
+   *
+   * 另一台设备可能学得比会话快：云端会话里的 currentCardIndex 还停在 50，
+   * 但今日统计已经同步到 98/100。若直接按 50 恢复，用户会一直看到另一端
+   * 已经学过的词，点「掌握」进度也不再增长（那些词今天已经计过数）。
+   * 队列里还有没学过的词时，从保存的下标往后跳过已计入统计的卡；
+   * 纯复习轮（整队都学过、进度本来就不该再涨）则保持原下标。
+   */
+  alignRestoredCardIndex(index, words) {
+    const list = Array.isArray(words) ? words : [];
+    const len = list.length;
+    const start = Math.max(0, Math.min(Math.floor(Number(index) || 0), len));
+    const hasFresh = list.some((w) => !this.isWordCountedToday(w));
+    if (!hasFresh) return start;
+    let next = start;
+    while (next < len && this.isWordCountedToday(list[next])) next++;
+    return next;
+  }
+
+  /**
    * 「今天」的日期键。
    *
    * 用 nowMs()（同步可用时是服务端校准时间）而不是裸 Date.now()：
@@ -2750,7 +2770,10 @@ class VocabApp {
     const progress = {
       currentCardIndex: this.currentCardIndex,
       todayWords: JSON.parse(JSON.stringify(this.todayWords)),
-      savedAt: new Date().toISOString()
+      savedAt: new Date().toISOString(),
+      // 纯复习轮（整队都是今天已学过的词）要带上标记：恢复时不能把它当成
+      // 「下标落后的过期会话」丢掉，否则每次刷新都会把这轮复习从头开始
+      isReviewRound: !this._queueHasFreshWords
     };
     await this.db.setSetting('learnProgress', progress);
     // 累计张数跟着进度一起落库，否则刷新后进度条会从当前队列的下标重新算
@@ -2993,15 +3016,32 @@ class VocabApp {
     if (savedProgress && !shouldRestoreProgress) {
       await this.db.setSetting('learnProgress', null);
     }
-    
-    if (shouldRestoreProgress) {
+
+    // 这份会话里是否还有「今天没学过」的卡；以及今天目标是否已经达成
+    const restoredGoalReached = shouldRestoreProgress && this.isDailyGoalReached();
+    const restoredHasFresh = shouldRestoreProgress &&
+      restoredTodayWords.some((w) => !this.isWordCountedToday(w));
+
+    // 过期会话：队列里的词今天全都学过了，但目标还没达成（例如云端会话的下标
+    // 停在 50、统计已同步到 98/100，手机恢复后只会反复看到另一端学过的词，
+    // 点「掌握」进度也不涨）。这不是复习轮（复习轮会带 isReviewRound 标记），
+    // 直接丢弃，按「今天还没学过的词」重新抽一批。
+    const staleAllCountedQueue = shouldRestoreProgress && !restoredHasFresh &&
+      !restoredGoalReached && !savedProgress.isReviewRound;
+    if (staleAllCountedQueue) {
+      await this.db.setSetting('learnProgress', null);
+    }
+
+    if (shouldRestoreProgress && !staleAllCountedQueue) {
       // 恢复之前的学习进度，并使用数据库中的最新词条内容，避免旧快照覆盖词典更新
       this.todayWords = restoredTodayWords;
-      this.currentCardIndex = savedProgress.currentCardIndex;
+      // 会话下标可能落后于实际进度（另一端学了更多、统计已同步过来）：
+      // 跳过队列里今天已经学过的卡，避免用户对着旧单词反复点「掌握」而进度不涨。
+      this.currentCardIndex = this.alignRestoredCardIndex(savedProgress.currentCardIndex, this.todayWords);
       // 队列容量记成实际长度，供切页时的快照恢复判断使用
       this._queueCapacity = this.todayWords.length;
       // 恢复出来的队列里还有没有「今天还没学过」的词条（纯复习轮时界面要给出说明）
-      this._queueHasFreshWords = this.todayWords.some((w) => !this.isWordCountedToday(w));
+      this._queueHasFreshWords = restoredHasFresh;
 
       const emptyState = document.getElementById('learnEmptyState');
       if (emptyState) emptyState.style.display = 'none';
@@ -3010,7 +3050,7 @@ class VocabApp {
       //   达标 → 完成页 + 继续学习（用户点它才会开始新一轮）；
       //   未达标 → 不显示完成页，哪怕队列已经背完也直接重抽一轮继续学，
       //            避免用户以为「学完了」而误点【继续学习】。
-      if (this.isDailyGoalReached()) {
+      if (restoredGoalReached) {
         this.todayStats.total = this.todayWords.length;
         await this.db.setSetting('todayStats', this.todayStats);
         this.showComplete();

@@ -1636,6 +1636,8 @@
       // 本轮起点：进度条 = 今日已计入统计的词条数 − 本轮起点。
       // 带上它，另一台设备恢复今天的会话后进度条数字才与本机一致
       roundStart: toNumber(this.app._todayRoundStart, 0),
+      // 纯复习轮标记：整队都是今天已学过的词，恢复端不要把它当成过期会话丢掉
+      isReviewRound: Boolean(progress.isReviewRound),
       savedAt: savedAt,
       dictKeys: keys
     };
@@ -1694,12 +1696,19 @@
     if (words.length === 0) return false;
 
     var index = Math.min(Math.max(toNumber(session.currentCardIndex, 0), 0), words.length);
+    // 云端会话的 currentCardIndex 可能比云端学习记录旧（另一端已经学到更后面、
+    // 但会话还没推上来）：按本机合并后的状态跳过今天已经学过的卡，
+    // 否则手机恢复后会停在一堆旧单词上，点「掌握」进度也不增长。
+    if (typeof this.app.alignRestoredCardIndex === 'function') {
+      index = this.app.alignRestoredCardIndex(index, words);
+    }
     this._suppress = true;
     try {
       await this.app.db.setSetting('learnProgress', {
         currentCardIndex: index,
         todayWords: words,
-        savedAt: session.savedAt || new Date().toISOString()
+        savedAt: session.savedAt || new Date().toISOString(),
+        isReviewRound: Boolean(session.isReviewRound)
       });
     } finally {
       this._suppress = false;
