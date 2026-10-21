@@ -1722,15 +1722,17 @@
     // 把云端会话里的「本轮起点」一并恢复，两台设备的进度条数字才一致。
     // （早期版本这里按「队列下标」补张数，与今日统计口径不一致，会多出 1~2 个）
     //
-    // 但只在「本机今天还没开始过新一轮」时采纳远端起点：
-    // 起点代表这台设备自己的轮次。一旦本机已经开始了（起点 > 0 或今天已完成过目标），
-    // 用另一台设备的起点覆盖会让进度凭空差 1~2 个 —— 典型现象就是
-    // 「明明完成了 100/100，重开却变成 99/100」（另一端统计差 1 时它的起点是 101）。
-    var localStart = toNumber(this.app._todayRoundStart, 0);
-    var localRoundStarted = localStart > 0 || Boolean(this.app._todayGoalReachedDate);
-    if (!localRoundStarted && session.roundStart !== undefined && session.roundStart !== null &&
+    // 既然已经决定恢复云端的队列，就必须连它的本轮起点一起采用：
+    // 本机可能之前点过【继续学习】，本地起点很高；继续用本机起点套云端统计，
+    // 会出现「电脑端 6/10，手机端 0/10」。setTodayRoundStart() 内部对
+    // 「起点 > 今日已学词条数」的失效值会自动归零，不会再把 100/100 压成 99。
+    if (session.roundStart !== undefined && session.roundStart !== null &&
         typeof this.app.setTodayRoundStart === 'function') {
       try {
+        // 先用刚合并完的词条状态重算今日统计，再对齐起点。
+        // 否则 setTodayRoundStart() 会拿同步前的旧统计做「起点是否失效」判断，
+        // 可能把合法的远端起点误判成过大而清零。
+        await this.app.refreshStatusCounts();
         await this.app.setTodayRoundStart(session.roundStart);
       } catch (error) {
         console.warn('[cloud-sync] 对齐今日进度起点失败:', error);
