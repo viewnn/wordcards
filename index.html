@@ -43,6 +43,11 @@
     <main class="page-content">
       <!-- 学习页面 -->
       <div id="learnPage" class="page active">
+        <!-- 启动时等待首次云同步的遮罩：避免先按本机空库显示 0/100 -->
+        <div class="learn-sync-mask" id="learnSyncMask" style="display: none;">
+          <div class="learn-sync-spinner" aria-hidden="true"></div>
+          <p>正在同步学习进度…</p>
+        </div>
         <div class="learn-container">
           <!-- 进度条 -->
           <div class="progress-bar">

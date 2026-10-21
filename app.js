@@ -503,6 +503,12 @@ class VocabApp {
     this._keyboardOpen = false;
     /** 练习页底部固定键盘是否展开（默认收起：收起时卡片才有足够高度与学习卡一致） */
     this._practiceKeyboardOpen = false;
+    /**
+     * 应用是否已经完成首次渲染。
+     * 启动阶段会先等首次云同步落定再渲染学习页（见 init），
+     * 云同步的界面刷新逻辑据此跳过「重建学习队列」，避免同一份云端进度被建两次。
+     */
+    this._appReady = false;
   }
   /**
    * 应用启动入口（DOMContentLoaded 后调用一次）。
@@ -542,13 +548,39 @@ class VocabApp {
       await this.loadTodayStats();
       // 显示上次词库更新时间
       await this.loadDictUpdateTimeDisplay();
-      this.render();
+
+      // 【云同步钩子 3】先启动云同步，并等首次同步落定后再渲染学习页。
+      // 手机端如果先按本地空库渲染，会显示 0/100；用户背了几十张后云端记录才合并进来，
+      // 进度会瞬间跳到目标并弹出【继续学习】（例如电脑端 64 + 手机端 36 = 100）。
+      // 最多等 10 秒；未登录 / 未配置 / 离线时几乎立即返回，不影响本地使用。
+      const cloudSync = window.CloudSync;
+      let syncMaskTimer = null;
+      try {
+        if (cloudSync && typeof cloudSync.attach === 'function') {
+          const shouldWait = typeof cloudSync.isConfigured === 'function' && cloudSync.isConfigured() &&
+            typeof cloudSync.hasStoredSession === 'function' && cloudSync.hasStoredSession();
+          const cloudReady = cloudSync.attach(this);
+          if (shouldWait && cloudReady && typeof cloudReady.then === 'function') {
+            const waitReady = typeof cloudSync.whenReady === 'function'
+              ? cloudSync.whenReady(10000)
+              : Promise.race([
+                  cloudReady,
+                  new Promise((resolve) => setTimeout(resolve, 10000))
+                ]);
+            // 同步通常很快：250ms 内完成就不闪遮罩；慢的时候给出明确提示
+            syncMaskTimer = setTimeout(() => this.showInitialSyncPending(), 250);
+            await waitReady;
+          }
+        }
+
+        await this.render();
+        this._appReady = true;
+      } finally {
+        if (syncMaskTimer) clearTimeout(syncMaskTimer);
+        this.hideInitialSyncPending();
+      }
       // 学习卡此刻可见：量一次高度，练习卡据此与学习卡等高
       this.syncPracticeCardHeight();
-
-      // 【云同步钩子 3】启动云同步（登录态恢复、首次合并、注册网络/前台监听）。
-      // 未配置 Supabase 或未加载 SDK 时，内部直接跳过，不影响任何本地功能。
-      window.CloudSync?.attach?.(this);
     } catch (error) {
       console.error('App initialization failed:', error);
       this.showToast('应用初始化失败，正在尝试修复...');
@@ -975,7 +1007,8 @@ class VocabApp {
       await this.loadTodayDoneCount();
       this.bindEvents();
       await this.addSampleWords();
-      this.render();
+      await this.render();
+      this._appReady = true;
       this.showToast('数据已重置，应用恢复正常');
     } catch (recoverError) {
       console.error('Recovery failed:', recoverError);
@@ -2685,13 +2718,29 @@ class VocabApp {
     this.syncPracticeCardHeight();
   }
 
-  /** 首次渲染：准备今日学习队列（学习页默认显示）并把设置应用到界面 */
-  render() {
-    this.prepareLearnSession();
+  /**
+   * 首次渲染：准备今日学习队列（学习页默认显示）并把设置应用到界面。
+   * 改为 async：启动阶段要等队列真正就绪后再移除「正在同步」遮罩，
+   * 否则会先闪一下空卡片。
+   */
+  async render() {
+    await this.prepareLearnSession();
     this.applySettings();
     // 同步设置页控件状态：设置页虽未展示，但开关的初始状态必须与库里读到的设置一致
     // （例如「显示释义」默认开启，用户关了之后刷新页面，再进设置页应看到关闭态）
     this.renderSettings();
+  }
+
+  /** 启动阶段等待首次云同步时显示遮罩，避免用户先看到本机的 0/100 */
+  showInitialSyncPending() {
+    const mask = document.getElementById('learnSyncMask');
+    if (mask) mask.style.display = 'flex';
+  }
+
+  /** 隐藏「正在同步学习进度」遮罩 */
+  hideInitialSyncPending() {
+    const mask = document.getElementById('learnSyncMask');
+    if (mask) mask.style.display = 'none';
   }
 
   // 保存学习进度到 IndexedDB

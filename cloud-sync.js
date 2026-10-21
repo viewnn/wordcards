@@ -397,6 +397,8 @@
     this._pushTimer = null;
     this._syncPromise = null;
     this._attached = false;
+    /** 首次同步 Promise：attach() 返回并保存在此，供启动阶段等云端进度落定 */
+    this.ready = null;
     // 前台只提供登录：账号由管理员在 Supabase 后台创建
     this._unsubscribeAuth = null;
     /** SDK 是否可用：null=还没判断，true=可用，false=CDN 没加载成功 */
@@ -406,11 +408,12 @@
   // ---------------------------------------------------------------- 生命周期
 
   /**
-   * 由 app.js 在初始化完成时调用。
-   * 未配置 Supabase 或未加载 SDK 时直接返回，不影响任何本地功能。
+   * 由 app.js 在初始化时调用。
+   * 返回首次同步的 Promise（启动阶段据此等云端进度落定后再渲染学习页）；
+   * 未配置 Supabase 或未加载 SDK 时返回已完成的 Promise，不影响任何本地功能。
    */
   CloudSyncEngine.prototype.attach = function (app) {
-    if (this._attached) return;
+    if (this._attached) return this.ready || Promise.resolve(false);
     this._attached = true;
     this.app = app;
 
@@ -426,7 +429,8 @@
         '  开启方法：① 在 supabase.com 建项目 ② 执行 supabase/schema.sql ' +
         '③ 把 Project URL 和 anon key 填进 supabase-config.js'
       );
-      return;
+      this.ready = Promise.resolve(false);
+      return this.ready;
     }
     if (!global.supabase || typeof global.supabase.createClient !== 'function') {
       this.sdkReady = false;
@@ -434,7 +438,8 @@
       this.statusDetail = 'Supabase SDK 未加载';
       this.renderUi();
       console.warn('[cloud-sync] 未检测到 supabase-js SDK，云同步停用。');
-      return;
+      this.ready = Promise.resolve(false);
+      return this.ready;
     }
     this.sdkReady = true;
 
@@ -461,13 +466,50 @@
     // 不会在 bootstrap 的这几十毫秒里显示成「未启用」而让人以为没生效
     this.renderUi();
 
-    // 再读本机元数据（自动同步开关、上次同步时间等），然后建立客户端并恢复登录态
-    this.loadMeta()
+    // 再读本机元数据（自动同步开关、上次同步时间等），然后建立客户端并恢复登录态。
+    // 这个 Promise 会在首次同步（或未登录判定）结束时落定，启动阶段据此决定
+    // 是否等云端进度回来后再渲染学习页。
+    this.ready = this.loadMeta()
       .catch(function () {})
       .then(this.bootstrap.bind(this))
       .catch(function (error) {
         console.error('[cloud-sync] 初始化失败:', error);
+        return false;
       });
+    return this.ready;
+  };
+
+  /** 是否已在 supabase-config.js 里填好地址与 key */
+  CloudSyncEngine.prototype.isConfigured = function () {
+    return CONFIGURED;
+  };
+
+  /**
+   * 本机是否存有登录态（用于启动时判断「值得等首次同步」）。
+   * 未登录过就无需等待，避免每次打开都白等一次 bootstrap。
+   */
+  CloudSyncEngine.prototype.hasStoredSession = function () {
+    try {
+      return Boolean(global.localStorage && global.localStorage.getItem('wordcards.auth'));
+    } catch (error) {
+      return false;
+    }
+  };
+
+  /**
+   * 等首次同步落定，最多等 timeoutMs 毫秒。
+   * 永远 resolve（超时 / 未配置 / 同步失败都返回 false），调用方按本地数据继续启动。
+   */
+  CloudSyncEngine.prototype.whenReady = function (timeoutMs) {
+    var ready = this.ready || Promise.resolve(false);
+    var ms = toNumber(timeoutMs, 0);
+    if (ms <= 0) return ready;
+    return Promise.race([
+      ready,
+      new Promise(function (resolve) {
+        setTimeout(function () { resolve(false); }, ms);
+      })
+    ]);
   };
 
   /** 创建 Supabase 客户端、恢复登录态、注册登录态监听 */
@@ -1518,7 +1560,11 @@
             await this.app.db.setSetting('todayGoalReached', null);
           }
           await this.app.db.setSetting('learnProgress', null);
-          await this.app.prepareLearnSession();
+          // 启动阶段先不建队列：app.init() 会在首次同步落定后统一 render()，
+          // 由那一次 prepareLearnSession 按合并后的设置/进度建队。
+          if (this.app._appReady !== false) {
+            await this.app.prepareLearnSession();
+          }
           if (this.app.currentPage === 'library') await this.app.renderLibrary();
         } catch (error) {
           console.warn('[cloud-sync] 应用云端设置后重建学习队列失败:', error);
@@ -1681,8 +1727,11 @@
       }
     }
 
-    // 让学习页按同步过来的队列重建（prepareLearnSession 会读取刚写入的 learnProgress）
-    if (this.app.currentPage === 'learn') {
+    // 让学习页按同步过来的队列重建（prepareLearnSession 会读取刚写入的 learnProgress）。
+    // 启动阶段（_appReady === false）先不重建：app.init() 会在首次同步落定后
+    // 统一调用 render()，由那一次 prepareLearnSession 恢复云端队列，避免这里先建一次、
+    // render() 再建一次把恢复出来的当前下标冲掉。
+    if (this.app.currentPage === 'learn' && this.app._appReady !== false) {
       this.app.currentCardIndex = 0;
       this.app._learnSessionSnapshot = null;
       try {
@@ -2316,11 +2365,14 @@
    */
   CloudSyncEngine.prototype.refreshLocalViews = async function (rebuildLearnQueue) {
     if (!this.app) return;
+    var booting = this.app._appReady === false;
+    var doneBefore = toNumber(this.app.todayDoneCount, 0);
     try {
       // 统计完全由词条状态实时算出，状态变了就必须整体重算
       await this.app.refreshStatusCounts();
+      var doneAfter = toNumber(this.app.todayDoneCount, 0);
 
-      if (rebuildLearnQueue) {
+      if (rebuildLearnQueue && !booting) {
         this.app._learnSessionSnapshot = null;
         // 立刻重建队列的两种情况：
         //   1) 还没开始背（下标为 0）—— 不会打断正在学习的人；
@@ -2346,6 +2398,14 @@
           document.querySelectorAll('.favorite-btn').forEach(function (btn) {
             btn.classList.toggle('active', Boolean(word.favorite));
           });
+        }
+        // 启动时的首次同步正常会在渲染前完成；只有「等超时后用户已经开始学」
+        // 或后台同步晚到时才会走到这里。进度因云端记录突然增加，要用轻提示说明，
+        // 避免用户以为进度条坏了。
+        if (!booting && doneAfter > doneBefore && this.app.currentCardIndex > 0 &&
+            typeof this.app.showToast === 'function') {
+          var goal = toNumber(this.app.settings && this.app.settings.dailyGoal, 0);
+          this.app.showToast('已同步云端进度：今日 ' + doneAfter + (goal > 0 ? '/' + goal : ''));
         }
       }
     } catch (error) {

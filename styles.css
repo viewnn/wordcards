@@ -174,6 +174,11 @@ select {
   min-height: 100%;
 }
 
+/* 学习页：等待首次云同步时的遮罩以本页为定位基准 */
+#learnPage {
+  position: relative;
+}
+
 /* 切页入场动画：只做淡入，不做位移。
    页面本身至少占满一屏（.learn-container 等是 min-height: 100%），
    一旦加上 translateY(10px)，内容底部就会在动画这 0.3 秒里超出滚动容器，
@@ -184,6 +189,34 @@ select {
 }
 
 /* ==================== 学习页面 ==================== */
+/* 首次云同步遮罩：盖住整页学习内容，避免先显示本机的 0/100 */
+.learn-sync-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.learn-sync-spinner {
+  width: 30px;
+  height: 30px;
+  border: 3px solid rgba(74, 144, 217, 0.18);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: learnSyncSpin 0.8s linear infinite;
+}
+
+@keyframes learnSyncSpin {
+  to { transform: rotate(360deg); }
+}
+
 .learn-container {
   width: 100%;
   display: flex;
