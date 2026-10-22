@@ -96,7 +96,7 @@ select {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 20px;
+  padding: 14px 14px;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border-color);
   position: relative;
@@ -261,7 +261,7 @@ select {
   flex-direction: column;
   /* min-height 代替固定 height：空间不足时由 .page-content 出滚动条 */
   min-height: 100%;
-  padding: 8px;
+  padding: 8px 14px;
   box-sizing: border-box;
   background: var(--bg-card);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
@@ -879,7 +879,7 @@ select {
   display: flex;
   flex-direction: column;
   min-height: 100%;
-  padding: 8px;
+  padding: 8px 14px;
   box-sizing: border-box;
   background: var(--bg-card);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
@@ -1148,7 +1148,7 @@ select {
 
 /* ==================== 词库页面 ==================== */
 .library-header {
-  padding: 16px 20px;
+  padding: 16px 14px;
   background: var(--bg-card);
   box-shadow: var(--shadow-sm);
   position: sticky;
@@ -1371,7 +1371,7 @@ select {
 }
 
 .library-container {
-  padding: 20px;
+  padding: 20px 14px;
   padding-bottom: calc(80px + env(safe-area-inset-bottom));
   background: var(--bg-card);
 }
@@ -1798,7 +1798,7 @@ select {
 
 /* ==================== 设置页面 ==================== */
 .settings-container {
-  padding: 20px;
+  padding: 20px 14px;
   padding-bottom: calc(80px + env(safe-area-inset-bottom));
   background: var(--bg-card);
   min-height: calc(100%);
