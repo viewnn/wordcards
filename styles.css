@@ -504,8 +504,8 @@ select {
 
 .favorite-btn {
   position: absolute;
-  top: 20px;
-  left: 6px;
+  top: 0px;
+  left: 0px;
   width: 44px;
   height: 44px;
   border: none;
@@ -521,7 +521,7 @@ select {
 /* 右侧收藏按钮：与左上角左右对称，状态由同一套逻辑同步 */
 .favorite-btn-right {
   left: auto;
-  right: 6px;
+  right: 0px;
 }
 
 .favorite-btn:active {
