@@ -620,7 +620,8 @@ select {
   /* 正文上移由内部 .card-content 的 padding-top 控制，两面数值一致 → 翻转不错位 */
   justify-content: flex-start;
   text-align: center;
-  padding: 20px;
+  /* 将padding 20px 改成了 14px，背面蓝色背景也要改成 14px  */
+  padding: 14px;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   border-radius: var(--radius-lg);
@@ -636,8 +637,8 @@ select {
   align-items: center;
   justify-content: flex-start;
   text-align: center;
-  /* 与正面同一套内边距（20px 内容边距 + 扩出去的一圈） */
-  padding: calc(20px + var(--flashcard-pad));
+  /* 与正面同一套内边距（14px 内容边距 + 扩出去的一圈） */
+  padding: calc(14px + var(--flashcard-pad));
   transform: rotateY(180deg);
   -webkit-transform: rotateY(180deg);
   /* 护眼：去饱和的柔和暖蓝紫 */
