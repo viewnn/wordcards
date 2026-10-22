@@ -93,6 +93,33 @@ const PRACTICE_ADVANCE_DELAY_MS = 900;
  */
 const KEYBOARD_MIN_HEIGHT_PX = 120;
 
+// ==================== 学习范围（设置页 → 学习设置） ====================
+/**
+ * 学习范围：决定学习页的卡片从哪一类词条中抽取。
+ *   all      全部（保持原有逻辑：按重复频率抽词，学完可进入复习轮）
+ *   new      新词（status === 'new'）
+ *   review   待复习（status === 'review'）
+ *   mastered 已掌握（status === 'mastered'）
+ *   favorite 收藏（favorite === true）
+ * 具体范围一旦学完，学习页显示红字提示并冻结三个操作按钮，进度不归零；
+ * 用户切换范围后，今日进度继续沿用（例如 20/100 → 21/100）。
+ */
+const STUDY_SCOPE_VALUES = ['all', 'new', 'review', 'mastered', 'favorite'];
+/**
+ * 学习范围完成进度的存储版本。
+ * v2 起：学一张卡只记「全部」和“当前正在学习的 tab”，不再顺手记
+ * 已掌握/待复习/收藏（否则在「新词」里学习时，这些 tab 会被误判为已学完）。
+ */
+const SCOPE_PASS_VERSION = 2;
+/** 学习范围对应的中文名 */
+const STUDY_SCOPE_LABELS = {
+  all: '全部',
+  new: '新词',
+  review: '待复习',
+  mastered: '已掌握',
+  favorite: '收藏'
+};
+
 // ==================== IndexedDB 数据库操作（数据层） ====================
 /**
  * 数据层类：对 IndexedDB 的 Promise 化封装。
@@ -409,6 +436,31 @@ class VocabApp {
      */
     this._scopePoolCache = [];
     /**
+     * 词库菜单里手动改动当前「学习范围」成员后，需要强制放进学习队列的词条 id。
+     *
+     * 例如：学习范围是「待复习」且已经显示「已学完」，此时到词库把一条新词改成
+     * 「待复习」。这条词刚写过 lastStudied（今天已计入统计），按“只抽今天没学过的词”
+     * 的规则会被排除，红字提示就会一直留着。这里把这类词单独记下来，
+     * 重建队列时强制排在最前面，让学习页的提示与词库里的范围标签保持一致。
+     */
+    this._externalScopeIncludeIds = new Set();
+    /** 上面这些 id 属于哪个学习范围（切换范围时清空） */
+    this._externalScopeIncludeScope = 'all';
+    /**
+     * 「学习范围」每一轮已经学过的词条（用 dict_key 记录，跨设备/重新导入词典都稳定）。
+     *
+     * 每个 tab（全部/新词/待复习/已掌握/收藏）各自维护一份：
+     * 某个 tab 内的词条 key 全部出现在对应集合里，才算「这个 tab 学完一遍」，
+     * 学习页才提示「已学完【…】」。之后如果词典新增词条、或者词库里把某条词
+     * 新加进这个 tab，它的 key 不在集合里 → 自动取消「已学完」，继续出卡；
+     * 学过之后 key 补进集合，再次学完才重新提示。
+     */
+    this._scopePassDone = this._emptyScopePassDone();
+    /** 学习范围进度的防抖保存定时器（学习过程中每张卡都写库太重） */
+    this._scopePassSaveTimer = null;
+    /** 正在处理“一轮队列走完”：继续下一批 / 显示已学完，防止重复进入 */
+    this._handlingScopeEnd = false;
+    /**
      * 本次会话里被「跳过」的词条 id。
      * 跳过不写学习记录（不改 status / lastStudied），所以需要这份内存名单来保证
      * 跳过的词不会立刻被补回队列；新一轮会话开始时清空。
@@ -428,7 +480,9 @@ class VocabApp {
       repeatFrequency: 2,
       /** 词典导入范围：all / phrase / word，与设置页下拉同步 */
       dictImportType: 'all',
-      categoryDisplay: false,         // 卡片上方是否显示分类徽标（默认关闭；loadSettings 会从库中读取用户选择）
+      /** 学习范围：all / new / review / mastered / favorite（决定学习页卡片抽词范围） */
+      studyScope: 'all',
+      categoryDisplay: true,          // 卡片上方是否显示分类徽标（默认开启；loadSettings 会从库中读取用户选择）
       /** 词库列表卡片中，单词下方是否显示释义（默认开启；只影响词库卡片，查看单词弹窗不受影响） */
       meaningDisplay: true,
       /** 练习页：练习范围 all / phrase / word（独立于学习页的「词典导入」） */
@@ -1084,15 +1138,18 @@ class VocabApp {
   async loadSettings() {
     this.settings.dailyGoal = await this.db.getSetting('dailyGoal', 100);
     this.settings.cardDefinitionFirst = await this.db.getSetting('cardDefinitionFirst', false);
-    this.settings.categoryDisplay = await this.db.getSetting('categoryDisplay', false);
+    this.settings.categoryDisplay = await this.db.getSetting('categoryDisplay', true);
     this.settings.meaningDisplay = await this.db.getSetting('meaningDisplay', true);
     this.settings.learnMode = await this.db.getSetting('learnMode', 'random');
     this.settings.phoneticDelay = await this.db.getSetting('phoneticDelay', 2);
     this.settings.repeatFrequency = await this.db.getSetting('repeatFrequency', 2);
     this.settings.dictImportType = await this.db.getSetting('dictImportType', 'all');
+    this.settings.studyScope = this.normalizeStudyScope(await this.db.getSetting('studyScope', 'all'));
     this.settings.practiceScope = await this.db.getSetting('practiceScope', 'all');
     this.settings.practiceToneMode = await this.db.getSetting('practiceToneMode', 'with');
     this.settings.practiceProgress = await this.db.getSetting('practiceProgress', { word: [], phrase: [] });
+    // 各学习范围「已经学过一遍」的词条集合（dict_key），用于判断 tab 是否学完
+    await this.loadScopePass();
     // 进度索引（Set）由持久化的列表重建
     this.initPracticeProgress();
     // 旧版本把练习进度存成本地词条 id：id 是 IndexedDB 自增主键，换设备后会错位，
@@ -1111,6 +1168,140 @@ class VocabApp {
       word: { mastered: 0, review: 0 },
       phrase: { mastered: 0, review: 0 }
     };
+  }
+
+  // ==================== 学习范围的「学完一遍」进度 ====================
+  // 每个学习范围（全部/新词/待复习/已掌握/收藏）分别记录已经学过的 dict_key。
+  // 一个 tab 内的词条全部在集合里 → 该 tab 学完一遍，学习页显示红字提示。
+
+  _emptyScopePassDone() {
+    return {
+      all: new Set(),
+      new: new Set(),
+      review: new Set(),
+      mastered: new Set(),
+      favorite: new Set()
+    };
+  }
+
+  /** 从数据库读取各学习范围的完成集合；旧数据/异常数据按空集合处理 */
+  async loadScopePass() {
+    const saved = await this.db.getSetting('studyScopePass', null);
+    this._scopePassDone = this._emptyScopePassDone();
+    if (!saved || typeof saved !== 'object') return;
+
+    // 旧版会把“这张卡学完后的状态 tab / 收藏 tab”也一起标记，
+    // 导致在「新词」里学习时，已掌握/待复习/收藏被误判成已学完。
+    // 这些具体 tab 的旧记录不可信，升级到 v2 时只保留「全部」的进度。
+    const trusted = Number(saved.version) === SCOPE_PASS_VERSION;
+    for (const scope of STUDY_SCOPE_VALUES) {
+      if (!trusted && scope !== 'all') continue;
+      const list = Array.isArray(saved[scope]) ? saved[scope] : [];
+      for (const key of list) {
+        if (key) this._scopePassDone[scope].add(String(key));
+      }
+    }
+    if (!trusted) {
+      // 写回 v2，避免每次启动都重复迁移
+      await this.saveScopePass();
+    }
+  }
+
+  /** 把各学习范围的完成集合落库（数组形式，便于 IndexedDB/JSON 存储） */
+  async saveScopePass() {
+    if (this._scopePassSaveTimer) {
+      clearTimeout(this._scopePassSaveTimer);
+      this._scopePassSaveTimer = null;
+    }
+    const out = { version: SCOPE_PASS_VERSION };
+    for (const scope of STUDY_SCOPE_VALUES) {
+      out[scope] = Array.from(this._scopePassDone[scope] || []);
+    }
+    await this.db.setSetting('studyScopePass', out);
+  }
+
+  /**
+   * 学习过程中每张卡都整体序列化写库太重，这里防抖 1 秒；
+   * 显示「已学完」、新增词条等关键节点会直接 await saveScopePass()。
+   */
+  scheduleSaveScopePass() {
+    if (this._scopePassSaveTimer) clearTimeout(this._scopePassSaveTimer);
+    this._scopePassSaveTimer = setTimeout(() => {
+      this._scopePassSaveTimer = null;
+      this.saveScopePass().catch((error) => {
+        console.warn('[learn] 保存学习范围进度失败:', error);
+      });
+    }, 1000);
+  }
+
+  /** 某词条在当前学习范围内是否已经学过一遍 */
+  isScopePassWordDone(word, scope = this.settings.studyScope) {
+    const key = this.dictKeyOf(word);
+    if (!key) return false;
+    const done = this._scopePassDone[this.normalizeStudyScope(scope)];
+    return Boolean(done && done.has(key));
+  }
+
+  /** 当前学习范围内还有多少词条没学过一遍 */
+  countPendingScopeWords(pool, scope = this.settings.studyScope) {
+    const list = Array.isArray(pool) ? pool : [];
+    const done = this._scopePassDone[this.normalizeStudyScope(scope)];
+    if (!done) return list.length;
+    return list.filter((w) => {
+      const key = this.dictKeyOf(w);
+      return !key || !done.has(key);
+    }).length;
+  }
+
+  /**
+   * 一次学习动作完成后，把该词条记入「全部」和“当前正在学习的 tab”。
+   *
+   * 不能顺手记到这张卡学完后的状态 tab / 收藏 tab：
+   * 例如在「新词」里点掌握，词条会变成已掌握；如果连「已掌握」也一起标记，
+   * 用户之后切到「已掌握」范围时，会看到“已学完”而学不到这批新词。
+   * 各具体 tab 只认“在这个 tab 里学过的卡”，互不串进度。
+   */
+  markScopePassDone(word) {
+    const key = this.dictKeyOf(word);
+    if (!key) return;
+    const scopes = new Set(['all']);
+    // 当前正在学习的 tab：例如「新词」里点掌握后词条会离开新词 tab，
+    // 但它确实是在这一轮里学过的，记下来可以避免状态写库延迟导致 tab 又被判成“没学完”。
+    const currentScope = this.normalizeStudyScope(this.settings.studyScope);
+    if (currentScope) scopes.add(currentScope);
+    for (const scope of scopes) {
+      if (this._scopePassDone[scope]) this._scopePassDone[scope].add(key);
+    }
+    // 当前 tab 里，如果这张卡处理后已经离开该范围（如新词→已掌握），
+    // 从缓存池里移除；这样红字提示里的【继续学习】按钮能准确判断还有没有词可学。
+    if (currentScope && currentScope !== 'all' && !this.isWordInStudyScope(word, currentScope)) {
+      const pool = this._scopePoolCache;
+      if (Array.isArray(pool)) {
+        const idx = pool.findIndex((w) => w.id === word.id);
+        if (idx >= 0) pool.splice(idx, 1);
+      }
+    }
+    this.scheduleSaveScopePass();
+  }
+
+  /**
+   * 词条新加入某个 tab（词库改状态 / 新收藏 / 重新变成新词）时，
+   * 把它从该 tab 的完成集合里移除，让 tab 重新变为“没学完”。
+   */
+  markScopePassPending(word, scopes = []) {
+    const key = this.dictKeyOf(word);
+    if (!key) return;
+    for (const scope of scopes) {
+      const s = this.normalizeStudyScope(scope);
+      if (this._scopePassDone[s]) this._scopePassDone[s].delete(key);
+    }
+    this.scheduleSaveScopePass();
+  }
+
+  /** 清空各学习范围的“已学完”进度（清除学习记录时调用） */
+  async resetScopePass() {
+    this._scopePassDone = this._emptyScopePassDone();
+    await this.saveScopePass();
   }
 
   /** 当前设置（全部/字/短语）对应的分类键列表；全部 = 字+短语 */
@@ -1133,6 +1324,86 @@ class VocabApp {
     if (!w) return false;
     if (!w.dictScope) return (this.settings.dictImportType || 'all') === 'all';
     return this.activeScopeKeys().includes(w.dictScope);
+  }
+
+  /** 把任意值规范成合法的学习范围；非法/旧数据按「全部」处理 */
+  normalizeStudyScope(value) {
+    const scope = String(value == null ? '' : value).trim();
+    return STUDY_SCOPE_VALUES.includes(scope) ? scope : 'all';
+  }
+
+  /** 学习范围的中文名（用于设置页、红色提示与 toast） */
+  studyScopeLabel(value = this.settings.studyScope) {
+    return STUDY_SCOPE_LABELS[this.normalizeStudyScope(value)] || STUDY_SCOPE_LABELS.all;
+  }
+
+  /** 当前是否选择了「全部」以外的具体范围（新词/待复习/已掌握/收藏） */
+  isScopedStudyRange(value = this.settings.studyScope) {
+    return this.normalizeStudyScope(value) !== 'all';
+  }
+
+  /**
+   * 词条是否属于当前选择的学习范围。
+   * 只负责「范围」这一层；是否属于当前词典（字/短语）仍由 isWordInActiveScope 判断。
+   */
+  isWordInStudyScope(word, scope = this.settings.studyScope) {
+    if (!word) return false;
+    switch (this.normalizeStudyScope(scope)) {
+      case 'new':
+        return (word.status || 'new') === 'new';
+      case 'review':
+        return word.status === 'review';
+      case 'mastered':
+        return word.status === 'mastered';
+      case 'favorite':
+        return Boolean(word.favorite);
+      default:
+        return true;
+    }
+  }
+
+  /** 词条已被学习动作处理：不再需要「强制放进队列」的标记 */
+  clearExternalScopeInclude(wordId) {
+    if (this._externalScopeIncludeIds) this._externalScopeIncludeIds.delete(wordId);
+  }
+
+  /**
+   * 词库菜单里手动改了当前「学习范围」的成员（状态标签或收藏）后调用。
+   *
+   * 学习范围按 tab 的“学完一遍”集合判断：用户刚在词库里把词条改成该状态时，
+   * 要把它从该 tab 的完成集合里移除，否则会一直停在
+   * 「已学完【待复习】，请切换范围」。
+   *
+   * 这里按最新范围重建队列，并把新进入范围的词条强制排到队首；
+   * 今日进度、本轮起点与统计都不动（进度继续连续）。
+   */
+  async refreshScopedStudySessionAfterExternalChange(word, inScope) {
+    if (!word || !this.isScopedStudyRange()) return false;
+
+    const scope = this.normalizeStudyScope(this.settings.studyScope);
+    const belongs = Boolean(inScope) && this.isWordInStudyScope(word, scope);
+    this._externalScopeIncludeScope = scope;
+    if (belongs) {
+      // 新加入该 tab：从完成集合里移除，让它重新算作“没学过”
+      this.markScopePassPending(word, [scope]);
+      this._externalScopeIncludeIds.add(word.id);
+    } else {
+      this._externalScopeIncludeIds.delete(word.id);
+    }
+
+    // 旧队列/快照/红字状态都属于改动前的范围，直接丢弃；进度条与今日统计保持原值
+    this._learnSessionSnapshot = null;
+    this.todayWords = [];
+    this.currentCardIndex = 0;
+    this._queueHasFreshWords = true;
+    this.clearCardDisplay();
+    await this.db.setSetting('learnProgress', null);
+    await this.saveScopePass();
+    await this.prepareLearnSession();
+    // 把重建后的队列落库：刷新页面/切换页面后，刚加入范围的词仍在队列里
+    await this.saveLearnProgress();
+    this.updateProgress();
+    return true;
   }
 
   /**
@@ -1168,6 +1439,26 @@ class VocabApp {
     if (!hasFresh) return start;
     let next = start;
     while (next < len && this.isWordCountedToday(list[next])) next++;
+    return next;
+  }
+
+  /**
+   * 恢复会话时跳过「本轮已经学过一遍」的卡。
+   * 学习范围是按 tab 的“学过一遍”进度判断的，与「今天是否计入统计」无关：
+   * 待复习/已掌握/收藏里的词即使今天没计入统计，只要在本轮学过一遍，也不该重复出现。
+   */
+  alignRestoredScopeCardIndex(index, words, scope) {
+    const list = Array.isArray(words) ? words : [];
+    const len = list.length;
+    const start = Math.max(0, Math.min(Math.floor(Number(index) || 0), len));
+    const s = this.normalizeStudyScope(scope);
+    const done = this._scopePassDone[s] || new Set();
+    let next = start;
+    while (next < len) {
+      const key = this.dictKeyOf(list[next]);
+      if (!key || !done.has(key)) break;
+      next++;
+    }
     return next;
   }
 
@@ -1641,6 +1932,17 @@ class VocabApp {
     restartBtn.addEventListener('click', () => self.restartLearn());
     restartBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.restartLearn(); });
 
+    // 「已学完【…】，是否继续？」下方的蓝色【继续学习】：
+    // 只重置当前学习范围的“学过一遍”进度，继续在同一个范围内学习
+    const scopeRestartBtn = document.getElementById('scopeRestartBtn');
+    if (scopeRestartBtn) {
+      scopeRestartBtn.addEventListener('click', () => self.restartScopeLearn());
+      scopeRestartBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        self.restartScopeLearn();
+      });
+    }
+
     // 设置相关
     this.bindSettingsEvents();
     
@@ -1964,6 +2266,35 @@ class VocabApp {
     // 监听页面切换，更新滑块状态
     // 已合并到 handleNavClick 事件委托中，此监听器删除
 
+    // ---------- 学习范围 ----------
+    // 只重建学习队列，不重置「本轮起点」：切换范围后今日进度继续连续（如 20/100 → 21/100）
+    const studyScopeSelect = document.getElementById('studyScopeSelect');
+    if (studyScopeSelect) {
+      studyScopeSelect.value = this.normalizeStudyScope(this.settings.studyScope);
+      studyScopeSelect.addEventListener('change', async () => {
+        const nextScope = self.normalizeStudyScope(studyScopeSelect.value);
+        if (nextScope === self.settings.studyScope) return;
+
+        self.settings.studyScope = nextScope;
+        await self.db.setSetting('studyScope', nextScope);
+        // 强制入队标记只对上一个范围有效
+        self._externalScopeIncludeIds.clear();
+        self._externalScopeIncludeScope = nextScope;
+
+        // 旧队列/快照属于上一个范围，直接丢弃；进度条与今日统计保持原值
+        self._learnSessionSnapshot = null;
+        self.todayWords = [];
+        self.currentCardIndex = 0;
+        self._queueHasFreshWords = true;
+        self.clearCardDisplay();
+        await self.db.setSetting('learnProgress', null);
+
+        await self.prepareLearnSession();
+        self.updateProgress();
+        self.showToast(`学习范围已切换为「${self.studyScopeLabel(nextScope)}」`);
+      });
+    }
+
     // 学习模式
     document.querySelectorAll('.mode-option').forEach(option => {
       option.addEventListener('click', handleModeClick);
@@ -2122,6 +2453,7 @@ class VocabApp {
         self._learnSessionSnapshot = null;
         self.todayWords = [];
         self.currentCardIndex = 0;
+        self._externalScopeIncludeIds.clear();
         self.clearCardDisplay();
 
         try {
@@ -2646,8 +2978,9 @@ class VocabApp {
         todayWords: JSON.parse(JSON.stringify(this.todayWords)),
         todayStats: { ...this.todayStats },
         todayDoneCount: this.todayDoneCount,
-        // 记下快照所属的词典范围：切换「词典导入」后，旧范围的队列不能再被恢复
-        scope: this.settings.dictImportType || 'all'
+        // 记下快照所属的词典范围与学习范围：切换后旧队列不能再被恢复
+        scope: this.settings.dictImportType || 'all',
+        studyScope: this.normalizeStudyScope(this.settings.studyScope)
       };
     }
 
@@ -2685,6 +3018,7 @@ class VocabApp {
       const snapshotMatchesScope = Boolean(
         snap &&
         (snap.scope || 'all') === (this.settings.dictImportType || 'all') &&
+        (snap.studyScope || 'all') === this.normalizeStudyScope(this.settings.studyScope) &&
         Array.isArray(snap.todayWords) &&
         snap.todayWords.length > 0 &&
         snap.todayWords.every((w) => this.isWordInActiveScope(w))
@@ -2711,9 +3045,10 @@ class VocabApp {
           this.showComplete();
           this.updateProgress();
         } else if (this.currentCardIndex >= this.todayWords.length) {
+          // 队列走完：tab 里还有没学过一遍的词就继续出卡；全部学过才显示红字提示
           this._learnSessionSnapshot = null;
-          this.prepareLearnSession().catch((error) => {
-            console.error('[learn] 重建今日学习队列失败:', error);
+          this.handleScopeQueueEnd().catch((error) => {
+            console.error('[learn] 继续当前学习范围失败:', error);
           });
         } else {
           this.showCard(this.currentCardIndex);
@@ -2783,7 +3118,9 @@ class VocabApp {
       savedAt: new Date().toISOString(),
       // 纯复习轮（整队都是今天已学过的词）要带上标记：恢复时不能把它当成
       // 「下标落后的过期会话」丢掉，否则每次刷新都会把这轮复习从头开始
-      isReviewRound: !this._queueHasFreshWords
+      isReviewRound: !this._queueHasFreshWords,
+      // 记下这份队列属于哪个学习范围：切换范围后旧队列不能当作当前范围的进度恢复
+      studyScope: this.normalizeStudyScope(this.settings.studyScope)
     };
     await this.db.setSetting('learnProgress', progress);
     // 累计张数跟着进度一起落库，否则刷新后进度条会从当前队列的下标重新算
@@ -2983,24 +3320,31 @@ class VocabApp {
   }
 
   /**
-   * 准备（或恢复）今日学习会话：
-   * 1) 若今天保存过进度且队列与当前设置匹配 → 恢复进度；
-   * 2) 否则取当前词典范围（全部/字/短语）的词条，按“重复频率”过滤掉近期学过的；
-   * 3) 随机模式打散并尽量让相邻卡片分类不同；顺序模式按 新词→待复习→已掌握 排列；
-   * 4) 截取每日目标数量作为今日队列，渲染第一张卡并更新进度条。
+   * 准备（或恢复）今日学习会话。
    *
-   * 特例：范围内的词条全都学过时（累计已掌握 + 累计待复习 = 词条总数），
-   * 「重复频率」会把所有词都挡在静默期内，按频率抽词只能得到空队列。
-   * 这时降级为「复习轮」（_isReviewRound = true）：忽略重复频率，从最久没学过的词
-   * 开始重新组一轮队列，保证【继续学习】永远有卡可背，而不是卡在空状态上。
+   * 学习范围（全部/新词/待复习/已掌握/收藏）各自有一个「学完一遍」的完成集合：
+   * 学习页只从当前 tab 里还没学过一遍的词条中抽卡。当前 tab 的单词全部学过一遍后，
+   * 显示「已学完【…】，请切换范围」；之后如果词典新增词条、或词库里把词条新加进
+   * 这个 tab，它的 key 不在完成集合里，会自动取消“已学完”并继续出卡，
+   * 学过之后才再次提示。
+   *
+   * 队列仍然受每日目标限制：达到今日目标时先显示完成页与【继续学习】；
+   * 点【继续学习】后进度归零，但学习范围的完成集合继续保留，接着学没学过的词。
    */
   async prepareLearnSession() {
     this._learnSessionSnapshot = null;
     // 新一轮会话开始：清掉上一次的「已跳过」内存名单（跳过本身不写学习记录）
     this._skippedWordIds.clear();
 
-    // 本次会话是否为「复习轮」（范围内词条都学过、重复频率把它们全挡住时才会置 true）
     this._isReviewRound = false;
+
+    // 本次会话使用的学习范围（all/new/review/mastered/favorite）
+    const studyScope = this.normalizeStudyScope(this.settings.studyScope);
+    // 强制入队标记只在创建它的范围里有效
+    if (this._externalScopeIncludeScope !== studyScope) {
+      this._externalScopeIncludeIds.clear();
+      this._externalScopeIncludeScope = studyScope;
+    }
 
     // 尝试加载之前保存的学习进度
     const savedProgress = await this.loadLearnProgress();
@@ -3012,68 +3356,69 @@ class VocabApp {
 
     // 只取当前展示分类（全部/字/短语）的词条；另一分类的词条常驻词库，记录不会被清除
     const allWords = allStoredWords.filter((w) => this.isWordInActiveScope(w));
-    // 缓存当前范围的词条快照，供「跳过」同步补牌使用（见 pickSkipReplacement）
-    this._scopePoolCache = allWords;
+    // 当前 tab 的全部词条（全部 = 当前词典范围）
+    const studyScopePool = allWords.filter((w) => this.isWordInStudyScope(w, studyScope));
+    // 缓存当前可抽词范围，供「跳过」同步补牌使用（见 pickSkipReplacement）
+    this._scopePoolCache = studyScopePool;
 
-    // 本轮队列最多能有多少张：范围内词条比每日目标还少时，队列只能是范围内词条数
-    const queueCapacity = Math.min(this.settings.dailyGoal, allWords.length);
-    this._queueCapacity = queueCapacity;
+    const goalValue = Math.max(0, Number(this.settings.dailyGoal) || 0);
+    const doneSet = this._scopePassDone[studyScope] || new Set();
+    // 当前 tab 里还没学过一遍的词条
+    const pendingScopeWords = studyScopePool.filter((w) => {
+      const key = this.dictKeyOf(w);
+      return !key || !doneSet.has(key);
+    });
 
     // 恢复出来的队列必须整体属于当前词典范围：切换过「词典导入」（字 ↔ 短语）后，
     // 库里可能还留着上一个范围的进度，若只比长度就恢复，学习页会继续展示旧范围的内容
     const restoredAllInActiveScope =
       restoredTodayWords.length > 0 && restoredTodayWords.every((w) => this.isWordInActiveScope(w));
+    // 保存的队列还必须属于同一个「学习范围」：切换范围后不能恢复上一个范围的卡片
+    const savedStudyScope = this.normalizeStudyScope(savedProgress?.studyScope);
 
-    // 只有保存的队列能完整对上库里的词条、整体属于当前范围、且长度不超过本轮容量时才恢复进度。
-    // 用「不超过」而不是「等于」：今天可学词条不足每日目标时，队列本来就会短一截
-    // （例如只补今天还没学过的词），要求相等的话每次刷新都会重抽队列、把进度丢掉。
-    const shouldRestoreProgress = savedProgress && 
-                                  savedProgress.todayWords && 
+    // 保存的队列只在今天、同一词典/学习范围、词条都还存在时恢复。
+    // 队列长度限制用每日目标而不是当前待学数量：tab 的待学数量会随着学习推进而减少，
+    // 用它判断会每学几张就重建队列、把卡片位置丢掉。
+    const shouldRestoreProgress = savedProgress &&
+                                  savedProgress.todayWords &&
                                   restoredAllInActiveScope &&
                                   restoredTodayWords.length === savedProgress.todayWords.length &&
-                                  savedProgress.todayWords.length <= queueCapacity &&
-                                  this.currentCardIndex === 0;
+                                  savedStudyScope === studyScope &&
+                                  this.currentCardIndex === 0 &&
+                                  savedProgress.todayWords.length <= goalValue;
 
-    // 保存的进度属于别的词典范围（切换过「词典导入」）或词条已不存在：
-    // 直接丢掉这份进度。否则它会一直留在库里，每次刷新/切页都被读出来再判废一次。
     if (savedProgress && !shouldRestoreProgress) {
       await this.db.setSetting('learnProgress', null);
     }
 
-    // 这份会话里是否还有「今天没学过」的卡；以及今天目标是否已经达成
-    const restoredGoalReached = shouldRestoreProgress && this.isDailyGoalReached();
-    const restoredHasFresh = shouldRestoreProgress &&
-      restoredTodayWords.some((w) => !this.isWordCountedToday(w));
+    if (shouldRestoreProgress) {
+      // 恢复之前的学习进度，并使用数据库中的最新词条内容，避免旧快照覆盖词典更新。
+      // 队列里的词可能已经不在当前 tab（例如复习词刚被改成已掌握）：过滤掉，
+      // 同时把保存的下标换算到过滤后的队列位置上。
+      const savedIndex = Math.max(0, Math.min(
+        Math.floor(Number(savedProgress.currentCardIndex) || 0),
+        restoredTodayWords.length
+      ));
+      const restoredWords = [];
+      let restoredIndexBefore = 0;
+      for (let i = 0; i < restoredTodayWords.length; i++) {
+        const w = restoredTodayWords[i];
+        if (!this.isWordInStudyScope(w, studyScope)) continue;
+        if (i < savedIndex) restoredIndexBefore++;
+        restoredWords.push(w);
+      }
 
-    // 过期会话：队列里的词今天全都学过了，但目标还没达成（例如云端会话的下标
-    // 停在 50、统计已同步到 98/100，手机恢复后只会反复看到另一端学过的词，
-    // 点「掌握」进度也不涨）。这不是复习轮（复习轮会带 isReviewRound 标记），
-    // 直接丢弃，按「今天还没学过的词」重新抽一批。
-    const staleAllCountedQueue = shouldRestoreProgress && !restoredHasFresh &&
-      !restoredGoalReached && !savedProgress.isReviewRound;
-    if (staleAllCountedQueue) {
-      await this.db.setSetting('learnProgress', null);
-    }
-
-    if (shouldRestoreProgress && !staleAllCountedQueue) {
-      // 恢复之前的学习进度，并使用数据库中的最新词条内容，避免旧快照覆盖词典更新
-      this.todayWords = restoredTodayWords;
-      // 会话下标可能落后于实际进度（另一端学了更多、统计已同步过来）：
-      // 跳过队列里今天已经学过的卡，避免用户对着旧单词反复点「掌握」而进度不涨。
-      this.currentCardIndex = this.alignRestoredCardIndex(savedProgress.currentCardIndex, this.todayWords);
-      // 队列容量记成实际长度，供切页时的快照恢复判断使用
+      this.todayWords = restoredWords;
+      // 跳过队列里本轮已经学过一遍的卡（可能来自另一台设备/云端会话）
+      this.currentCardIndex = this.alignRestoredScopeCardIndex(restoredIndexBefore, restoredWords, studyScope);
       this._queueCapacity = this.todayWords.length;
-      // 恢复出来的队列里还有没有「今天还没学过」的词条（纯复习轮时界面要给出说明）
-      this._queueHasFreshWords = restoredHasFresh;
+      this._queueHasFreshWords = pendingScopeWords.some((w) => !this.isWordCountedToday(w));
 
       const emptyState = document.getElementById('learnEmptyState');
       if (emptyState) emptyState.style.display = 'none';
 
-      // 【继续学习】按钮只在「今日目标已完成、且用户还没开始新一轮」时出现：
-      //   达标 → 完成页 + 继续学习（用户点它才会开始新一轮）；
-      //   未达标 → 不显示完成页，哪怕队列已经背完也直接重抽一轮继续学，
-      //            避免用户以为「学完了」而误点【继续学习】。
-      if (restoredGoalReached) {
+      // 今日目标已完成：先显示完成页与【继续学习】（点它才开始新一轮）
+      if (this.isDailyGoalReached()) {
         this.todayStats.total = this.todayWords.length;
         await this.db.setSetting('todayStats', this.todayStats);
         this.showComplete();
@@ -3093,51 +3438,31 @@ class VocabApp {
         return;
       }
 
-      // 队列已背完、但今日目标还没达成：丢弃这份收尾的进度，落到下面重新抽词
-      this.todayWords = [];
-      this.currentCardIndex = 0;
-      this._learnSessionSnapshot = null;
-      await this.db.setSetting('learnProgress', null);
+      // 队列走完：tab 里还有没学过一遍的词（新增词条或这本轮没排到）就继续组队；
+      // 全部学过才显示红字提示。
+      if (pendingScopeWords.length > 0) {
+        this.todayWords = [];
+        this.currentCardIndex = 0;
+        this._learnSessionSnapshot = null;
+        await this.db.setSetting('learnProgress', null);
+      } else {
+        this.todayStats.total = this.todayWords.length;
+        await this.db.setSetting('todayStats', this.todayStats);
+        this.showScopeComplete();
+        this.updateProgress();
+        this.refreshGoalSliderLockedState();
+        return;
+      }
     }
 
-    // 根据重复频率筛选单词
-    const frequency = this.settings.repeatFrequency;
-    // 与词条 lastStudied 用同一时间基准（同步可用时是服务端基准），避免两端时钟偏差影响筛选
-    const now = this.nowMs();
-    const dayMs = 24 * 60 * 60 * 1000; // 一天的毫秒数
-    
-    let availableWords = allWords;
-    
-    if (frequency > 0) {
-      // 筛选出在重复频率时间之外的单词
-      availableWords = allWords.filter(word => {
-        const lastStudied = word.lastStudied || 0;
-        const timePassed = now - lastStudied;
-        return timePassed >= frequency * dayMs;
-      });
-    }
-    
-    // 范围内的词条全都还在「重复频率」的静默期内 —— 也就是
-    // 「累计已掌握 + 累计待复习」已经等于词条总数、再没有没学过的词时：
-    // 按频率抽词会得到空队列，界面显示「还没有可学习的单词」，
-    // 点【继续学习】也永远没反应。这里降级为「复习轮」：忽略重复频率，
-    // 用范围内全部词条重新组一轮队列，保证任何时候都能继续背。
-    this._isReviewRound = frequency > 0 && availableWords.length === 0 && allWords.length > 0;
-    if (this._isReviewRound) {
-      // 复习轮优先照顾遗忘风险最高的词：最久没学过的排最前面
-      availableWords = allWords.slice().sort(
-        (a, b) => (Number(a.lastStudied) || 0) - (Number(b.lastStudied) || 0)
-      );
-    }
-
-    // 队列里优先放「今天还没计入统计」的词条。
-    //
-    // 这是进度条与「今日已掌握 + 今日待复习」不再差 1~2 个的关键：
-    // 今天已经学过并计入统计的词条，再学一次不会让两个数字增加，进度条（同一口径）也不会增加；
-    // 若把它们排进今天的队列，用户就会看到「学完 100 张，上方两数之和只有 98/99」。
-    // 「重复频率」为 0 天、或小范围词典需要跨轮时，旧实现正是这种情况。
-    const untouchedWords = availableWords.filter((w) => !this.isWordCountedToday(w));
-    const alreadyTodayWords = availableWords.filter((w) => this.isWordCountedToday(w));
+    // 队列里优先放「今天还没计入统计」的词条：它们才会让进度条与今日统计增长；
+    // 今天已经学过、但本轮还没学过的词排后面，保证一个 tab 能完整走完一遍。
+    const untouchedWords = pendingScopeWords.filter((w) => !this.isWordCountedToday(w));
+    const alreadyTodayWords = pendingScopeWords.filter((w) => this.isWordCountedToday(w));
+    // 词库里刚手动加入当前范围的词条：优先排在最前面，让用户立刻看到它
+    const externalWords = this._externalScopeIncludeIds.size > 0
+      ? pendingScopeWords.filter((w) => this._externalScopeIncludeIds.has(w.id))
+      : [];
     /** 顺序模式排序：新词 → 待复习 → 已掌握（组内保持词典原序） */
     const orderSequential = (pool) => {
       const rank = (w) => (w.status === 'new' ? 0 : (w.status === 'review' ? 1 : 2));
@@ -3147,35 +3472,44 @@ class VocabApp {
         .map((item) => item.w);
     };
 
-    const goal = Math.max(0, Number(this.settings.dailyGoal) || 0);
-    let todayWords;
-    if (untouchedWords.length === 0) {
-      // 今天该范围已经没有没学过的词条了：组一轮「纯复习」队列，保证永远有卡可背。
-      // 复习的词条今天已计入统计，所以这一轮不会让进度条和上方数字增长（界面会说明）
-      todayWords = this.settings.learnMode === 'random'
-        ? this.pickRandomSpreadByCategory(alreadyTodayWords, goal)
-        : alreadyTodayWords.slice(0, goal);
-    } else if (this._isReviewRound) {
-      // 复习轮：availableWords 已按「最久没学」升序，今天还没学过的排在前面（它们才会计入进度）
-      todayWords = [...untouchedWords, ...alreadyTodayWords].slice(0, goal);
-    } else if (this.settings.learnMode === 'random') {
-      todayWords = this.pickRandomSpreadByCategory(untouchedWords, goal);
+    const goal = goalValue;
+    const includeWords = externalWords.slice(0, goal);
+    const includeIds = new Set(includeWords.map((w) => w.id));
+    const restUntouched = untouchedWords.filter((w) => !includeIds.has(w.id));
+    const restAlready = alreadyTodayWords.filter((w) => !includeIds.has(w.id));
+    let restSlots = Math.max(0, goal - includeWords.length);
+    let restWords = [];
+    if (this.settings.learnMode === 'random') {
+      const pickedUntouched = this.pickRandomSpreadByCategory(restUntouched, restSlots);
+      restWords = pickedUntouched;
+      restSlots = Math.max(0, restSlots - pickedUntouched.length);
+      restWords = restWords.concat(this.pickRandomSpreadByCategory(restAlready, restSlots));
     } else {
-      todayWords = orderSequential(untouchedWords).slice(0, goal);
+      const pickedUntouched = orderSequential(restUntouched).slice(0, restSlots);
+      restWords = pickedUntouched;
+      restSlots = Math.max(0, restSlots - pickedUntouched.length);
+      restWords = restWords.concat(orderSequential(restAlready).slice(0, restSlots));
     }
-    // 队列里已经没有「今天还没学过」的词条了：整轮都是复习，进度不会再往前涨
-    this._queueHasFreshWords = untouchedWords.length > 0;
-    // 队列容量记成实际长度：刷新/切页后按它判断能否恢复这份进度
-    // （今天可学词条不足每日目标时，队列本来就会短一截）
-    this._queueCapacity = todayWords.length > 0 ? todayWords.length : this._queueCapacity;
+    const todayWords = includeWords.concat(restWords);
 
+    this._queueHasFreshWords = untouchedWords.length > 0;
+    // 队列容量记成实际长度，供切页时的快照恢复判断使用
+    this._queueCapacity = todayWords.length;
     this.todayWords = todayWords;
     this.currentCardIndex = 0;
     this.todayStats.total = this.todayWords.length;
     await this.db.setSetting('todayStats', this.todayStats);
-    
+
     if (this.todayWords.length === 0) {
-      this.showEmptyState();
+      if (allWords.length === 0) {
+        // 词库本身为空（还没导入词典）：保留原来的空状态
+        this.showEmptyState();
+      } else if (this.isDailyGoalReached()) {
+        this.showComplete();
+      } else {
+        // 当前 tab 的单词已经全部学过一遍，或这个 tab 本来就没有词条
+        this.showScopeComplete();
+      }
     } else if (this.isDailyGoalReached()) {
       // 今日目标已达标：不再展示卡片（例如刷新页面后进度还在、队列是新的），
       // 用户点【继续学习】会先把本轮起点前移，再开始新一轮
@@ -3186,17 +3520,8 @@ class VocabApp {
       document.querySelector('.complete-container').style.display = 'none';
       const emptyState = document.getElementById('learnEmptyState');
       if (emptyState) emptyState.style.display = 'none';
-      if (!this._queueHasFreshWords) {
-        // 当前范围今天已经没有没学过的词条了：这是一轮纯复习，两个统计数字不会增加
-        this.showToast(this._isReviewRound
-          ? '词条都已学过，已开始新一轮复习（今日统计不会再增加）'
-          : '今日可学词条已学完，接下来是复习（今日统计不会再增加）');
-      } else if (this._isReviewRound) {
-        // 让用户知道这轮为什么又出现了学过的词，而不是以为筛选/进度出了问题
-        this.showToast('词条都已学过，已开始新一轮学习');
-      }
     }
-    
+
     // 刷新累计统计缓存后再更新进度，确保数字与词库一致
     await this.refreshStatusCounts();
     this.updateProgress();
@@ -3216,6 +3541,125 @@ class VocabApp {
     });
   }
 
+  /** 冻结/恢复学习页的三个操作按钮（范围学完时不再记录任何数值） */
+  setLearnActionsDisabled(disabled) {
+    const actions = document.querySelector('.card-actions');
+    if (actions) actions.classList.toggle('actions-disabled', Boolean(disabled));
+    ['btnSkip', 'btnMastered', 'btnDifficult'].forEach((id) => {
+      const btn = document.getElementById(id);
+      if (btn) btn.disabled = Boolean(disabled);
+    });
+  }
+
+  /** 收起「已学完【范围】，请切换范围」的红色提示，恢复卡片与操作按钮 */
+  hideScopeComplete() {
+    const hint = document.getElementById('learnScopeComplete');
+    if (hint) hint.style.display = 'none';
+    const flashcard = document.getElementById('flashcard');
+    if (flashcard) flashcard.style.display = '';
+    this.setLearnActionsDisabled(false);
+  }
+
+  /** 从数据库现算当前学习范围里还有多少词条没学过一遍 */
+  async countPendingScopeWordsInDb(scope = this.settings.studyScope) {
+    const s = this.normalizeStudyScope(scope);
+    const words = await this.db.getAllWords();
+    const pool = words.filter(
+      (w) => this.isWordInActiveScope(w) && this.isWordInStudyScope(w, s)
+    );
+    return this.countPendingScopeWords(pool, s);
+  }
+
+  /**
+   * 当前学习范围的一轮队列走完（还没到每日目标）：
+   * - tab 里还有没学过一遍的词（本轮没排到 / 新增词条）→ 继续组下一批；
+   * - tab 里的单词全部学过一遍 → 显示红字「已学完【…】，请切换范围」。
+   *
+   * 用数据库现算而不是相信队列快照：在词库改状态、收藏、词典导入新词之后，
+   * 红字提示必须马上跟着消失/恢复。
+   */
+  async handleScopeQueueEnd() {
+    if (this._handlingScopeEnd) return;
+    this._handlingScopeEnd = true;
+    const scopeAtStart = this.normalizeStudyScope(this.settings.studyScope);
+    try {
+      if (this.isDailyGoalReached()) {
+        this.showComplete();
+        this.updateProgress();
+        this.refreshGoalSliderLockedState();
+        return;
+      }
+
+      const pending = await this.countPendingScopeWordsInDb(scopeAtStart);
+      // 读库期间学习范围可能被切换（设置页/云同步）：交给新的范围自己重建，别用旧范围的结果覆盖
+      if (this.normalizeStudyScope(this.settings.studyScope) !== scopeAtStart) return;
+      // 读库期间统计可能因云同步/其它操作变化
+      if (this.isDailyGoalReached()) {
+        this.showComplete();
+        this.updateProgress();
+        this.refreshGoalSliderLockedState();
+        return;
+      }
+
+      if (pending > 0) {
+        await this.prepareLearnSession();
+        return;
+      }
+
+      // 当前 tab 的单词已经全部学过一遍：保存完成集合后显示红字提示
+      await this.saveScopePass();
+      this.showScopeComplete();
+      this.updateProgress();
+      this.refreshGoalSliderLockedState();
+    } finally {
+      this._handlingScopeEnd = false;
+    }
+  }
+
+  /**
+   * 当前学习范围已学完（或该范围本来就没有待学词条）：
+   * 在卡片区域显示红字提示，冻结跳过 / 掌握 / 陌生三个按钮；进度条保持当前数字。
+   */
+  showScopeComplete() {
+    this._learnView = 'scopeComplete';
+    const label = this.studyScopeLabel();
+    // 当前 tab 还有词 → “是否继续？”+ 蓝色继续学习；
+    // tab 已经空了（例如新词全部变成已掌握）→ 没有可继续的内容，提示切换范围并隐藏按钮。
+    const canContinue = Array.isArray(this._scopePoolCache) && this._scopePoolCache.length > 0;
+    const text = document.getElementById('learnScopeCompleteText');
+    if (text) {
+      text.textContent = canContinue
+        ? `已学完【${label}】，是否继续？`
+        : `已学完【${label}】，请切换范围`;
+    }
+    const scopeRestartBtn = document.getElementById('scopeRestartBtn');
+    if (scopeRestartBtn) {
+      scopeRestartBtn.style.display = canContinue ? '' : 'none';
+    }
+    const hint = document.getElementById('learnScopeComplete');
+    if (hint) hint.style.display = 'flex';
+    const flashcard = document.getElementById('flashcard');
+    if (flashcard) flashcard.style.display = 'none';
+    const stack = document.querySelector('.card-stack');
+    if (stack) stack.style.display = 'flex';
+    const complete = document.querySelector('.complete-container');
+    if (complete) complete.style.display = 'none';
+    const emptyState = document.getElementById('learnEmptyState');
+    if (emptyState) emptyState.style.display = 'none';
+    this.setLearnActionsDisabled(true);
+    // 把下标停在队列末尾，切页/刷新后仍能恢复成「范围已学完」而不是重新显示最后一张卡
+    if (Array.isArray(this.todayWords) && this.todayWords.length > 0) {
+      this.currentCardIndex = this.todayWords.length;
+    }
+    // 红字提示是“学完一遍”的最终状态：立即保存完成集合，刷新后仍然保持
+    this.saveScopePass().catch((error) => {
+      console.warn('[learn] 保存学习范围完成状态失败:', error);
+    });
+    this.saveLearnProgress().catch((error) => {
+      console.warn('[learn] 保存范围学完状态失败:', error);
+    });
+  }
+
   /**
    * 渲染指定下标的卡片：拼接正反面 HTML（正面=词汇+音标+收藏，
    * 背面=释义+例句），按“释义优先”设置决定初始朝向，并处理音标渐显定时。
@@ -3226,6 +3670,8 @@ class VocabApp {
     }
 
     this._learnView = 'card';
+    // 切换范围/重新建队后，红色「已学完」提示与按钮冻结状态都要撤掉
+    this.hideScopeComplete();
 
     // 换卡：清掉上一张卡残留的文字选中与尚未执行的「单击翻面」，
     // 避免新卡片带着旧选中态，或在滑入过程中被上一次点击翻转
@@ -3242,9 +3688,12 @@ class VocabApp {
     
     const isCantonese = this.isCantoneseWord(word);
     const cantonesePhoneticFirst = isCantonese || this.isImportedCantoneseLanguage(word);
-    // 顶部标签（语言 + 分类）与练习页共用同一套生成逻辑
+    // 顶部标签：第一位固定显示当前「学习范围」，后面接语言 + 分类（与练习页共用后两者）
+    const scopeBadgeHtml =
+      `<span class="language-badge scope-badge">${this.escapeHtml(this.studyScopeLabel())}</span>`;
     const badgesHtml = this.buildCardBadgesHtml(word);
-    const badgeRowHtml = badgesHtml ? `<div class="flashcard-badge-row">${badgesHtml}</div>` : '';
+    const badgeRowHtml =
+      `<div class="flashcard-badge-row">${scopeBadgeHtml}${badgesHtml ? `&nbsp;&nbsp;${badgesHtml}` : ''}</div>`;
 
     cardInner.innerHTML = `
       <div class="flashcard-front">
@@ -3590,19 +4039,27 @@ class VocabApp {
     }
     
     this.showToast(word.favorite ? '已添加收藏' : '已取消收藏');
+    // 返回更新后的词条：词库页据此判断「收藏」学习范围的成员是否变了
+    return word;
   }
 
   /** 标记为困难；releaseOffset 含义同 skipCard（按钮触发时为 0） */
   markDifficult(releaseOffset = 0) {
     if (this._cardAnimating) return;
+    // 当前学习范围已学完：按钮仍可见，但不再记录任何数值（快捷键/滑动同此逻辑）
+    if (this._learnView === 'scopeComplete') return;
     if (this.currentCardIndex >= this.todayWords.length) return;
 
     const word = this.todayWords[this.currentCardIndex];
+    // 这张卡已经处理过：撤销“词库外部加入范围”的强制入队标记
+    this.clearExternalScopeInclude(word.id);
     // 进度条与「今日待复习」同口径（去重词条）：今天已经计入过统计的词条再次学习时，
     // 今日统计不会再增加，进度条也不该增加，否则两者会差出 1~2 个
     const countsTowardProgress = !this.isWordCountedToday(word);
     word.status = 'review';
     word.lastStudied = this.nowMs(); // 记录学习时间（同步可用时用服务端基准，避免两端时钟偏差）
+    // 记入学习范围的“学过一遍”集合（待复习/全部/收藏等）
+    this.markScopePassDone(word);
 
     // 乐观更新今日统计：写库是异步的，等它回来之前上方数字也要立刻 += 1，
     // 否则完成页会短暂显示 99/100（与进度条同源，所以两者一起改，始终一致）
@@ -3619,9 +4076,8 @@ class VocabApp {
   /**
    * 为「跳过」挑一张补进队列的新卡。
    *
-   * 只从当前词典范围里挑「今天还没排进今日队列、也没在今天学过、本次会话也没跳过」的词，
-   * 因此连续跳过会一路走到词库里的新词，而不是把今日队列里那几十张来回循环。
-   * 返回 null 表示当前范围内已经没有可补的新词（调用方退回旧行为）。
+   * 从当前学习范围里挑「本轮还没学过一遍、还没排进队列、本次会话也没跳过」的词。
+   * 跳过不会把词标记为学过，所以补不到时调用方会把原词放回队尾，它仍然算没学完。
    *
    * 说明：候选来自 prepareLearnSession 缓存的 _scopePoolCache；本次会话跳过的词
    * 记录在 _skippedWordIds 里（只在内存，不写进学习记录）。
@@ -3629,11 +4085,8 @@ class VocabApp {
   pickSkipReplacement(skippedWord) {
     const pool = this._scopePoolCache || [];
     if (pool.length === 0) return null;
-
-    const now = this.nowMs();
-    const dayStart = new Date(now).setHours(0, 0, 0, 0);
-    const frequency = Number(this.settings.repeatFrequency) || 0;
-    const dayMs = 24 * 60 * 60 * 1000;
+    const scope = this.normalizeStudyScope(this.settings.studyScope);
+    const done = this._scopePassDone[scope] || new Set();
 
     // 已在队列里的（含刚补进来的）与刚跳过的都不再选
     const queuedIds = new Set(this.todayWords.map((w) => w.id));
@@ -3644,11 +4097,10 @@ class VocabApp {
       // 本次会话已经跳过的词不再补进来：否则刚跳过的那张马上又会出现
       if (this._skippedWordIds.has(w.id)) return false;
       if (!this.isWordInActiveScope(w)) return false;
-      const lastStudied = Number(w.lastStudied) || 0;
-      // 今天已经学过（掌握/陌生）的词不再补进来
-      if (lastStudied >= dayStart) return false;
-      // 仍处在「重复频率」静默期内的词也不补
-      if (frequency > 0 && now - lastStudied < frequency * dayMs) return false;
+      if (!this.isWordInStudyScope(w, scope)) return false;
+      // 本轮已经学过一遍的词不再补
+      const key = this.dictKeyOf(w);
+      if (key && done.has(key)) return false;
       return true;
     });
 
@@ -3673,6 +4125,8 @@ class VocabApp {
    */
   skipCard(releaseOffset = 0) {
     if (this._cardAnimating) return;
+    // 当前学习范围已学完：跳过也不再生效（不换卡、不记录数值）
+    if (this._learnView === 'scopeComplete') return;
     if (this.currentCardIndex >= this.todayWords.length) return;
 
     const skippedIndex = this.currentCardIndex;
@@ -3706,13 +4160,19 @@ class VocabApp {
   /** 标记为已掌握；releaseOffset 含义同 skipCard */
   markMastered(releaseOffset = 0) {
     if (this._cardAnimating) return;
+    // 当前学习范围已学完：按钮仍可见，但不再记录任何数值（快捷键/滑动同此逻辑）
+    if (this._learnView === 'scopeComplete') return;
     if (this.currentCardIndex >= this.todayWords.length) return;
 
     const word = this.todayWords[this.currentCardIndex];
+    // 同 markDifficult：撤销“词库外部加入范围”的强制入队标记
+    this.clearExternalScopeInclude(word.id);
     // 同 markDifficult：今天已计入统计的词条不再重复推进度，保证进度条与今日统计同口径
     const countsTowardProgress = !this.isWordCountedToday(word);
     word.status = 'mastered';
     word.lastStudied = this.nowMs(); // 记录学习时间（同步可用时用服务端基准）
+    // 记入学习范围的“学过一遍”集合（已掌握/全部/收藏等）
+    this.markScopePassDone(word);
 
     // 乐观更新今日统计（理由见 markDifficult）
     if (countsTowardProgress) this.bumpTodayStatsOptimistically('mastered');
@@ -3818,12 +4278,23 @@ class VocabApp {
     // 本轮完成数 +1。掌握/陌生且该词条今天还没计入统计时算一个；「跳过」不算
     // （countsTowardProgress=false），重复学习同一词条也不算 —— 口径与今日统计一致。
     if (countsTowardProgress) this.todayDoneCount++;
-    // 队列背完、或本轮完成数达到每日目标时，收卡显示完成页。
+    // 队列背完、或本轮完成数达到每日目标时，收卡。
     // 第二个条件不可少：队列里还剩着卡片但目标已满时若不拦住，用户会以为「进度满了还能一直学」。
     if (this.currentCardIndex >= this.todayWords.length || this.isDailyGoalReached()) {
-      this.showComplete();
-      this.updateProgress();
-      this.refreshGoalSliderLockedState();
+      if (this.isDailyGoalReached()) {
+        // 每日目标达成：照旧显示完成页与【继续学习】
+        this.showComplete();
+        this.updateProgress();
+        this.refreshGoalSliderLockedState();
+      } else {
+        // 还没到今日目标：只有当前 tab 里的单词全部学过一遍才提示「已学完」；
+        // 还有没学过的词（本轮没排到 / 新增词条）就继续组下一批，不弹红字。
+        this.updateProgress();
+        this.refreshGoalSliderLockedState();
+        this.handleScopeQueueEnd().catch((error) => {
+          console.error('[learn] 继续当前学习范围失败:', error);
+        });
+      }
       return;
     }
 
@@ -4013,6 +4484,8 @@ class VocabApp {
   // 显示完成页面
   showComplete() {
     this._learnView = 'complete';
+    // 完成页与「范围学完」红字提示互斥；按钮随卡片区域一起隐藏
+    this.hideScopeComplete();
     document.querySelector('.card-stack').style.display = 'none';
     document.querySelector('.complete-container').style.display = 'flex';
     // 完成页与空状态互斥：否则「还没有可学习的单词」会和【继续学习】按钮同时出现在屏幕上
@@ -4056,6 +4529,7 @@ class VocabApp {
   // 显示空状态（只有当前词典范围里确实一个词条都没有时才会走到这里）
   showEmptyState() {
     this._learnView = 'empty';
+    this.hideScopeComplete();
     document.querySelector('.card-stack').style.display = 'none';
     const completeContainer = document.querySelector('.complete-container');
     if (completeContainer) completeContainer.style.display = 'none';
@@ -4086,6 +4560,34 @@ class VocabApp {
     this._learnSessionSnapshot = null;
     // 重新生成学习队列（范围内词条都学过时会自动进入「复习轮」）
     await this.prepareLearnSession();
+  }
+
+  /**
+   * 红字「已学完【…】，是否继续？」下方的【继续学习】。
+   *
+   * 只重置当前学习范围的“学过一遍”集合，让该 tab 的单词重新变成待学；
+   * 其它 tab 的完成进度、今日统计与本轮起点都不动，点击后仍停留在同一个学习范围。
+   */
+  async restartScopeLearn() {
+    // 当前 tab 一个词都没有时没有可继续的内容
+    if (!Array.isArray(this._scopePoolCache) || this._scopePoolCache.length === 0) return;
+    const scope = this.normalizeStudyScope(this.settings.studyScope);
+    this._scopePassDone[scope] = new Set();
+    await this.saveScopePass();
+
+    // 旧队列/快照/红字状态作废；今日进度保持连续
+    this._learnSessionSnapshot = null;
+    this.todayWords = [];
+    this.currentCardIndex = 0;
+    this._queueHasFreshWords = true;
+    this._externalScopeIncludeIds.clear();
+    this._externalScopeIncludeScope = scope;
+    this.clearCardDisplay();
+    await this.db.setSetting('learnProgress', null);
+    await this.prepareLearnSession();
+    // 把新一轮队列落库，刷新后能接着学
+    await this.saveLearnProgress();
+    this.updateProgress();
   }
 
   // ==================== 练习页面 ====================
@@ -5137,7 +5639,17 @@ class VocabApp {
       span.addEventListener('click', async (e) => {
         e.stopPropagation();
         const id = parseInt(span.dataset.id, 10);
-        await this.toggleFavorite(id);
+        const word = await this.toggleFavorite(id);
+        if (word) {
+          // 收藏 tab 的成员变了：把它从“学过一遍”集合里移除，收藏 tab 重新变为没学完
+          this.markScopePassPending(word, ['favorite']);
+          // 学习范围正好是「收藏」时，刚收藏的词要立刻进入学习队列（不能继续停在“已学完”）
+          if (this.normalizeStudyScope(this.settings.studyScope) === 'favorite') {
+            await this.refreshScopedStudySessionAfterExternalChange(word, word.favorite);
+          } else {
+            await this.saveScopePass();
+          }
+        }
         await this.renderLibrary();
       });
     });
@@ -5152,6 +5664,11 @@ class VocabApp {
         const words = await this.db.getAllWords();
         const word = words.find(w => w.id === id);
         if (word) {
+          // 记下改动前是否属于当前学习范围：状态标签变化可能让词条进入/离开该范围
+          const studyScope = this.normalizeStudyScope(this.settings.studyScope);
+          const scopedStudy = this.isScopedStudyRange(studyScope);
+          const wasInStudyScope = scopedStudy && this.isWordInStudyScope(word, studyScope);
+
           word.status = newStatus;
           word.lastStudied = this.nowMs();
           await this.db.updateWord(word);
@@ -5189,6 +5706,22 @@ class VocabApp {
             this.updateProgress();
           }
 
+          // 状态标签变化后，该词条进入了另一个 tab。把它从新 tab 的
+          // “学过一遍”集合里移除：对那个 tab 来说它是新增的，不能算已学完。
+          if (newStatus === 'new' || newStatus === 'review' || newStatus === 'mastered') {
+            this.markScopePassPending(word, [newStatus]);
+          }
+
+          // 状态标签变化让词条进入/离开当前学习范围时，学习页的红字提示与队列
+          // 必须跟着更新：例如「待复习」已显示学完，在词库把一条新词改成待复习后，
+          // 再回学习页应当直接看到这张卡，而不是继续显示「已学完【待复习】」。
+          const nowInStudyScope = scopedStudy && this.isWordInStudyScope(word, studyScope);
+          if (scopedStudy && wasInStudyScope !== nowInStudyScope) {
+            await this.refreshScopedStudySessionAfterExternalChange(word, nowInStudyScope);
+          } else {
+            await this.saveScopePass();
+          }
+
           this.renderLibrary();
           // this.showToast(newStatus === 'mastered' ? '已标记为掌握' : '已标记为待复习'); // 请勿删除该注释
         }
@@ -5200,7 +5733,17 @@ class VocabApp {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const id = parseInt(btn.dataset.id);
-        await this.toggleFavorite(id);
+        const word = await this.toggleFavorite(id);
+        if (word) {
+          // 取消收藏后它已经不在收藏 tab；同时清掉旧完成标记，下次重新收藏会算新增
+          this.markScopePassPending(word, ['favorite']);
+          // 学习范围是「收藏」时，取消收藏意味着该词离开范围，队列与提示要同步更新
+          if (this.normalizeStudyScope(this.settings.studyScope) === 'favorite') {
+            await this.refreshScopedStudySessionAfterExternalChange(word, word.favorite);
+          } else {
+            await this.saveScopePass();
+          }
+        }
         this.renderLibrary();
       });
     });
@@ -5268,6 +5811,9 @@ class VocabApp {
     const dictTypeEl = document.getElementById('dictTypeSelect');
     if (dictTypeEl) dictTypeEl.value = this.settings.dictImportType || 'all';
 
+    const studyScopeEl = document.getElementById('studyScopeSelect');
+    if (studyScopeEl) studyScopeEl.value = this.normalizeStudyScope(this.settings.studyScope);
+
     const phoneticDelaySelect = document.getElementById('phoneticDelaySelect');
     if (phoneticDelaySelect) phoneticDelaySelect.value = String(this.settings.phoneticDelay);
 
@@ -5325,6 +5871,10 @@ class VocabApp {
     this.currentCardIndex = 0;
     this._learnSessionSnapshot = null;
     this.todayWords = [];
+    this._externalScopeIncludeIds.clear();
+    this._externalScopeIncludeScope = this.normalizeStudyScope(this.settings.studyScope);
+    // 学习记录清空后，各 tab 的“学过一遍”进度也重新开始
+    await this.resetScopePass();
     await this.resetTodayDoneCount();
 
     // 4) 统计以数据库重算为准（只影响当前范围），进度条与四个数字一并刷新

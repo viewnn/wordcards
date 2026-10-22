@@ -569,6 +569,11 @@ select {
   background: var(--success);
 }
 
+/* 学习卡第一位标签：当前「学习范围」（全部/新词/待复习/已掌握/收藏） */
+.flashcard .scope-badge {
+  background: #C08A2E;
+}
+
 .flashcard .cantonese-word {
   font-size: var(--font-size-lg);
   color: var(--text-secondary);
@@ -723,6 +728,47 @@ select {
 .action-btn span {
   font-size: 10px;
   color: var(--text-secondary);
+}
+
+/* 当前学习范围已学完：占满卡片区域，红字引导用户切换范围。
+   三个操作按钮保持可见但置灰，点击不会再记录任何数值。 */
+.scope-complete {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+}
+
+.scope-complete-title {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.scope-restart-btn {
+  min-width: 168px;
+  padding: 12px 40px;
+  margin-top: 4px;
+}
+
+.scope-complete-desc {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.card-actions.actions-disabled .action-btn,
+.card-actions .action-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.card-actions.actions-disabled .action-btn:active {
+  transform: none;
 }
 
 /* ==================== 完成页面 ==================== */
@@ -1714,6 +1760,14 @@ select {
   font-size: 13px;
   padding: 10px 28px 10px 14px;
   box-sizing: border-box;
+}
+
+/* 「学习范围」的选项最多 3 个字（如「待复习」），需要比其它下拉框略宽一些。
+   选择器要与上面的 .setting-item select.dict-select 同等特异性，才能覆盖 70px 上限 */
+.setting-item > select.study-scope-select,
+.setting-item select.study-scope-select {
+  max-width: 70px;
+  min-width: 0px;
 }
 
 .setting-info h4 {

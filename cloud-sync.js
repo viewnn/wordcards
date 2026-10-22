@@ -105,6 +105,9 @@
     'learnMode',
     'repeatFrequency',
     'dictImportType',
+    // 学习范围（全部/新词/待复习/已掌握/收藏）：决定学习页从哪类词条抽卡，
+    // 两端不一致时会出现「电脑上在背新词、手机上一打开是待复习」，所以一起同步
+    'studyScope',
     'phoneticDelay',
     'cardDefinitionFirst',
     'categoryDisplay',
@@ -1505,6 +1508,7 @@
     var applied = 0;
     var rangeChanged = false;
     var goalChanged = false;
+    var studyScopeChanged = false;
     this._suppress = true;
     try {
       for (var i = 0; i < SYNCED_SETTING_KEYS.length; i++) {
@@ -1528,6 +1532,7 @@
         this.app.settings[key] = settings[key];
         if (key === 'dictImportType') rangeChanged = true;
         if (key === 'dailyGoal') goalChanged = true;
+        if (key === 'studyScope') studyScopeChanged = true;
         await this.app.db.setSetting(key, settings[key]);
         applied++;
       }
@@ -1546,10 +1551,10 @@
 
       // 云端改过「词典导入」范围或「每日目标」：本地学习队列必须按新设置重建，
       // 否则学习页会继续展示旧范围（如「字」）的卡片，或停在旧目标的进度的完成页上
-      if (rangeChanged || goalChanged) {
+      if (rangeChanged || goalChanged || studyScopeChanged) {
         try {
           this.app._learnSessionSnapshot = null;
-          if (rangeChanged) {
+          if (rangeChanged || studyScopeChanged) {
             this.app.todayWords = [];
             this.app.currentCardIndex = 0;
             if (typeof this.app.clearCardDisplay === 'function') this.app.clearCardDisplay();
@@ -1639,6 +1644,8 @@
       roundStart: toNumber(this.app._todayRoundStart, 0),
       // 纯复习轮标记：整队都是今天已学过的词，恢复端不要把它当成过期会话丢掉
       isReviewRound: Boolean(progress.isReviewRound),
+      // 这个队列属于哪个学习范围：两端范围不同时，恢复端不能把它当成当前范围的进度
+      studyScope: progress.studyScope || 'all',
       savedAt: savedAt,
       dictKeys: keys
     };
@@ -1709,7 +1716,8 @@
         currentCardIndex: index,
         todayWords: words,
         savedAt: session.savedAt || new Date().toISOString(),
-        isReviewRound: Boolean(session.isReviewRound)
+        isReviewRound: Boolean(session.isReviewRound),
+        studyScope: session.studyScope || 'all'
       });
     } finally {
       this._suppress = false;

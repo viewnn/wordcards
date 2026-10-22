@@ -80,6 +80,13 @@
 
           <!-- 卡片区域 -->
           <div class="card-stack">
+            <!-- 当前学习范围已学完：红字提示 + 切换范围引导；此时操作按钮不再记录任何数值 -->
+            <div class="scope-complete" id="learnScopeComplete" style="display: none;">
+              <div class="scope-complete-title" id="learnScopeCompleteText">已学完，是否继续？</div>
+              <!-- 蓝色继续学习：只重置当前 tab 的“学过一遍”进度，继续在当前范围内学习 -->
+              <p class="scope-complete-desc">「设置 → 学习设置 → 学习范围」</p>
+              <button class="btn-primary scope-restart-btn" id="scopeRestartBtn" type="button">继续学习</button>
+            </div>
             <div class="flashcard" id="flashcard">
               <div class="flashcard-inner">
                 <div class="flashcard-front">
@@ -329,6 +336,19 @@
             </div>
             <div class="setting-item">
               <div class="setting-info">
+                <h4>学习范围</h4>
+                <p>会显示到学习卡片内</p>
+              </div>
+              <select id="studyScopeSelect" class="dict-select study-scope-select">
+                <option value="all" selected>全部</option>
+                <option value="new">新词</option>
+                <option value="review">待复习</option>
+                <option value="mastered">已掌握</option>
+                <option value="favorite">收藏</option>
+              </select>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
                 <h4>单词顺序</h4>
                 <p>学习页与练习页共用</p>
               </div>
@@ -393,7 +413,7 @@
                 <h4>分类显示</h4>
                 <p>关闭后，卡片上方将不会再显示分类</p>
               </div>
-              <div class="toggle" id="categoryDisplayToggle"></div>
+              <div class="toggle active" id="categoryDisplayToggle"></div>
             </div>
 
             <div class="setting-item">
