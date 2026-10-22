@@ -300,14 +300,14 @@ select {
 
 .stats-row {
   display: flex;
-  gap: 12px;
+  gap: 6px;
   margin-bottom: 10px;
 }
 
 .stat-card {
   flex: 1;
   background: var(--bg-card);
-  padding: 10px;
+  padding: 6px;
   border-radius: var(--radius-md);
   border: 1px solid rgba(230, 223, 206, 0.9);
   box-shadow: var(--shadow-sm);
