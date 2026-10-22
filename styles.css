@@ -16,6 +16,7 @@
   --warning: #E0A458;
   --danger: #C96A50;
   --border-color: #E6DFCE;
+  --divider: #E6DFCE;
 
   /* 护眼基调：暖调米黄“纸感”，整体压低亮度差与蓝光 */
   --bg-primary: #F1EEE7;
@@ -276,7 +277,8 @@ select {
 .progress-track {
   flex: 1;
   height: 6px;
-  background: #E9E2D0;
+  background: var(--card-bg);
+  /* background: #E9E2D0; */
   border-radius: 999px;
   overflow: hidden;
   box-shadow: inset 0 1px 2px rgba(74, 60, 38, 0.06);
@@ -767,7 +769,7 @@ select {
   font-size: var(--font-size-lg);
   font-weight: 700;
   line-height: 1.5;
-  color: var(--danger);
+  color: var(--text-primary);
 }
 
 .scope-restart-btn {
@@ -1777,8 +1779,7 @@ select {
   box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.12);
 }
 
-/* 查看模式（只读）下的输入框：文字保持深色加粗，避免“淡到看不清” */
-/* 查看模式（只读）下的输入框：文字保持深色加粗，避免“淡到看不清” */
+/* 查看模式（只读）下的输入框：文字保持深色，避免“淡到看不清” */
 .form-input:disabled,
 .form-textarea:disabled {
   opacity: 1;
@@ -1820,21 +1821,25 @@ select {
   align-items: center;
   gap: 4px;
   font-size: var(--font-size-sm);
-  color: var(--text-primary);
-  padding: 16px 20px 10px;
+  color: var(--text-secondary);
+  padding: 14px 20px 12px;
   font-weight: 500;
   letter-spacing: 0.5px;
+  /* 标题行背景色（取左侧图标的蓝紫色系，浅调不刺眼） */
+  background: rgba(74, 68, 56, 0.035);
+  /* 标题底部下划线 */
+  border-bottom: 1px solid var(--divider)
 }
 
 /* 标题前的彩色小竖条，区块更有节奏感（.cloud-title 自带双列布局） */
-.settings-section-title:not(.cloud-title)::before {
+/* .settings-section-title:not(.cloud-title)::before {
   content: '';
   width: 3px;
   height: 13px;
   border-radius: 2px;
   background: linear-gradient(180deg, var(--primary), var(--secondary));
   flex: 0 0 auto;
-}
+} */
 
 .setting-item {
   display: flex;
@@ -1870,11 +1875,6 @@ select {
   font-weight: 500;
   color: var(--text-primary);
   margin-bottom: 2px;
-}
-
-.setting-info p {
-  font-size: 13px;
-  color: var(--text-secondary);
 }
 
 .setting-info p {
