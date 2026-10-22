@@ -79,6 +79,9 @@ const CARD_CLEAR_MARGIN_PX = 8;
 const CARD_PARK_MARGIN_PX = 30;
 /** 新卡入场起点在滑出终点基础上再越界的像素数，0 = 正好接在旧卡离场的位置继续滑入 */
 const CARD_FINISH_MARGIN_PX = 0;
+/** 收藏心形图标（学习卡两个角落与词库列表共用同一颗心） */
+const HEART_ICON_SVG =
+  '<svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>';
 
 // ==================== 练习页参数 ====================
 /**
@@ -582,7 +585,6 @@ class VocabApp {
    */
   async init() {
     try {
-      this.measureScrollbarWidth();
       await this.db.init();
       await this.loadSettings();
       const savedDictType = await this.db.getSetting('dictImportType', null);
@@ -1025,16 +1027,6 @@ class VocabApp {
     document.documentElement.style.setProperty('--learn-card-height', `${height}px`);
   }
 
-  /** 测量滚动条宽度 */
-  measureScrollbarWidth() {
-    const scrollDiv = document.createElement('div');
-    scrollDiv.style.cssText = 'width: 100px; height: 100px; overflow: scroll; position: absolute; top: -9999px;';
-    document.body.appendChild(scrollDiv);
-    const scrollbarWidth = scrollDiv.offsetWidth - scrollDiv.clientWidth;
-    document.body.removeChild(scrollDiv);
-    document.documentElement.style.setProperty('--scrollbar-width', `${scrollbarWidth}px`);
-  }
-  
   /** 数据库修复后写入少量示例词，保证可立即学习 */
   async addSampleWords() {
     const samples = [
@@ -1748,6 +1740,21 @@ class VocabApp {
 
 
   /**
+   * 统一绑定「点击 + 触摸」：移动端 touchstart 先触发（preventDefault 会阻断
+   * 随后合成的 click，同一动作只执行一次），桌面端走 click。
+   * 与原先「click / touchstart 各写一份」完全等价；
+   * preventTouch=false 用于不能阻断触摸默认行为的元素（如模态框遮罩）。
+   */
+  _bindTap(el, handler, preventTouch = true) {
+    if (!el) return;
+    el.addEventListener('click', handler);
+    el.addEventListener('touchstart', (e) => {
+      if (preventTouch) e.preventDefault();
+      handler(e);
+    }, { passive: false });
+  }
+
+  /**
    * 绑定全局事件（只在启动时绑定一次）：
    * 底部导航切换、弹窗关闭、首页统计数字点击、保存单词按钮、
    * 卡片点击翻面、收藏按钮（同时监听 click 与 touchstart 并去重）、
@@ -1758,9 +1765,8 @@ class VocabApp {
     const self = this;
     
     // 导航切换
-    document.querySelector('.bottom-nav').addEventListener('click', handleNavClick);
-    document.querySelector('.bottom-nav').addEventListener('touchstart', handleNavClick);
-    
+    this._bindTap(document.querySelector('.bottom-nav'), handleNavClick);
+
     /** 导航点击处理（使用事件委托，确保点击文字/图标均可触发） */
     function handleNavClick(e) {
       e.preventDefault();
@@ -1780,52 +1786,32 @@ class VocabApp {
       }
     }
 
-    // 模态框关闭
+    // 模态框关闭（遮罩层不阻断触摸默认行为，避免影响遮罩上的手势）
     document.querySelectorAll('.modal-overlay').forEach(el => {
-      el.addEventListener('click', (e) => {
+      this._bindTap(el, (e) => {
         if (e.target === el) self.closeModals();
-      });
-      el.addEventListener('touchstart', (e) => {
-        if (e.target === el) self.closeModals();
-      });
+      }, false);
     });
-    
+
     // 关闭按钮
     document.querySelectorAll('.modal-close').forEach(el => {
-      el.addEventListener('click', () => self.closeModals());
-      el.addEventListener('touchstart', (e) => { e.preventDefault(); self.closeModals(); });
+      this._bindTap(el, () => self.closeModals());
     });
     
-    // 首页统计数字点击跳转
-    const statMastered = document.getElementById('statMastered');
-    if (statMastered) {
-      statMastered.addEventListener('click', () => self.handleStatClick('mastered'));
-      statMastered.addEventListener('touchstart', (e) => { e.preventDefault(); self.handleStatClick('mastered'); });
-    }
-    
-    const statReview = document.getElementById('statReview');
-    if (statReview) {
-      statReview.addEventListener('click', () => self.handleStatClick('review'));
-      statReview.addEventListener('touchstart', (e) => { e.preventDefault(); self.handleStatClick('review'); });
-    }
-    
-    // 累计统计点击事件
-    const totalMastered = document.getElementById('totalMastered');
-    if (totalMastered) {
-      totalMastered.addEventListener('click', () => self.handleTotalStatClick('mastered'));
-      totalMastered.addEventListener('touchstart', (e) => { e.preventDefault(); self.handleTotalStatClick('mastered'); });
-    }
-    
-    const totalReview = document.getElementById('totalReview');
-    if (totalReview) {
-      totalReview.addEventListener('click', () => self.handleTotalStatClick('review'));
-      totalReview.addEventListener('touchstart', (e) => { e.preventDefault(); self.handleTotalStatClick('review'); });
-    }
+    // 统计数字点击跳转：前两项是今日口径（带“只看今天学过”筛选），后两项是累计口径
+    [
+      ['statMastered', 'mastered', false],
+      ['statReview', 'review', false],
+      ['totalMastered', 'mastered', true],
+      ['totalReview', 'review', true]
+    ].forEach(([id, filter, total]) => {
+      this._bindTap(document.getElementById(id), () =>
+        total ? self.handleTotalStatClick(filter) : self.handleStatClick(filter)
+      );
+    });
 
     // 保存单词表单
-    const saveWordBtn = document.getElementById('saveWordBtn');
-    saveWordBtn.addEventListener('click', () => self.saveWord());
-    saveWordBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.saveWord(); });
+    this._bindTap(document.getElementById('saveWordBtn'), () => self.saveWord());
 
     // 卡片单击翻面（桌面鼠标走这里；触屏的翻面在 initCardSwipe 的 touchend 里）
     const flashcard = document.getElementById('flashcard');
@@ -1914,34 +1900,17 @@ class VocabApp {
     // 卡片文字长按/拖选复制（与滑动、翻面互斥）
     this.initCardTextSelection(flashcard);
     
-    // 操作按钮
-    const btnDifficult = document.getElementById('btnDifficult');
-    btnDifficult.addEventListener('click', () => self.markDifficult());
-    btnDifficult.addEventListener('touchstart', (e) => { e.preventDefault(); self.markDifficult(); });
-    
-    const btnSkip = document.getElementById('btnSkip');
-    btnSkip.addEventListener('click', () => self.skipCard());
-    btnSkip.addEventListener('touchstart', (e) => { e.preventDefault(); self.skipCard(); });
-    
-    const btnMastered = document.getElementById('btnMastered');
-    btnMastered.addEventListener('click', () => self.markMastered());
-    btnMastered.addEventListener('touchstart', (e) => { e.preventDefault(); self.markMastered(); });
-    
-    // 重新开始按钮
-    const restartBtn = document.getElementById('restartBtn');
-    restartBtn.addEventListener('click', () => self.restartLearn());
-    restartBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.restartLearn(); });
+    // 操作按钮（陌生 / 跳过 / 掌握）与学习页的【继续学习】
+    [['btnDifficult', 'markDifficult'],
+     ['btnSkip', 'skipCard'],
+     ['btnMastered', 'markMastered']].forEach(([id, method]) => {
+      this._bindTap(document.getElementById(id), () => self[method]());
+    });
+    this._bindTap(document.getElementById('restartBtn'), () => self.restartLearn());
 
     // 「已学完【…】，是否继续？」下方的蓝色【继续学习】：
     // 只重置当前学习范围的“学过一遍”进度，继续在同一个范围内学习
-    const scopeRestartBtn = document.getElementById('scopeRestartBtn');
-    if (scopeRestartBtn) {
-      scopeRestartBtn.addEventListener('click', () => self.restartScopeLearn());
-      scopeRestartBtn.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        self.restartScopeLearn();
-      });
-    }
+    this._bindTap(document.getElementById('scopeRestartBtn'), () => self.restartScopeLearn());
 
     // 设置相关
     this.bindSettingsEvents();
@@ -2263,9 +2232,6 @@ class VocabApp {
       self.showToast('每日目标已更新为 ' + nextGoal);
     });
     
-    // 监听页面切换，更新滑块状态
-    // 已合并到 handleNavClick 事件委托中，此监听器删除
-
     // ---------- 学习范围 ----------
     // 只重建学习队列，不重置「本轮起点」：切换范围后今日进度继续连续（如 20/100 → 21/100）
     const studyScopeSelect = document.getElementById('studyScopeSelect');
@@ -2296,10 +2262,7 @@ class VocabApp {
     }
 
     // 学习模式
-    document.querySelectorAll('.mode-option').forEach(option => {
-      option.addEventListener('click', handleModeClick);
-      option.addEventListener('touchstart', handleModeClick);
-    });
+    document.querySelectorAll('.mode-option').forEach(option => this._bindTap(option, handleModeClick));
     
     async function handleModeClick(e) {
       e.preventDefault();
@@ -2313,25 +2276,33 @@ class VocabApp {
       self.showToast(self.settings.learnMode === 'random' ? '已切换为随机模式' : '已切换为顺序模式');
     }
 
-    const cardDefinitionFirstToggle = document.getElementById('cardDefinitionFirstToggle');
-    if (cardDefinitionFirstToggle) {
-      cardDefinitionFirstToggle.addEventListener('click', handleCardDefinitionFirstToggle);
-      cardDefinitionFirstToggle.addEventListener('touchstart', handleCardDefinitionFirstToggle);
-    }
+    // 三个同构开关：卡片翻转 / 分类显示 / 显示释义（「显示调值」逻辑特殊，单独在下面绑定）
+    const bindSettingToggle = (id, key, after) => {
+      const toggle = document.getElementById(id);
+      if (!toggle) return;
+      const handler = async (e) => {
+        e.preventDefault();
+        toggle.classList.toggle('active');
+        const value = toggle.classList.contains('active');
+        self.settings[key] = value;
+        await self.db.setSetting(key, value);
+        if (after) await after();
+      };
+      toggle.addEventListener('click', handler);
+      toggle.addEventListener('touchstart', handler);
+    };
 
-    // 分类显示设置
-    const categoryDisplayToggle = document.getElementById('categoryDisplayToggle');
-    if (categoryDisplayToggle) {
-      categoryDisplayToggle.addEventListener('click', handleCategoryDisplayToggle);
-      categoryDisplayToggle.addEventListener('touchstart', handleCategoryDisplayToggle);
-    }
-
-    // 显示释义设置（只控制词库列表卡片，查看单词弹窗始终显示释义）
-    const meaningDisplayToggle = document.getElementById('meaningDisplayToggle');
-    if (meaningDisplayToggle) {
-      meaningDisplayToggle.addEventListener('click', handleMeaningDisplayToggle);
-      meaningDisplayToggle.addEventListener('touchstart', handleMeaningDisplayToggle);
-    }
+    const refreshLearnCard = () => {
+      if (self.currentPage === 'learn' && self.todayWords.length > 0) {
+        self.showCard(self.currentCardIndex);
+      }
+    };
+    bindSettingToggle('cardDefinitionFirstToggle', 'cardDefinitionFirst', refreshLearnCard);
+    bindSettingToggle('categoryDisplayToggle', 'categoryDisplay', refreshLearnCard);
+    // 显示释义（只控制词库列表卡片，查看单词弹窗始终显示释义）
+    bindSettingToggle('meaningDisplayToggle', 'meaningDisplay', async () => {
+      if (self.currentPage === 'library') await self.renderLibrary();
+    });
 
     // ---------- 练习设置（练习页的范围与调值开关都在这里） ----------
     const practiceScopeSelect = document.getElementById('practiceScopeSelect');
@@ -2373,44 +2344,6 @@ class VocabApp {
       }
     }
 
-    async function handleCardDefinitionFirstToggle(e) {
-      e.preventDefault();
-      const toggle = document.getElementById('cardDefinitionFirstToggle');
-      toggle.classList.toggle('active');
-      self.settings.cardDefinitionFirst = toggle.classList.contains('active');
-      await self.db.setSetting('cardDefinitionFirst', self.settings.cardDefinitionFirst);
-      if (self.currentPage === 'learn' && self.todayWords.length > 0) {
-        self.showCard(self.currentCardIndex);
-      }
-    }
-
-    // 分类显示设置
-    async function handleCategoryDisplayToggle(e) {
-      e.preventDefault();
-      const toggle = document.getElementById('categoryDisplayToggle');
-      toggle.classList.toggle('active');
-      self.settings.categoryDisplay = toggle.classList.contains('active');
-      await self.db.setSetting('categoryDisplay', self.settings.categoryDisplay);
-      if (self.currentPage === 'learn' && self.todayWords.length > 0) {
-        self.showCard(self.currentCardIndex);
-      }
-    }
-
-    /**
-     * 「显示释义」开关：只决定词库列表卡片里“单词下方那行释义”是否渲染，
-     * 词库卡片点开的「查看单词」弹窗不受影响，学习卡片的翻转逻辑也不受影响。
-     */
-    async function handleMeaningDisplayToggle(e) {
-      e.preventDefault();
-      const toggle = document.getElementById('meaningDisplayToggle');
-      toggle.classList.toggle('active');
-      self.settings.meaningDisplay = toggle.classList.contains('active');
-      await self.db.setSetting('meaningDisplay', self.settings.meaningDisplay);
-      if (self.currentPage === 'library') {
-        await self.renderLibrary();
-      }
-    }
-
     // 音标渐显设置
     const phoneticDelaySelect = document.getElementById('phoneticDelaySelect');
     if (phoneticDelaySelect) {
@@ -2434,9 +2367,7 @@ class VocabApp {
     }
 
     // 清除进度按钮
-    const clearProgressBtn = document.getElementById('clearProgressBtn');
-    clearProgressBtn.addEventListener('click', () => self.clearProgress());
-    clearProgressBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.clearProgress(); });
+    this._bindTap(document.getElementById('clearProgressBtn'), () => self.clearProgress());
     
     // 词典类型选择事件
     const dictTypeSelect = document.getElementById('dictTypeSelect');
@@ -3698,12 +3629,8 @@ class VocabApp {
     cardInner.innerHTML = `
       <div class="flashcard-front">
         ${badgeRowHtml}
-        <button class="favorite-btn ${word.favorite ? 'active' : ''}" id="favoriteBtn">
-          <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
-        </button>
-        <button class="favorite-btn favorite-btn-right ${word.favorite ? 'active' : ''}" id="favoriteBtnRight">
-          <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
-        </button>
+        <button class="favorite-btn ${word.favorite ? 'active' : ''}" id="favoriteBtn">${HEART_ICON_SVG}</button>
+        <button class="favorite-btn favorite-btn-right ${word.favorite ? 'active' : ''}" id="favoriteBtnRight">${HEART_ICON_SVG}</button>
         <div class="card-content">
           <div class="word">${word.word}</div>
           <div class="phonetic" id="phoneticText">${cantonesePhoneticFirst ? (word.jyutping || word.phonetic || '') : (word.phonetic || word.jyutping || '')}</div>
@@ -3712,9 +3639,7 @@ class VocabApp {
         <div class="tap-hint">点击查看释义（Shift）</div>
       </div>
       <div class="flashcard-back">
-        <button class="favorite-btn ${word.favorite ? 'active' : ''}" id="favoriteBtnBack">
-          <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
-        </button>
+        <button class="favorite-btn ${word.favorite ? 'active' : ''}" id="favoriteBtnBack">${HEART_ICON_SVG}</button>
         <div class="card-content">
           <div class="meaning">${word.definition || word.meaning}</div>
           <div class="example">${word.example ? `"${word.example}"` : ''}</div>
@@ -4398,40 +4323,22 @@ class VocabApp {
     document.getElementById('statMastered').textContent = this.todayStats.mastered;
     document.getElementById('statReview').textContent = this.todayStats.review;
 
-    // 完成页里的「已掌握 / 待复习」是同一个口径，必须跟着一起刷新：
-    // 点最后一张卡时是「先收卡显示完成页、统计才异步重算完」，如果只在 showComplete()
-    // 里写一次，完成页就会永远比上方少一张（例如上方 20、完成页 19）。
-    const completeMastered = document.getElementById('completeMastered');
-    if (completeMastered) completeMastered.textContent = this.todayStats.mastered;
-    const completeReview = document.getElementById('completeReview');
-    if (completeReview) completeReview.textContent = this.todayStats.review;
-
     // 累计统计 = 当前词库中各状态的真实词条数（与词库页筛选结果一致）
     document.getElementById('totalMastered').textContent = this._cachedStatusCounts.mastered;
     document.getElementById('totalReview').textContent = this._cachedStatusCounts.review;
 
-    // 更新可点击状态
-    const statMastered = document.getElementById('statMastered');
-    const statReview = document.getElementById('statReview');
-    if (statMastered) {
-      statMastered.style.cursor = this.todayStats.mastered >= 1 ? 'pointer' : 'default';
-      statMastered.style.opacity = this.todayStats.mastered >= 1 ? '1' : '0.6';
-    }
-    if (statReview) {
-      statReview.style.cursor = this.todayStats.review >= 1 ? 'pointer' : 'default';
-      statReview.style.opacity = this.todayStats.review >= 1 ? '1' : '0.6';
-    }
-    // 累计统计的可点击状态
-    const totalMastered = document.getElementById('totalMastered');
-    const totalReview = document.getElementById('totalReview');
-    if (totalMastered) {
-      totalMastered.style.cursor = this._cachedStatusCounts.mastered >= 1 ? 'pointer' : 'default';
-      totalMastered.style.opacity = this._cachedStatusCounts.mastered >= 1 ? '1' : '0.6';
-    }
-    if (totalReview) {
-      totalReview.style.cursor = this._cachedStatusCounts.review >= 1 ? 'pointer' : 'default';
-      totalReview.style.opacity = this._cachedStatusCounts.review >= 1 ? '1' : '0.6';
-    }
+    // 可点击状态：数字 ≥ 1 才允许点击跳转（四个数字同一套规则）
+    const setStatPointer = (id, count) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const active = count >= 1;
+      el.style.cursor = active ? 'pointer' : 'default';
+      el.style.opacity = active ? '1' : '0.6';
+    };
+    setStatPointer('statMastered', this.todayStats.mastered);
+    setStatPointer('statReview', this.todayStats.review);
+    setStatPointer('totalMastered', this._cachedStatusCounts.mastered);
+    setStatPointer('totalReview', this._cachedStatusCounts.review);
   }
   
   /**
@@ -4505,9 +4412,6 @@ class VocabApp {
         this.db.setSetting('todayGoalReached', { date: today, goal }).catch(() => {});
       }
     }
-
-    // document.getElementById('completeMastered').textContent = this.todayStats.mastered;
-    // document.getElementById('completeReview').textContent = this.todayStats.review;
 
     // 文案：
     //   - 真正达到每日目标 → 「今日学习目标已完成」；
@@ -4636,11 +4540,7 @@ class VocabApp {
       });
     }
 
-    const restartBtn = document.getElementById('practiceRestartBtn');
-    if (restartBtn) {
-      restartBtn.addEventListener('click', () => self.restartPractice());
-      restartBtn.addEventListener('touchstart', (e) => { e.preventDefault(); self.restartPractice(); });
-    }
+    this._bindTap(document.getElementById('practiceRestartBtn'), () => self.restartPractice());
 
     // 点击输入框以外的地方就收起软键盘：键盘只服务于输入，
     // 不该一直占着半屏（点卡片看答案、切范围、切菜单时都会自动收回）
@@ -5568,9 +5468,7 @@ class VocabApp {
                   <div class="word-status">
                     ${effectiveStatus === 'favorite' ? `
                       <div class="word-actions">
-                        <button type="button" class="word-action-btn unfavorite-btn" data-id="${word.id}" title="取消收藏" aria-label="取消收藏">
-                          <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
-                        </button>
+                        <button type="button" class="word-action-btn unfavorite-btn" data-id="${word.id}" title="取消收藏" aria-label="取消收藏">${HEART_ICON_SVG}</button>
                         <button type="button" class="word-action-btn library-view-btn view-btn" data-id="${word.id}" title="查看" aria-label="查看单词">
                           ${viewIconSvg}
                         </button>

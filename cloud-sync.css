@@ -81,7 +81,7 @@
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--bg-primary);
-  color: var(--text-light);
+  color: var(--text-secondary);
   font-size: 11px;
   font-weight: 400;
   line-height: 1.6;
@@ -152,7 +152,7 @@
 .cloud-setup-note {
   padding-top: 12px;
   border-top: 1px solid var(--bg-primary);
-  color: var(--text-light);
+  color: var(--text-secondary);
 }
 
 /*
@@ -165,7 +165,7 @@
   flex: 0 0 auto;
   padding: 8px 21px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--primary);
   color: #fff;
   font-size: 13px;
@@ -260,7 +260,7 @@
   padding-top: 14px;
   border-top: 1px solid var(--bg-primary);
   font-size: var(--font-size-xs);
-  color: var(--text-light);
+  color: var(--text-secondary);
   line-height: 1.7;
 }
 

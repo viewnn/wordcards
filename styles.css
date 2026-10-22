@@ -1,29 +1,43 @@
-/* ==================== 全局样式 ==================== */
+/* ============================================================
+ * WordCards 全局样式（护眼米黄纸感 · 精致化视觉层）
+ * ------------------------------------------------------------
+ * 注意：本文件里所有尺寸（卡片高度 clamp、--flashcard-pad、
+ * 正反面内边距、practice 输入框度量等）都被 app.js 或翻面
+ * 对齐逻辑依赖，改视觉时务必保留数值，只动颜色/阴影/圆角。
+ * ============================================================ */
+
+/* ==================== 设计令牌 ==================== */
 :root {
   --primary: #4A90D9;
   --primary-color: #4A90D9;
-  --border-color: #E1DCCF;
   --primary-dark: #3A7BC8;
   --secondary: #6C5CE7;
   --success: #5A9E6F;
   --warning: #E0A458;
   --danger: #C96A50;
-  /* 护眼基调：暖调米黄“纸感”，整体压低亮度差与蓝光，长时间看更放松 */
+  --border-color: #E6DFCE;
+
+  /* 护眼基调：暖调米黄“纸感”，整体压低亮度差与蓝光 */
   --bg-primary: #F1EEE7;
   --bg-card: #FBFAF6;
-  /* 学习卡面：米黄纸感（替代刺眼的纯亮绿/纯白），比页面底色略亮以拉开层次 */
+  /* 学习卡面：米黄纸感，比页面底色略亮以拉开层次 */
   --card-bg: #F6F2E7;
-  /* 正文用偏暖的柔褐灰，不做纯黑、也不做高反差；
-     实测对 #F2EDE1 卡面约 8.3:1，清晰但明显比纯黑白柔和 */
+  /* 正文用偏暖的柔褐灰，不做纯黑、也不做高反差 */
   --text-primary: #4A4438;
   --text-secondary: #6B6355;
   --text-light: #8F8878;
-  --shadow-sm: 0 0 2px rgba(0,0,0,0.2);
-  --shadow-md: 0 4px 16px rgba(0,0,0,0.12);
-  --shadow-lg: 0 8px 32px rgba(0,0,0,0.16);
+
+  /* 阴影：低存在感，但保留一点分层（列表卡片可感知、不厚重） */
+  --shadow-sm: 0 1px 3px rgba(74, 60, 38, 0.07);
+  --shadow-md: 0 3px 10px rgba(74, 60, 38, 0.08);
+  --shadow-lg: 0 8px 20px rgba(74, 60, 38, 0.12);
+
+  /* 圆角：全部收敛为 8px（与早期版本一致，卡片/按钮/输入框同弧） */
   --radius-sm: 8px;
   --radius-md: 8px;
   --radius-lg: 8px;
+  --radius-language-badge: 20px;
+
   --font-size-xs: 12px;
   --font-size-sm: 14px;
   --font-size-md: 16px;
@@ -41,24 +55,23 @@
 
 html, body {
   height: 100%;
+  /* font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC','Hiragino Sans GB', 'Microsoft YaHei', Roboto, Oxygen, Ubuntu, sans-serif; */
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
   background: var(--bg-primary);
   color: var(--text-primary);
   overflow: hidden;
 }
 
-/**
- * 表单控件默认不继承页面字体：UA 样式表会直接给 button/input/textarea/select 赋一个 font 简写，
- * 于是上面 html, body 的字体链传不进控件内部。各浏览器默认值还不一致——Blink 给 <textarea> 用
- * monospace、给 <input>/<button>/<select> 用系统小控件字体（Windows 上 Arial），
- * 结果就是弹窗里「例句」与其他字段、按钮文字与页面文字字体各不相同。
- * 这里统一改成继承，让所有控件跟随页面字体。
- */
+/* 表单控件默认不继承页面字体（UA 会给控件另赋字体），统一改成继承 */
 button,
 input,
 textarea,
 select {
   font-family: inherit;
+}
+
+::selection {
+  background: rgba(74, 144, 217, 0.22);
 }
 
 /* ==================== 页面容器 ==================== */
@@ -70,18 +83,20 @@ select {
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  background: var(--bg-primary);
+  /* 顶部一点极淡的暖色光晕，纸面更有层次 */
+  background:
+    radial-gradient(120% 24% at 50% 0%, rgba(255, 253, 247, 0.9) 0%, rgba(255, 253, 247, 0) 100%),
+    var(--bg-primary);
   overflow: hidden;
 }
 
-/* ==================== 头部导航 ==================== */
+/* ==================== 头部 ==================== */
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 14px 20px;
   background: var(--bg-card);
-  /* box-shadow: var(--shadow-sm); */
   border-bottom: 1px solid var(--border-color);
   position: relative;
   z-index: 100;
@@ -91,6 +106,7 @@ select {
   font-size: var(--font-size-lg);
   font-weight: 600;
   color: var(--primary);
+  filter: drop-shadow(0 1px 1px rgba(74, 60, 38, 0.08));
 }
 
 .dict-update-time {
@@ -98,18 +114,18 @@ select {
   font-weight: 400;
   color: var(--text-light);
   margin: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ==================== 底部导航 ==================== */
 .bottom-nav {
   display: flex;
   background: var(--bg-card);
-  padding: 8px 0;
-  padding-bottom: max(8px, env(safe-area-inset-bottom));
+  padding: 6px 8px;
+  padding-bottom: max(6px, env(safe-area-inset-bottom));
   border-top: 1px solid var(--border-color);
   position: relative;
   z-index: 100;
-  /* box-shadow: 0 -2px 10px rgba(0,0,0,0.05); */
 }
 
 .nav-item {
@@ -121,25 +137,36 @@ select {
   padding: 8px 0;
   border: none;
   background: none;
+  border-radius: 14px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background 0.2s, transform 0.15s;
 }
 
 .nav-item svg {
   width: 24px;
   height: 24px;
   fill: var(--text-light);
-  transition: all 0.2s;
+  transition: fill 0.2s, transform 0.2s;
 }
 
 .nav-item span {
   font-size: var(--font-size-xs);
   color: var(--text-light);
-  transition: all 0.2s;
+  transition: color 0.2s;
+}
+
+.nav-item:active {
+  transform: scale(0.92);
+}
+
+.nav-item.active {
+  /* 仅用图标与文字颜色表达选中态，不铺背景色块 */
+  background: none;
 }
 
 .nav-item.active svg {
   fill: var(--primary);
+  transform: translateY(-1px);
 }
 
 .nav-item.active span {
@@ -147,13 +174,26 @@ select {
   font-weight: 500;
 }
 
-/* ==================== 页面内容==================== */
+/* ==================== 页面内容 ==================== */
 .page-content {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   background: var(--bg-card);
+}
+
+.page-content::-webkit-scrollbar {
+  width: 5px;
+}
+
+.page-content::-webkit-scrollbar-thumb {
+  background: rgba(74, 60, 38, 0.18);
+  border-radius: 999px;
+}
+
+.page-content::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .page {
@@ -179,10 +219,7 @@ select {
   position: relative;
 }
 
-/* 切页入场动画：只做淡入，不做位移。
-   页面本身至少占满一屏（.learn-container 等是 min-height: 100%），
-   一旦加上 translateY(10px)，内容底部就会在动画这 0.3 秒里超出滚动容器，
-   .page-content 会先闪出一条纵向滚动条、动画结束又消失（滚动条还会挤窄内容，看起来像抖了一下）。 */
+/* 切页入场动画：只做淡入，不做位移（位移会把内容顶出滚动容器、闪滚动条） */
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -221,13 +258,8 @@ select {
   width: 100%;
   display: flex;
   flex-direction: column;
-  /* 用 min-height 代替固定 height：高度不足时容器可撑开，
-     由 .page-content 出滚动条，而不是卡片溢出遮挡下方按钮 */
+  /* min-height 代替固定 height：空间不足时由 .page-content 出滚动条 */
   min-height: 100%;
-  /* 底部不留多余留白：卡片下方就是 .card-actions（三个操作按钮），
-     按钮自身已带内边距（含安全区），此前额外的 72px 会顶出一条空白带，
-     把卡片挤矮、并在按钮与底部导航之间留下大空隙（实测占到 88px）。
-     只保留 8px 与左右一致的基础内边距，省下的 64px 全部让给卡片高度。 */
   padding: 8px;
   box-sizing: border-box;
   background: var(--bg-card);
@@ -244,15 +276,16 @@ select {
 .progress-track {
   flex: 1;
   height: 6px;
-  background: #8f88785c;
-  border-radius: 3px;
+  background: #E9E2D0;
+  border-radius: 999px;
   overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(74, 60, 38, 0.06);
 }
 
 .progress-fill {
   height: 100%;
   background: linear-gradient(90deg, var(--primary), var(--secondary));
-  border-radius: 3px;
+  border-radius: 999px;
   transition: width 0.3s ease;
 }
 
@@ -260,6 +293,7 @@ select {
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .stats-row {
@@ -273,27 +307,36 @@ select {
   background: var(--bg-card);
   padding: 10px;
   border-radius: var(--radius-md);
+  border: 1px solid rgba(230, 223, 206, 0.9);
   box-shadow: var(--shadow-sm);
   text-align: center;
-  /* border:1px solid #94c4f8; */
   cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.15s;
+}
+
+.stat-card:hover {
+  box-shadow: var(--shadow-md);
+}
+
+.stat-card:active {
+  transform: scale(0.97);
 }
 
 .notice {
   font-size: var(--font-size-xs);
-  color: var(--text-secondary);
+  color: #5B87B8;
   margin-bottom: 10px;
-  padding:6px 10px;
-  background: #F6EDE2;
-  border-radius: 6px;
-
+  padding: 6px 10px;
+  background: rgba(74, 144, 217, 0.08);
+  border-radius: 8px;
+  text-align: center;
 }
 
 .stat-value {
-  /* 统计数值字体大小 */
   font-size: 22px;
   font-weight: 700;
   color: var(--primary);
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-value-sum {
@@ -313,47 +356,40 @@ select {
   /* flex: 1 让卡片区域吃掉进度条/统计/按钮之外的全部剩余高度 */
   flex: 1;
   /* 卡片(320 下限) + 按钮区(88) + 卡片区上下内边距(12) ≈ 420：
-     空间不足时由这里撑开、页面出滚动条，而不是把卡片压矮、把按钮往上挤 */
+     空间不足时由这里撑开、页面出滚动条，而不是把卡片压矮 */
   min-height: 420px;
   position: relative;
   perspective: 1000px;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  /* 卡片与按钮作为一组垂直居中，按钮始终紧贴单词卡下方 */
-  /* justify-content: center; */
   padding: 4px 0 8px;
   overflow: visible;
 }
 
 .flashcard {
   width: 100%;
-  /* 高度随可用空间伸缩：短屏保底 320px（保证单词/释义不被挤），
-     空间充裕时最多长到 460px，把卡片区域下方的余量吃满，
-     避免按钮与底部导航之间出现大片空白。
-     注意：高度只在这里定义一次。写进 @media (max-width:400px) 是无效的——
-     宽度 412/430px 的手机匹配不到该断点，改了在那个尺寸上看不到任何变化。 */
+  /* 高度只在这里定义一次（短屏保底 320px，最多 460px）；
+     写进 max-width:400 断点对 412/430px 手机无效 */
   height: clamp(320px, calc(100% - 96px), 460px);
-  /* 不允许被 flex 压缩：.card-stack 空间不足时，flex-shrink 会把上面的下限压破
-     （小屏手机上曾把 280px 的下限压到 252px，卡片就显得很矮）。
-     空间不够时改由 .card-stack 的 min-height 撑开、页面出滚动条 */
+  /* 不允许被 flex 压缩：空间不够时由 .card-stack 的 min-height 撑开 */
   flex-shrink: 0;
-  /* 卡面：米黄纸感 + 极淡描边，与同色系背景拉开层次但不刺眼 */
-  background: var(--card-bg);
-  border: 0px solid #E7DFCC;
+  /* 卡面：米黄纸感 + 淡描边 + 柔和投影 */
+  background: linear-gradient(160deg, #FAF6EC 0%, var(--card-bg) 100%);
+  border: 1px solid #EBE4D3;
   border-radius: var(--radius-lg);
+  /* 轻投影：只作层次暗示，不压过纸面质感 */
+  box-shadow: 0 3px 10px -6px rgba(74, 60, 38, 0.14), 0 1px 3px rgba(74, 60, 38, 0.05);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  /* 卡片内边距抽成变量：背面要用负 inset 往外扩出这一圈，
-     让整块蓝紫底色与正面看到的米黄卡面一样大（此前四周缩进一圈，比正面小一号） */
+  /* 背面用负 inset 往外扩出这一圈内边距，保证两面卡面等大 */
   --flashcard-pad: 16px;
   padding: var(--flashcard-pad);
   cursor: grab;
   user-select: none;
   -webkit-user-select: none;
-  /* box-shadow: var(--shadow-md); */
   transition: transform 0.3s, box-shadow 0.3s;
   touch-action: pan-y;
   -webkit-tap-highlight-color: transparent;
@@ -368,7 +404,7 @@ select {
   width: 100%;
   height: 100%;
   position: relative;
-  /* 正反两面都以 inset:0 绝对定位铺满本层，这里的 flex 只服务于初始静态标记 */
+  /* 正反两面都以 inset:0 绝对定位铺满本层，flex 只服务于初始静态标记 */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -380,9 +416,8 @@ select {
   -webkit-transition: -webkit-transform 0.45s cubic-bezier(.2,.8,.2,1);
 }
 
-/* 正反面共用的“卡片正文”盒子：撑满除角标/提示之外的整块卡面。
-   正文不再垂直居中，而是靠上留出固定内边距（两面数值完全一致），
-   因此既整体上移、又保证翻转前后文字落在同一水平位置。 */
+/* 正反面共用的“卡片正文”盒子：靠上留固定内边距（两面数值一致），
+   行间距统一交给 gap，保证翻转前后文字落在同一水平位置 */
 .card-content {
   flex: 1 1 auto;
   min-height: 0;
@@ -390,11 +425,8 @@ select {
   display: flex;
   flex-direction: column;
   align-items: center;
-  /* 靠上排布：配合下面的 padding-top 控制正文起始位置 */
   justify-content: flex-start;
   padding-top: 30px;
-  /* 行间距统一交给 gap，不要写成 .meaning/.phonetic 的上下内边距：
-     那样只会把背面的第一行（meaning）往下推 10px，翻面时正文会整体向下跳。 */
   gap: 10px;
   text-align: center;
 }
@@ -403,18 +435,14 @@ select {
   font-size: var(--font-size-xl);
   font-weight: 700;
   color: var(--text-primary);
-  /* margin-bottom: 16px; */
 }
 
 .flashcard .phonetic {
   font-size: 18px;
-  /* color: var(--text-light); */
   color: var(--text-primary);
-  /* 正面第一行 .word（28px）比背面第一行 .meaning（20px）行盒略高，
-     同一 gap 下第二行会差约 4px（翻面时音标/例句位置跳一下）。
-     这里补 4px 把两面的第二行拉回同一水平位置。 */
+  /* 正面第一行 .word(28px) 比背面第一行 .meaning(20px) 行盒略高，
+     补 4px 把两面的第二行拉回同一水平位置 */
   margin-top: 4px;
-  /* margin-bottom: 24px; */
 }
 
 .flashcard .meaning {
@@ -422,31 +450,22 @@ select {
   color: var(--text-secondary);
   line-height: 1.6;
   font-weight: 700;
-  /* margin-bottom: 16px; */
 }
 
-/* 释义 / 音标在卡面上只保留左右内边距：
-   上下内边距会让它们比正面的 .word 更低，造成翻面后正文下移；
-   行与行之间的间距由 .card-content 的 gap 统一控制。 */
+/* 释义 / 音标只保留左右内边距（上下内边距会造成翻面后正文下移） */
 .meaning,
 .phonetic {
   padding: 0 10px;
 }
+
 .flashcard .example {
   font-size: 18px;
-  /* color: var(--text-light); */
   color: var(--text-secondary);
-  /* font-style: italic; */
   line-height: 1.5;
-  /* 例句宽度跟随卡片正文区，而不是写死 280px：
-     写死时正文区 392px 而例句只用 280px，左右各空 56px，例句会在还有很大
-     边距的位置就换行（实测 4 行 → 放开后 3 行）。左右留白由卡面自身的
-     padding（20px，窄屏 24px）保证，不需要再额外收窄。 */
   max-width: 100%;
 }
 
-/* 卡片正文允许长按/拖选复制：只放开文字节点，卡片上的按钮、角标、提示仍保持不可选，
-   这样“长按选字/复制”不会与单击翻面互相干扰（正反两面都生效）。 */
+/* 卡片正文允许长按/拖选复制：只放开文字节点，按钮与角标仍不可选 */
 .flashcard .word,
 .flashcard .phonetic,
 .flashcard .cantonese-word,
@@ -455,13 +474,11 @@ select {
 .flashcard .cantonese-example {
   user-select: text;
   -webkit-user-select: text;
-  /* iOS 需要保留 callout，长按才会弹出「拷贝」菜单 */
   -webkit-touch-callout: default;
-  /* 文字区域用文本光标，提示这里可以选中 */
   cursor: text;
 }
 
-/* 语言角标：顶部水平居中，紧贴面上内边�?*/
+/* 语言角标：顶部水平居中 */
 .flashcard-badge-row {
   position: absolute;
   top: 0;
@@ -499,7 +516,7 @@ select {
   transition: all 0.2s;
 }
 
-/* 右侧收藏按钮：与左上角的收藏按钮左右对称，状态由同一套逻辑同步 */
+/* 右侧收藏按钮：与左上角左右对称，状态由同一套逻辑同步 */
 .favorite-btn-right {
   left: auto;
   right: 6px;
@@ -545,33 +562,36 @@ select {
   bottom: 6px;
   font-size: var(--font-size-xs);
   color: var(--text-light);
+  opacity: 0.85;
 }
 
 .flashcard-back .tap-hint-back {
   color: rgba(255, 255, 255, 0.78);
-  /* 背面底色外扩后，底部提示要补回同样的内边距，才与正面的提示停在同一高度 */
+  /* 背面底色外扩后，底部提示要补回同样内边距才与正面同高 */
   bottom: calc(6px + var(--flashcard-pad));
 }
 
 .flashcard .language-badge {
   display: inline-block;
-  margin-top: 0;
-  padding: 4px 10px;
+  padding: 4px 12px;
   background: var(--primary);
   color: white;
   font-size: 12px;
-  border-radius: 20px;
+  border-radius: var(--radius-language-badge);
   white-space: nowrap;
   line-height: 1.2;
+  box-shadow: 0 1px 4px rgba(74, 144, 217, 0.2);
 }
 
 .flashcard .category-badge {
   background: var(--success);
+  box-shadow: 0 1px 4px rgba(90, 158, 111, 0.2);
 }
 
-/* 学习卡第一位标签：当前「学习范围」（全部/新词/待复习/已掌握/收藏） */
+/* 学习卡第一位标签：当前「学习范围」 */
 .flashcard .scope-badge {
   background: #C08A2E;
+  box-shadow: 0 1px 4px rgba(192, 138, 46, 0.22);
 }
 
 .flashcard .cantonese-word {
@@ -582,8 +602,7 @@ select {
 
 .flashcard .cantonese-example {
   font-size: 18px;
-  /* color: var(--text-secondary); */
-  color: var(--text-secondary);  
+  color: var(--text-secondary);
   margin-top: 12px;
   font-style: italic;
 }
@@ -607,24 +626,24 @@ select {
 
 .flashcard-back {
   position: absolute;
-  /* 向外扩出卡片的内边距：整块蓝紫底色正好铺满卡面，与正面看到的米黄卡面等大。
-     内边距同步加上扩出去的这一圈，正文与底部提示才会停在和正面相同的位置。
-     注意这里不能再写 width/height: 100%（会与负 inset 冲突导致尺寸错位）。 */
+  /* 向外扩出卡片的内边距：整块蓝紫底色正好铺满卡面，与正面等大。
+     不能再写 width/height:100%（会与负 inset 冲突导致尺寸错位） */
   inset: calc(var(--flashcard-pad) * -1);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
   text-align: center;
-  /* 与正面使用同一套内边距（20px 内容边距 + 扩出去的一圈），保证翻面后文字落在相同位置 */
+  /* 与正面同一套内边距（20px 内容边距 + 扩出去的一圈） */
   padding: calc(20px + var(--flashcard-pad));
   transform: rotateY(180deg);
   -webkit-transform: rotateY(180deg);
-  /* 护眼：去饱和的柔和暖蓝紫，替代高饱和亮蓝紫 */
+  /* 护眼：去饱和的柔和暖蓝紫 */
   background: linear-gradient(135deg, #5C86C4 0%, #7A72C8 100%);
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   border-radius: var(--radius-lg);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
 .flashcard-back .speak-btn,
@@ -633,7 +652,7 @@ select {
 }
 
 .flashcard-back .meaning {
-  /* 米白而非纯白，配柔和蓝紫底降低强反差带来的刺眼感 */
+  /* 米白而非纯白，配柔和蓝紫底降低强反差 */
   color: #F4F6F1;
   font-size: var(--font-size-xl);
 }
@@ -647,12 +666,9 @@ select {
   -webkit-transform: rotateY(180deg);
 }
 
-/* 背朝自己的那一面既不接收指针事件，也不参与原生文字选中。
-   原因：Chrome 的命中测试按元素“自身”变换做背面剔除（绘制用的却是叠加后的朝向），
-   翻到背面后 .flashcard-back 自身带着 rotateY(180deg) 会被整层剔除，而看不见的
-   .flashcard-front 反而会被命中——在背面拖选/双击会选中正面那段看不见的文字并把它
-   复制出来。这里把不可见的一面彻底排除，长按取词则由 JS 按坐标自行判定（不依赖命中
-   测试）。点击翻面本身由 .flashcard 统一处理，不受影响。 */
+/* 背朝自己的一面不接收指针事件、不参与原生文字选中：
+   Chrome 命中测试按元素“自身”变换做背面剔除，翻到背面后
+   看不见的正面反而会被命中（拖选会复制到看不见的文字） */
 .flashcard:not(.flipped) .flashcard-back,
 .flashcard.flipped .flashcard-front {
   pointer-events: none;
@@ -660,7 +676,7 @@ select {
   -webkit-user-select: none;
 }
 
-/* 翻面后彻底隐藏正面语言角标（背面不设角标；避免 Mobile Safari 等透视合成叠层穿透或镜像�?*/
+/* 翻面后彻底隐藏正面角标（避免透视合成叠层穿透或镜像残留） */
 .flashcard.flipped .flashcard-front .flashcard-badge-row {
   display: none !important;
 }
@@ -678,9 +694,8 @@ select {
 .action-btn {
   flex: 1;
   min-width: 80px;
-  /* max-width: 128px; */
   height: 68px;
-  border: none;
+  border: 1px solid transparent;
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -688,12 +703,13 @@ select {
   justify-content: center;
   gap: 4px;
   transition: all 0.2s;
-  /* box-shadow: var(--shadow-sm); */
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
 }
 
 .action-btn:active {
-  transform: scale(0.9);
+  transform: scale(0.92);
+  box-shadow: var(--shadow-md);
 }
 
 .action-btn svg {
@@ -701,8 +717,15 @@ select {
   height: 24px;
 }
 
+.action-btn span {
+  font-size: 11px;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+}
+
 .action-btn.difficult {
   background: #F3E6D6;
+  border-color: #E8D5BE;
 }
 
 .action-btn.difficult svg {
@@ -710,28 +733,25 @@ select {
 }
 
 .action-btn.skip {
-  background: #E7EBEA;
+  background: #E9EEF2;
+  border-color: #D9E2EA;
 }
 
 .action-btn.skip svg {
-  fill: var(--text-secondary);
+  fill: #7E93A8;
 }
 
 .action-btn.mastered {
   background: #E3EBDD;
+  border-color: #D2E0C8;
 }
 
 .action-btn.mastered svg {
   fill: var(--success);
 }
 
-.action-btn span {
-  font-size: 10px;
-  color: var(--text-secondary);
-}
-
-/* 当前学习范围已学完：占满卡片区域，红字引导用户切换范围。
-   三个操作按钮保持可见但置灰，点击不会再记录任何数值。 */
+/* 当前学习范围已学完：占满卡片区域引导用户切换范围，
+   三个操作按钮保持可见但置灰 */
 .scope-complete {
   flex: 1;
   display: flex;
@@ -747,7 +767,7 @@ select {
   font-size: var(--font-size-lg);
   font-weight: 700;
   line-height: 1.5;
-  color: var(--text-primary);
+  color: var(--danger);
 }
 
 .scope-restart-btn {
@@ -789,6 +809,14 @@ select {
   margin-bottom: 8px;
 }
 
+.complete-title::before {
+  content: '🎉';
+  display: block;
+  font-size: 52px;
+  line-height: 1;
+  margin-bottom: 14px;
+}
+
 .complete-subtitle {
   font-size: var(--font-size-md);
   color: var(--text-secondary);
@@ -828,21 +856,21 @@ select {
   background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
   color: white;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   font-size: var(--font-size-md);
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 3px 8px -4px rgba(74, 144, 217, 0.4);
 }
 
 .btn-primary:active {
-  transform: scale(0.98);
+  transform: scale(0.96);
+  box-shadow: 0 2px 5px -2px rgba(74, 144, 217, 0.35);
 }
 
 /* ==================== 练习页面 ==================== */
-/* 练习页 = 学习页的“精简版”：去掉进度条、左右滑动提示、收藏与三个操作按钮，
-   保留卡片翻转；卡片下方换成音标输入框。 */
+/* 练习页 = 学习页的精简版：去掉滑动提示/收藏/操作按钮，卡片下方换成音标输入框 */
 .practice-container {
   width: 100%;
   display: flex;
@@ -854,26 +882,17 @@ select {
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
-/* ---------- 卡片区域 ---------- */
-/* 练习卡的正文排布（.card-content 的 padding-top / gap、字号、行距）与学习卡一致。
-   高度直接取学习卡的实测高度（--learn-card-height，见 app.js 的 syncPracticeCardHeight）：
-   练习页卡片区上方只有进度条，学习页还有「提示行 + 今日统计行」，
-   光靠同一条 clamp 公式会差几十像素，量出来才能保证电脑端与手机端都一致。
-   量不到时回退成与学习卡相同的 clamp 公式。 */
+/* 卡片高度直接取学习卡的实测高度（--learn-card-height，见 app.js），
+   量不到时回退成与学习卡相同的 clamp 公式 */
 .practice-card-stack {
   flex: 1;
   min-height: 0;
-  /* 卡片紧贴上方内容（进度条）排布；练习范围与调值开关移到设置页后，
-     这里上方不再有工具栏，卡片就是练习页最靠上的内容 */
   justify-content: flex-start;
 }
 
 .practice-card-stack .flashcard {
   height: var(--learn-card-height, clamp(320px, calc(100% - 96px), 460px));
-  /* 只收缩、不放大：
-     - flex-grow 0 → 空间再多也不会超过学习卡的高度，两页始终等高；
-     - flex-shrink 1 → 键盘展开、空间不够时按剩余高度收缩（输入区与箭头不可收缩），
-       卡片正好填满卡片区，因此不会在键盘上方留下空白。 */
+  /* 只收缩、不放大：空间不够时按剩余高度收缩，卡片区不留空白 */
   flex: 0 1 auto;
   max-height: var(--learn-card-height, 460px);
   min-height: 0;
@@ -884,24 +903,19 @@ select {
   cursor: pointer;
 }
 
-/* 背面的音标是本题答案：固定在卡片顶部居中，位置与正面的「语言 / 分类」标签一致。
-   这样背面的第一行正文是「释义」，正好落在正面第一行「词汇」的位置上，
-   翻面时文字不会整体往下掉。 */
+/* 背面的音标是本题答案：固定在卡片顶部居中，位置与正面标签一致 */
 .practice-card-stack .flashcard-back .practice-back-phonetic {
   position: absolute;
-  /* .flashcard-back 为了铺满卡面往外扩了 --flashcard-pad 一圈，
-     这里加回同样的距离，屏幕上看到的位置才与正面标签的 top: 0 相同 */
+  /* 加回 .flashcard-back 外扩的一圈，屏幕上才与正面标签的 top:0 对齐 */
   top: var(--flashcard-pad);
   left: 0;
   right: 0;
-  /* 抵消 .flashcard .phonetic 自带的 margin-top 与左右内边距 */
   margin-top: 0;
   padding: 0 calc(10px + var(--flashcard-pad));
   text-align: center;
   color: #FBF7E8;
   font-weight: 700;
   z-index: 2;
-  /* 与标签行同样做背面剔除，避免个别浏览器上透视合成叠层穿透 */
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   transform: translateZ(0);
@@ -917,15 +931,13 @@ select {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  caret-color: transparent; 
+  caret-color: transparent;
   gap: 6px;
-  /* 左右不留内边距：输入框宽度与卡片完全对齐（两者都是卡片区内容宽度）。
-     顶部 12px = 学习页「卡片 → 跳过/掌握/陌生」的间距（.card-actions 的上内边距） */
+  /* 顶部 12px = 学习页「卡片 → 操作按钮」的间距；左右与卡片对齐 */
   padding: 12px 0 4px;
 }
 
-/* 键盘开关：位于输入区之下、键盘正上方的小手柄，居中且不占输入框宽度
-   （输入框仍与卡片等宽）。高度很小，展开键盘时对卡片高度的影响可以忽略。 */
+/* 键盘开关：输入区下方的小手柄，居中且不占输入框宽度 */
 .practice-keyboard-toggle {
   flex: 0 0 auto;
   align-self: center;
@@ -936,6 +948,7 @@ select {
   border: none;
   border-radius: 11px;
   background: var(--bg-primary);
+  box-shadow: inset 0 1px 3px rgba(74, 60, 38, 0.1);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -955,13 +968,13 @@ select {
   transition: transform 0.15s;
 }
 
-/* 键盘展开时箭头翻转向下（再点即收起） */
+/* 键盘展开时箭头翻转向下 */
 .practice-keyboard-toggle.active svg {
   transform: rotate(180deg);
 }
 
-/* 输入框与它的「着色显示层」叠在一起：input 负责存值 / 交互，显示层负责可见文字。
-   两层用完全相同的字体、内边距、边框与居中方式，文字不会错位。 */
+/* 输入框与「着色显示层」叠在一起：input 存值/交互，显示层渲染可见文字。
+   两层的字体/内边距/边框度量必须完全一致，文字才不会错位 */
 .practice-input-wrap {
   position: relative;
   width: 100%;
@@ -973,17 +986,14 @@ select {
   font-size: 18px;
   letter-spacing: 1px;
   text-align: center;
-  /* 文字透明：可见内容由下方 .practice-input-display 渲染（要逐音节上色） */
   color: transparent;
   background: var(--bg-primary);
-  /* 边框常驻（只是透明），红/绿切换时输入框高度不会跳一下 */
   border: 2px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   outline: none;
-  transition: border-color 0.18s, background 0.18s, color 0.18s;
+  transition: border-color 0.18s, background 0.18s, box-shadow 0.18s;
 }
 
-/* 着色显示层：字体 / 内边距 / 边框 / 居中都要与上面的 input 对齐 */
 .practice-input-display {
   position: absolute;
   inset: 0;
@@ -998,23 +1008,21 @@ select {
   white-space: pre;
   overflow: hidden;
   color: var(--text-primary);
-  /* 点击穿透到下面的 input（聚焦、选中等交互不受影响） */
   pointer-events: none;
 }
 
-/* 音节之间的空格占位（自动补的空格也要看得见）。
-   空格必须由元素承载：显示层是 flex 容器，只含空白的匿名文本节点不会被渲染 */
+/* 音节之间的空格占位（flex 容器里裸空白文本节点不会被渲染） */
 .practice-input-display .sep {
   white-space: pre;
 }
 
-/* 输入正确（与目标音节完全一致）的音节：绿色 */
+/* 输入正确的音节：绿色 */
 .practice-input-display .ok {
   color: var(--success);
   font-weight: 500;
 }
 
-/* 输入错误的音节：红色（正在输入的前缀不着色，保持默认色） */
+/* 输入错误的音节：红色（前缀不着色，保持默认色） */
 .practice-input-display .bad {
   color: var(--danger);
 }
@@ -1027,20 +1035,23 @@ select {
 
 .practice-input:focus {
   border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.14);
 }
 
-/* 输入与目标音标不一致：红色提示（只改边框与底色，文字颜色交给显示层逐音节控制） */
+/* 与目标音标不一致：红色提示 */
 .practice-input.error,
 .practice-input.error:focus {
   border-color: var(--danger);
   background: rgba(201, 106, 80, 0.14);
+  box-shadow: none;
 }
 
-/* 整条音标全部输入正确：绿色提示（同样只改边框与底色） */
+/* 整条音标全部正确：绿色提示 */
 .practice-input.success,
 .practice-input.success:focus {
   border-color: var(--success);
   background: rgba(90, 158, 111, 0.16);
+  box-shadow: none;
 }
 
 .practice-hint {
@@ -1061,8 +1072,6 @@ select {
 }
 
 /* ---------- 固定键盘（底部菜单栏上方） ---------- */
-/* 26 个字母键 + 1~6 调值数字键 + 退格。手机端用它代替系统键盘，
-   这样键盘弹出不会顶乱布局；桌面端可以点，也可以直接用物理键盘打字。 */
 .practice-keyboard {
   flex: 0 0 auto;
   display: flex;
@@ -1084,28 +1093,32 @@ select {
   min-width: 0;
   height: 36px;
   padding: 0;
-  border: none;
-  border-radius: 4px;
-  background: var(--bg-primary);
+  border: 1px solid #E5DECC;
+  border-radius: 8px;
+  background: #FFFDF8;
   color: var(--text-primary);
   font-size: 16px;
   font-weight: 500;
   line-height: 1;
   cursor: pointer;
   touch-action: manipulation;
-  transition: background 0.12s, color 0.12s, transform 0.08s;
+  box-shadow: 0 2px 0 rgba(74, 60, 38, 0.08);
+  transition: background 0.12s, color 0.12s, transform 0.08s, box-shadow 0.12s;
 }
 
 .practice-key:active {
   background: var(--primary);
+  border-color: var(--primary);
   color: white;
-  transform: scale(0.94);
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 rgba(74, 60, 38, 0.1);
 }
 
-/* 数字键（粤拼调值 1~6）用略深的底色区分，避免和字母键混在一起 */
+/* 数字键（粤拼调值 1~6）用略深的底色区分 */
 .practice-key.is-digit {
-  background: var(--bg-primary);
-  color: var(--text-secondary);
+  /* background: #F2EDDF; */
+  border-color: #E3DBC6;
+  color: #B07C2A;
   font-weight: 600;
 }
 
@@ -1113,7 +1126,7 @@ select {
   flex: 1.6;
 }
 
-/* 矮屏再把键盘压低一点，给卡片多留几个像素 */
+/* 矮屏把键盘压低一点，给卡片多留几个像素 */
 @media (max-height:640px) {
   .practice-keyboard {
     gap: 4px;
@@ -1145,18 +1158,21 @@ select {
 /* 词库范围统计行 */
 .dict-scope-counts {
   font-size: 12px;
-  color: #999;
+  color: var(--text-light);
   margin-bottom: 10px;
   margin-left: 4px;
   line-height: 1.4;
+  font-variant-numeric: tabular-nums;
 }
+
 .dict-scope-counts .scope-active {
   color: var(--primary, #4A90D9);
-  font-weight: 500;
+  font-weight: 600;
 }
+
 .dict-scope-counts .scope-sep {
   margin: 0 6px;
-  color: #ddd;
+  color: #D8D2C2;
 }
 
 /* 筛选行 */
@@ -1167,7 +1183,7 @@ select {
   margin-top: 12px;
 }
 
-/* 分类下拉多�?*/
+/* 分类下拉多选 */
 .category-dropdown {
   position: relative;
   width: 100%;
@@ -1180,7 +1196,7 @@ select {
   justify-content: space-between;
   padding: 10px 16px;
   background: var(--bg-primary);
-  border: none;
+  border: 1px solid transparent;
   border-radius: var(--radius-md);
   font-size: var(--font-size-md);
   color: var(--text-secondary);
@@ -1191,6 +1207,10 @@ select {
   box-sizing: border-box;
 }
 
+.dropdown-trigger:hover {
+  border-color: var(--border-color);
+}
+
 .dropdown-trigger svg {
   width: 16px;
   height: 16px;
@@ -1198,8 +1218,13 @@ select {
   transition: transform 0.2s;
 }
 
+.category-dropdown.active .dropdown-trigger {
+  border-color: var(--primary);
+}
+
 .category-dropdown.active .dropdown-trigger svg {
   transform: rotate(180deg);
+  fill: var(--primary);
 }
 
 .dropdown-content {
@@ -1208,8 +1233,9 @@ select {
   left: 0;
   right: 0;
   background: var(--bg-card);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-lg);
   padding: 8px;
   max-height: 240px;
   overflow-y: auto;
@@ -1239,6 +1265,7 @@ select {
   width: 18px;
   height: 18px;
   cursor: pointer;
+  accent-color: var(--primary);
 }
 
 .dropdown-item span {
@@ -1250,9 +1277,17 @@ select {
   display: flex;
   align-items: center;
   background: var(--bg-primary);
+  border: 1px solid transparent;
   border-radius: var(--radius-md);
   padding: 10px 16px;
   margin-bottom: 12px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.search-box:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.12);
+  background: var(--bg-card);
 }
 
 .search-box svg {
@@ -1285,6 +1320,12 @@ select {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  transition: transform 0.15s, background 0.15s;
+}
+
+.search-clear:active {
+  transform: scale(0.9);
+  background: var(--danger);
 }
 
 .search-clear svg {
@@ -1294,20 +1335,23 @@ select {
   margin-right: 0;
 }
 
+/* 状态筛选：分段控件样式（圆角与上方搜索框/下拉框保持一致） */
 .filter-tabs {
   display: flex;
   justify-content: space-between;
   flex: 1;
-  padding: 0px 0 4px 0;
+  padding: 2px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-md);
 }
 
 .filter-tab {
   flex: 1;
-  margin: 0 4px;
-  padding: 8px 12px;
-  background: var(--bg-primary);
+  margin: 0 1px;
+  padding: 8px 4px;
+  background: transparent;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
   cursor: pointer;
@@ -1317,8 +1361,10 @@ select {
 }
 
 .filter-tab.active {
-  background: var(--primary);
+  background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
   color: white;
+  font-weight: 500;
+  box-shadow: 0 2px 8px -2px rgba(74, 144, 217, 0.5);
 }
 
 .library-container {
@@ -1327,8 +1373,6 @@ select {
   background: var(--bg-card);
 }
 
-/* 词库列表原先按分类分组渲染，每组带一个「分类名 (数量)」小标题；
-   现在小标题已取消、数量移到分类下拉选项里，整份列表共用一个 .word-list */
 .word-list {
   display: flex;
   flex-direction: column;
@@ -1339,13 +1383,19 @@ select {
   background: var(--bg-card);
   padding: 16px;
   border-radius: var(--radius-md);
+  border: 1px solid rgba(230, 223, 206, 0.85);
   box-shadow: var(--shadow-sm);
   display: flex;
   justify-content: space-between;
   align-items: center;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: box-shadow 0.2s, transform 0.15s, border-color 0.2s;
   gap: 12px;
+}
+
+.word-item:hover {
+  border-color: rgba(74, 144, 217, 0.35);
+  box-shadow: var(--shadow-md);
 }
 
 .word-item:active {
@@ -1384,9 +1434,10 @@ select {
 
 .status-badge {
   padding: 4px 10px;
-  border-radius: 12px;
+  border-radius: var(--radius-language-badge);
   font-size: var(--font-size-xs);
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .status-badge.mastered {
@@ -1404,14 +1455,19 @@ select {
   color: var(--primary);
 }
 
-/* 状态转换标�?*/
+/* 状态转换标签 */
 .status-switch {
   padding: 4px 10px;
-  border-radius: 12px;
+  border-radius: var(--radius-language-badge);
   font-size: var(--font-size-xs);
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.2s;
+  white-space: nowrap;
+  transition: background 0.2s, transform 0.15s;
+}
+
+.status-switch:active {
+  transform: scale(0.94);
 }
 
 .status-switch.to-review {
@@ -1432,7 +1488,7 @@ select {
   background: #D3E0C9;
 }
 
-/* 「➔收藏」标签：与「➔陌生 / ➔掌握」同样的形态，用收藏色区分 */
+/* 「➔收藏」标签：与「➔陌生 / ➔掌握」同形态，用收藏色区分 */
 .status-switch.favorite-switch {
   background: #F7EEDA;
   color: #C08A2E;
@@ -1457,6 +1513,11 @@ select {
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: transform 0.15s, background 0.15s;
+}
+
+.word-action-btn:active {
+  transform: scale(0.9);
 }
 
 .word-action-btn svg {
@@ -1478,10 +1539,6 @@ select {
   fill: #9AA3AD;
 }
 
-/* .word-action-btn.library-view-btn:hover {
-  background: var(--bg-primary);
-} */
-
 .word-action-btn.unfavorite-btn {
   background: rgba(233, 30, 99, 0.1);
 }
@@ -1494,14 +1551,15 @@ select {
   display: inline-block;
   margin-left: 6px;
   padding: 4px 10px;
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   font-size: var(--font-size-xs);
   font-weight: 500;
   background: #F7EEDA;
   color: #C08A2E;
+  white-space: nowrap;
 }
 
-/* ==================== 空状�?==================== */
+/* ==================== 空状态 ==================== */
 .empty-state {
   flex: 1;
   display: flex;
@@ -1515,18 +1573,20 @@ select {
 .empty-icon {
   width: 100px;
   height: 100px;
-  background: var(--bg-primary);
+  background: linear-gradient(160deg, rgba(74, 144, 217, 0.1) 0%, var(--bg-primary) 100%);
+  border: 1px solid var(--border-color);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-bottom: 20px;
+  box-shadow: var(--shadow-sm);
 }
 
 .empty-icon svg {
   width: 50px;
   height: 50px;
-  fill: var(--text-light);
+  fill: #A9B4C2;
 }
 
 .empty-title {
@@ -1550,8 +1610,9 @@ select {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0,0,0,0.3);
+  background: rgba(45, 38, 24, 0.36);
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   display: none;
   align-items: center;
   justify-content: center;
@@ -1568,10 +1629,11 @@ select {
   max-width: 480px;
   max-height: 85vh;
   background: var(--bg-card);
+  border: 1px solid rgba(230, 223, 206, 0.9);
   border-radius: var(--radius-lg);
   overflow: hidden;
   animation: fadeScaleIn 0.3s ease;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+  box-shadow: var(--shadow-lg);
 }
 
 @keyframes fadeScaleIn {
@@ -1602,6 +1664,12 @@ select {
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: background 0.15s, transform 0.15s;
+}
+
+.modal-close:active {
+  transform: scale(0.9);
+  background: #E7E1D2;
 }
 
 .modal-close svg {
@@ -1635,8 +1703,7 @@ select {
 }
 
 .btn-secondary {
-  background: var(--bg-primary); 
-  /* background: #f5f5f5; */
+  background: var(--bg-primary);
   color: var(--text-primary);
   border: none;
   border-radius: 8px;
@@ -1646,6 +1713,7 @@ select {
 .attention {
   background: var(--danger);
   color: white;
+  border-radius: var(--radius-sm);
 }
 
 /* ==================== 表单 ==================== */
@@ -1661,7 +1729,7 @@ select {
   font-weight: 500;
 }
 
-/* 「词汇」标签与它后面的语种标签排在同一行（标签由 viewWord 填充） */
+/* 「词汇」标签与它后面的语种标签排在同一行 */
 .form-label-row {
   display: flex;
   align-items: center;
@@ -1673,12 +1741,12 @@ select {
   margin-bottom: 0;
 }
 
-/* 语种标签：与词库条目的「待复习」状态标签同形，只换配色（淡紫），便于区分 */
+/* 语种标签：与状态标签同形，配色淡紫 */
 .word-language-tag {
   padding: 4px 10px;
-  border-radius: 12px;
+  border-radius: var(--radius-language-badge);
   font-size: var(--font-size-xs);
-  font-weight: 500;
+  /* font-weight: 500; */
   background: #E8E3F5;
   color: #5B4BC4;
 }
@@ -1706,6 +1774,19 @@ select {
   outline: none;
   border-color: var(--primary);
   background: var(--bg-card);
+  box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.12);
+}
+
+/* 查看模式（只读）下的输入框：文字保持深色加粗，避免“淡到看不清” */
+/* 查看模式（只读）下的输入框：文字保持深色加粗，避免“淡到看不清” */
+.form-input:disabled,
+.form-textarea:disabled {
+  opacity: 1;
+  color: var(--text-primary);
+  -webkit-text-fill-color: var(--text-primary);
+  /* font-weight: 500; */
+  background: var(--bg-primary);
+  cursor: default;
 }
 
 .form-textarea {
@@ -1723,7 +1804,8 @@ select {
 
 .settings-section {
   background: var(--bg-card);
-  border-radius: var(--radius-md);
+  border: 1px solid rgba(230, 223, 206, 0.85);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
   margin-bottom: 20px;
   overflow: hidden;
@@ -1734,10 +1816,24 @@ select {
 }
 
 .settings-section-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-  padding: 16px 20px 8px;
+  color: var(--text-primary);
+  padding: 16px 20px 10px;
   font-weight: 500;
+  letter-spacing: 0.5px;
+}
+
+/* 标题前的彩色小竖条，区块更有节奏感（.cloud-title 自带双列布局） */
+.settings-section-title:not(.cloud-title)::before {
+  content: '';
+  width: 3px;
+  height: 13px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--primary), var(--secondary));
+  flex: 0 0 auto;
 }
 
 .setting-item {
@@ -1762,8 +1858,7 @@ select {
   box-sizing: border-box;
 }
 
-/* 「学习范围」的选项最多 3 个字（如「待复习」），需要比其它下拉框略宽一些。
-   选择器要与上面的 .setting-item select.dict-select 同等特异性，才能覆盖 70px 上限 */
+/* 「学习范围」选项最多 3 个字，需要比其它下拉框略宽 */
 .setting-item > select.study-scope-select,
 .setting-item select.study-scope-select {
   max-width: 70px;
@@ -1778,23 +1873,29 @@ select {
 }
 
 .setting-info p {
-  font-size: var(--font-size-xs);
+  font-size: 13px;
   color: var(--text-secondary);
 }
 
-/* Toggle 开�?*/
+.setting-info p {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* Toggle 开关 */
 .toggle {
   width: 52px;
   height: 32px;
-  background: var(--text-light);
+  background: #C9C2B0;
   border-radius: 16px;
   position: relative;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: background 0.3s;
+  flex: 0 0 auto;
 }
 
 .toggle.active {
-  background: var(--primary);
+  background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
 }
 
 .toggle::after {
@@ -1806,29 +1907,30 @@ select {
   border-radius: 50%;
   top: 2px;
   left: 2px;
-  transition: all 0.3s;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  transition: left 0.3s cubic-bezier(.34,1.3,.5,1);
+  box-shadow: 0 2px 5px rgba(74, 60, 38, 0.25);
 }
 
 .toggle.active::after {
   left: 22px;
 }
 
-/* 词典管理下拉*/
+/* 词典管理下拉 */
 .dict-select {
   padding: 10px 28px 10px 14px;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   font-size: var(--font-size-md);
   color: var(--text-primary);
   cursor: pointer;
   outline: none;
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238F8878' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 8px center;
   background-size: 16px;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .dict-select:hover {
@@ -1837,7 +1939,7 @@ select {
 
 .dict-select:focus {
   border-color: var(--primary-color);
-  box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.2);
+  box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.14);
 }
 
 /* 学习模式选项 */
@@ -1847,11 +1949,11 @@ select {
 }
 
 .mode-option {
-  /* 尺寸与设置页「清除」按钮保持一致：padding 8px 21px + 13px 字号 */
+  /* 尺寸与设置页「清除」按钮一致：padding 8px 21px + 13px 字号 */
   padding: 8px 21px;
   background: var(--bg-primary);
-  border: none;
-  border-radius: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   font-size: 13px;
   font-weight: 400;
   color: var(--text-secondary);
@@ -1860,24 +1962,25 @@ select {
 }
 
 .mode-option.active {
-  background: var(--primary);
+  background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
   color: white;
+  box-shadow: 0 2px 8px -2px rgba(74, 144, 217, 0.5);
 }
 
 /* 滑块 */
 .slider-container {
   display: flex;
   align-items: center;
-  /* gap: 12px; */
-  
 }
 
 .slider {
   flex: 1;
   -webkit-appearance: none;
+  appearance: none;
   height: 6px;
   background: var(--bg-primary);
-  border-radius: 3px;
+  border-radius: 999px;
+  box-shadow: inset 0 1px 2px rgba(74, 60, 38, 0.08);
   outline: none;
   width: 112px;
 }
@@ -1886,9 +1989,11 @@ select {
   -webkit-appearance: none;
   width: 24px;
   height: 24px;
-  background: var(--primary);
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
   border-radius: 50%;
   cursor: pointer;
+  box-shadow: 0 2px 6px rgba(74, 144, 217, 0.45);
+  border: 2px solid #fff;
 }
 
 .slider:disabled {
@@ -1905,6 +2010,7 @@ select {
   text-align: right;
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ==================== Toast 提示 ==================== */
@@ -1913,15 +2019,19 @@ select {
   bottom: 100px;
   left: 50%;
   transform: translateX(-50%) translateY(100px);
-  background: var(--text-primary);
-  color: white;
-  padding: 14px 24px;
+  background: rgba(58, 52, 40, 0.92);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: #FBFAF6;
+  padding: 12px 22px;
   border-radius: var(--radius-md);
   font-size: var(--font-size-sm);
   opacity: 0;
   transition: all 0.3s ease;
   z-index: 2000;
   white-space: nowrap;
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
 }
 
 .toast.show {
@@ -1929,19 +2039,16 @@ select {
   opacity: 1;
 }
 
-/* ==================== 响应式设计 ===================== */
+/* ==================== 响应式 ==================== */
 @media (max-width:400px) {
   .flashcard {
-    /* 高度不要写在这个断点里：宽度 412/430px 的手机匹配不到 max-width:400px，
-       改了在手机上看不到效果。高度统一由 .flashcard 主样式的 clamp 决定，
-       这里只调整窄屏的卡面内边距与字号。 */
+    /* 高度统一由主样式的 clamp 决定，这里只调整窄屏的卡面内边距 */
     --flashcard-pad: 24px;
   }
-  
+
   .flashcard .word {
     font-size: var(--font-size-xl);
   }
-  
 }
 
 /* 横屏 / 矮屏：可用高度很紧时退回更矮的卡片，
@@ -1954,16 +2061,11 @@ select {
   .card-stack {
     min-height: 358px;
   }
-
-  /* 练习页不需要在这里单独收矮：卡片高度与卡片区下限都直接沿用上面这两条
-     （练习卡就是 .flashcard / .card-stack），两张卡片在矮屏上同样一致。 */
 }
 
 /* ==================== 手机端软键盘 ==================== */
 /* 键盘弹出时（body.keyboard-open 由 initKeyboardViewport 维护）：
-   把应用整体固定在 visualViewport 给出的「键盘上方可视区域」内，
-   避免 iOS Safari 把整页往上顶、底部菜单栏被推出屏幕。
-   这样一来菜单栏始终可见并紧贴键盘上沿，页面内容也重新从顶部开始排布。 */
+   把应用整体固定在 visualViewport 的「键盘上方可视区域」内 */
 body.keyboard-open .app-container {
   position: fixed;
   top: var(--visual-viewport-top, 0px);
@@ -1973,8 +2075,8 @@ body.keyboard-open .app-container {
   height: var(--visual-viewport-height, 100vh);
 }
 
-/* 键盘占掉了大半屏：卡片改成吃掉输入区之外的剩余空间，
-   保证输入框一定贴在键盘上方（此时不再强求与学习卡等高） */
+/* 键盘占掉大半屏：卡片吃掉输入区之外的剩余空间，
+   保证输入框贴在键盘上方 */
 body.keyboard-open .practice-card-stack {
   min-height: 0;
 }
@@ -1990,8 +2092,7 @@ body.keyboard-open .practice-input-area {
   padding-top: 8px;
 }
 
-/* 键盘弹出时底部安全区已被键盘覆盖，菜单栏不需要再为 home indicator 留白，
-   这样才能真正紧贴键盘上沿 */
+/* 键盘弹出时菜单栏不再为 home indicator 留白，紧贴键盘上沿 */
 body.keyboard-open .bottom-nav {
   padding-bottom: 8px;
 }
