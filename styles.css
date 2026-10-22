@@ -1419,6 +1419,23 @@ select {
   fill: var(--text-secondary);
 }
 
+/* 词库列表的「查看」小眼睛：灰色、无底色 */
+.word-action-btn.library-view-btn {
+  width: 28px;
+  height: 28px;
+  background: transparent;
+}
+
+.word-action-btn.library-view-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: #9AA3AD;
+}
+
+.word-action-btn.library-view-btn:hover {
+  background: var(--bg-primary);
+}
+
 .word-action-btn.unfavorite-btn {
   background: rgba(233, 30, 99, 0.1);
 }

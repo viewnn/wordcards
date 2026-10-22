@@ -5053,6 +5053,8 @@ class VocabApp {
     // 「显示释义」关闭时，卡片上只保留单词本身（单词下方那行释义不渲染）；
     // 仅影响词库列表卡片，点开卡片的「查看单词」弹窗始终展示释义。
     const showMeaningInCard = this.settings.meaningDisplay !== false;
+    // 词库列表右侧的「查看」小眼睛（灰色）
+    const viewIconSvg = '<svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>';
     const html = `
       <div class="word-list">
         ${orderedWords.map(word => `
@@ -5083,10 +5085,19 @@ class VocabApp {
                       ${word.status === 'new' ? `
                         <span class="status-switch to-review" data-id="${word.id}" data-status="review">➔陌生</span>
                       ` : ''}
-                      <span class="status-badge ${word.status}">${
-                        word.status === 'mastered' ? '已掌握' : 
-                        word.status === 'review' ? '待复习' : '新词'
-                      }</span>
+                      ${word.status === 'new' ? `
+                        <span class="status-switch to-mastered" data-id="${word.id}" data-status="mastered">➔已掌握</span>
+                      ` : ''}
+                      ${effectiveStatus === 'all' ? `
+                        <span class="status-badge ${word.status}">${
+                          word.status === 'mastered' ? '已掌握' : 
+                          word.status === 'review' ? '待复习' : '新词'
+                        }</span>
+                      ` : `
+                        <button type="button" class="word-action-btn library-view-btn view-btn" data-id="${word.id}" title="查看" aria-label="查看单词">
+                          ${viewIconSvg}
+                        </button>
+                      `}
                     `}
                   </div>
                 </div>
