@@ -96,7 +96,7 @@ select {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 14px;
+  padding: 12px 14px;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border-color);
   position: relative;
@@ -271,7 +271,7 @@ select {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .progress-track {
@@ -293,7 +293,8 @@ select {
 
 .progress-text {
   font-size: var(--font-size-sm);
-  color: var(--text-secondary);
+  color: var(--text-light);
+  font-weight: 400;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
@@ -301,13 +302,13 @@ select {
 .stats-row {
   display: flex;
   gap: 6px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .stat-card {
   flex: 1;
   background: var(--bg-card);
-  padding: 6px;
+  padding: 6px 6px 8px 6px;
   border-radius: var(--radius-md);
   border: 1px solid rgba(230, 223, 206, 0.9);
   box-shadow: var(--shadow-sm);
@@ -326,11 +327,13 @@ select {
 
 .notice {
   font-size: var(--font-size-xs);
-  color: #5B87B8;
+  /* color: #5B87B8; */
+  color: var(--text-secondary);
   margin-bottom: 10px;
   padding: 6px 10px;
-  background: rgba(74, 144, 217, 0.08);
-  border-radius: 8px;
+  /* background: rgba(74, 144, 217, 0.08); */
+  background: #F6EDE2;
+  border-radius: 6px;
   text-align: center;
 }
 
@@ -575,7 +578,7 @@ select {
 
 .flashcard .language-badge {
   display: inline-block;
-  padding: 4px 12px;
+  padding: 4px 10px;
   background: var(--primary);
   color: white;
   font-size: 12px;
@@ -1148,7 +1151,7 @@ select {
 
 /* ==================== 词库页面 ==================== */
 .library-header {
-  padding: 16px 14px;
+  padding: 14px 14px;
   background: var(--bg-card);
   box-shadow: var(--shadow-sm);
   position: sticky;
@@ -1183,14 +1186,14 @@ select {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
 /* 分类下拉多选 */
 .category-dropdown {
   position: relative;
   width: 100%;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .dropdown-trigger {
@@ -1283,7 +1286,7 @@ select {
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   padding: 10px 16px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
@@ -1343,7 +1346,7 @@ select {
   display: flex;
   justify-content: space-between;
   flex: 1;
-  padding: 2px;
+  padding: 4px;
   background: var(--bg-primary);
   border-radius: var(--radius-md);
 }

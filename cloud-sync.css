@@ -100,7 +100,8 @@
 
 /* 未配置时的「如何开启」引导：默认可见，不依赖 JS */
 .cloud-config-missing {
-  padding: 4px 20px 18px;
+  /* padding: 4px 20px 18px; */
+  padding: 16px 20px;
   font-size: var(--font-size-xs);
   color: var(--text-secondary);
   line-height: 1.7;
