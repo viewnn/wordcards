@@ -183,9 +183,8 @@ select {
 }
 
 .nav-item.active {
-  /* 选中态：极淡的蓝紫渐变胶囊 + 顶部高光，浮起但不抢眼 */
-  background: linear-gradient(180deg, rgba(74, 144, 217, 0.1) 0%, rgba(108, 92, 231, 0.07) 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  /* 仅用图标与文字颜色表达选中态，不铺背景色块 */
+  background: none;
 }
 
 .nav-item.active svg {
