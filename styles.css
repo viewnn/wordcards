@@ -146,7 +146,7 @@ select {
   padding: 6px 8px;
   padding-bottom: max(6px, env(safe-area-inset-bottom));
   border-top: 1px solid rgba(230, 223, 206, 0.9);
-  box-shadow: 0 -8px 20px -14px rgba(74, 60, 38, 0.22);
+  box-shadow: 0 -8px 20px -14px rgba(74, 60, 38, 0.15);
   position: relative;
   z-index: 100;
 }
@@ -437,7 +437,7 @@ select {
   /* 立体感：顶部受光高光 + 底部环境投影 + 大范围柔和落影（卡面底色不变） */
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.8),
-    inset 0 -22px 36px -26px rgba(74, 60, 38, 0.16),
+    inset 0 -22px 36px -26px rgba(74, 60, 38, 0.13),
     0 2px 4px -2px rgba(74, 60, 38, 0.08),
     0 16px 32px -16px rgba(74, 60, 38, 0.22);
   display: flex;
@@ -620,7 +620,7 @@ select {
 
 .flashcard .tap-hint {
   position: absolute;
-  bottom: 6px;
+  bottom: 4px;
   font-size: var(--font-size-xs);
   color: var(--text-light);
   opacity: 0.85;
@@ -1236,7 +1236,7 @@ select {
 .library-header {
   padding: 14px 14px;
   background: linear-gradient(180deg, #FCFBF8 0%, var(--bg-card) 100%);
-  box-shadow: 0 6px 16px -10px rgba(74, 60, 38, 0.2);
+  box-shadow: 0 6px 16px -10px rgba(74, 60, 38, 0.16);
   position: sticky;
   top: 0;
   z-index: 100;
