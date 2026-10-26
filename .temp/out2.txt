@@ -1,0 +1,7 @@
+ROW cat='=IF(G2=1,"常用一音","一字多音")' | word='啊' | phonetic='=D2&"，"&E2' | meaning='aa3' | example='好啊 hou2 aa3' | language='字' | countif='=COUNTIF(B:B,B2)'
+ROW cat='=IF(G3=1,"常用一音","一字多音")' | word='揞' | phonetic='=D3&"，"&E3' | meaning='am2' | example='揞住（遮挡着） am2 zyu6' | language='字' | countif='=COUNTIF(B:B,B3)'
+ROW cat='=IF(G4=1,"常用一音","一字多音")' | word='压' | phonetic='=D4&"，"&E4' | meaning='aat3' | example='压力 aat3 lik6' | language='字' | countif='=COUNTIF(B:B,B4)'
+ROW cat='=IF(G5=1,"常用一音","一字多音")' | word='抓' | phonetic='=D5&"，"&E5' | meaning='aau1' | example='抓痕 aau1 han4' | language='字' | countif='=COUNTIF(B:B,B5)'
+ROW cat='=IF(G6=1,"常用一音","一字多音")' | word='拗' | phonetic='=D6&"，"&E6' | meaning='aau3' | example='拗撬 aau3 giu6' | language='字' | countif='=COUNTIF(B:B,B6)'
+ROW cat='=IF(G7=1,"常用一音","一字多音")' | word='哎' | phonetic='=D7&"，"&E7' | meaning='aai1' | example='哎呦 aai1 jo1' | language='字' | countif='=COUNTIF(B:B,B7)'
+ROW cat='=IF(G8=1,"常用一音","一字多音")' | word='爸' | phonetic='=D8&"，"&E8' | meaning='baa1' | example='爸爸 baa4 baa1' | language='字' | countif='=COUNTIF(B:B,B8)'

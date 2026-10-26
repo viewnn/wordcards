@@ -60,6 +60,7 @@
 
 html, body {
   height: 100%;
+  height: 100dvh;
   /* font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC','Hiragino Sans GB', 'Microsoft YaHei', Roboto, Oxygen, Ubuntu, sans-serif; */
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
   background: var(--bg-primary);
@@ -83,6 +84,7 @@ select {
 .app-container {
   width: 100%;
   height: 100%;
+  height: 100dvh;
   max-width: 480px;
   min-width: 320px;
   margin: 0 auto;
@@ -116,6 +118,8 @@ select {
   align-items: center;
   justify-content: space-between;
   padding: 12px 14px;
+  /* PWA 全屏时顶部留出刘海/状态栏安全区，避免标题被遮挡 */
+  padding-top: calc(12px + env(safe-area-inset-top, 0px));
   /* 顶部微亮渐变 + 柔和投影：头部像一条浅浮雕条 */
   background: linear-gradient(180deg, #FCFBF8 0%, var(--bg-card) 100%);
   border-bottom: 1px solid rgba(230, 223, 206, 0.9);
@@ -647,6 +651,11 @@ select {
 .flashcard .category-badge {
   background: linear-gradient(135deg, #67AE7E 0%, var(--success) 100%);
   box-shadow: 0 2px 6px -1px rgba(90, 158, 111, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+/* 分类标签可点击：跳转词库并按该分类筛选 */
+.flashcard .category-badge.clickable-badge {
+  cursor: pointer;
 }
 
 /* 学习卡第一位标签：当前「学习范围」 */

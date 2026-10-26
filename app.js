@@ -3601,6 +3601,8 @@ class VocabApp {
     }
 
     this._learnView = 'card';
+    // 切换学习卡片时，把词库菜单的分类勾选恢复为默认（全部分类），避免残留上一张卡筛选
+    this.resetLibraryCategorySelection();
     // 切换范围/重新建队后，红色「已学完」提示与按钮冻结状态都要撤掉
     this.hideScopeComplete();
 
@@ -3648,6 +3650,16 @@ class VocabApp {
         <div class="tap-hint tap-hint-back">点击查看词汇（Shift）</div>
       </div>
     `;
+
+    // 顶部「分类」标签可点击：跳转词库并按该分类筛选（语言标签、收藏按钮等仍不跳转）
+    const catBadge = cardInner.querySelector('.category-badge');
+    if (catBadge) {
+      catBadge.classList.add('clickable-badge');
+      catBadge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.handleCategoryBadgeClick(catBadge.textContent);
+      });
+    }
     
     const defFirst = !!this.settings.cardDefinitionFirst;
     if (defFirst) {
@@ -3877,6 +3889,48 @@ class VocabApp {
       : '';
     if (!badgeHtml && !categoryHtml) return '';
     return `${badgeHtml}${badgeHtml && categoryHtml ? '&nbsp;&nbsp;' : ''}${categoryHtml}`;
+  }
+
+  /** 切换学习卡片时，把词库菜单的分类勾选与「按字精确筛选」恢复为默认（全部分类） */
+  resetLibraryCategorySelection() {
+    // 置空后，下次 renderCategoryOptions 会把它恢复为「全部分类」勾选
+    this.selectedCategories = null;
+    this._libraryWordExactFilter = null;
+  }
+
+  /**
+   * 学习卡片顶部「分类」标签点击：跳转词库菜单并按该分类筛选。
+   * - 分类 tab 一律切到「全部」；
+   * - 普通分类（如「常用短语」）：分类下拉框按 category-badge 内容精确筛选；
+   * - 一字类分类（一字多音 / 一字一音 / 常用一音）：除了按该分类筛选，还进一步按学习卡
+   *   当前的 word 字精确筛选，词库只展示该字（word）的全部记录，而不是该分类下的所有字。
+   */
+  handleCategoryBadgeClick(categoryText) {
+    const cat = String(categoryText ?? '').trim();
+    if (!cat) return;
+    // 一字类分类：跳转后只展示学习卡当前 word 字，而非整个分类的所有字
+    const ONE_CHAR_CLASSES = ['一字多音', '一字一音', '常用一音'];
+    const isOneCharClass = ONE_CHAR_CLASSES.includes(cat);
+    // 清掉「今日已掌握/今日待复习」带过来的今日筛选，保证是从「全部」口径进入
+    this.resetLibraryTodayFilter();
+    this.filterStatus = 'all';
+    this.resetPageNum();
+    this.selectedCategories = [cat];
+    if (isOneCharClass) {
+      const currentWord = this.todayWords && this.todayWords[this.currentCardIndex]
+        ? String(this.todayWords[this.currentCardIndex].word || '').trim()
+        : '';
+      this._libraryWordExactFilter = currentWord || null;
+      // 清掉搜索词，避免它与「按字精确筛选」叠加出错误结果
+      this.searchQuery = '';
+      const searchInput = document.getElementById('searchInput');
+      if (searchInput) searchInput.value = '';
+      const clearBtn = document.getElementById('searchClearBtn');
+      if (clearBtn) clearBtn.style.display = 'none';
+    } else {
+      this._libraryWordExactFilter = null;
+    }
+    this.switchPage('library');
   }
 
   /** 该词条是否按粤语处理（决定音标优先展示粤拼） */
@@ -5358,6 +5412,12 @@ class VocabApp {
     // 分类多选
     if (this.selectedCategories && this.selectedCategories.length > 0) {
       words = words.filter((w) => this.selectedCategories.includes(w.category || '未分类'));
+    }
+
+    // 一字类（一字多音/一字一音）从学习卡跳转时：仅展示该 word 字的全部记录，
+    // 而不是该分类下的所有字（此时 selectedCategories 已限定到该分类）
+    if (this._libraryWordExactFilter) {
+      words = words.filter((w) => String(w.word || '').trim() === this._libraryWordExactFilter);
     }
 
     // 搜索（支持单词、释义、粤拼、粤语字、粤语例句搜索）
