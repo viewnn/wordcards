@@ -1404,9 +1404,11 @@ body.learn-landscape #learnPage .card-content {
 }
 
 body.learn-landscape #learnPage .card-actions {
-  padding: 6px 8px;
   /* 横屏容器已自带 12px 内边距，负 margin 会把按钮挤出容器边缘 */
   margin: 0;
+  /* 左右 padding 归零：三个按钮（含最左/最右）与上方卡片区域两侧完全对齐 */
+  padding: 6px 0;
+  gap: 10px;
 }
 
 /* 横屏精简显示：操作按钮去掉图标只留文字，高度按文字内容自适应；
