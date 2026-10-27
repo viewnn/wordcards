@@ -1241,6 +1241,103 @@ select {
   }
 }
 
+/* ==================== 卡片横屏（学习页 · 跟随手机横竖屏） ====================
+   「设置 → 卡片设置 → 卡片横屏」开启且手机横过来时（body.learn-landscape 由
+   app.js 按屏幕方向维护）：把学习页卡片区（进度/统计 + 单词卡 + 操作按钮）
+   作为一个整体旋转 90°，旋转方向跟随屏幕转动（--learn-rotate 由 JS 写入）。
+   整体旋转 = 只旋转内容文字/数值/按钮/图标，不改变任何按钮的尺寸；
+   「全部 / 字/短语 / 分类 / 收藏」仍位于卡片顶部，跳过/掌握/陌生仍位于卡片下方。
+   旋转后过长的内容一律用省略号截断，不溢出、不覆盖其它文字。 */
+body.learn-landscape #learnPage .learn-container {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  /* 宽高互换：旋转 90° 后正好铺满横屏视口。宽度沿用竖屏的窄列（上限 480px，
+     与 .app-container 的最大宽度一致），排版与竖屏完全相同 */
+  width: min(100vh, 480px);
+  height: 100vw;
+  min-height: 0;
+  border-radius: 0;
+  z-index: 200;
+  transform: translate(-50%, -50%) rotate(var(--learn-rotate, -90deg));
+  /* 卡片区接管整个横屏：超出部分收在这一层内，绝不盖到其它文字 */
+  overflow: hidden;
+}
+
+/* 等待云同步的遮罩跟着卡片区一起旋转，横屏时同样居中提示 */
+body.learn-landscape #learnPage .learn-sync-mask {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: min(100vh, 480px);
+  height: 100vw;
+  transform: translate(-50%, -50%) rotate(var(--learn-rotate, -90deg));
+  z-index: 210;
+}
+
+/* 卡片区内部：允许卡片在剩余空间内伸缩（上限与竖屏一致），
+   保证任何横屏尺寸下操作按钮都不会被挤出可视区 */
+body.learn-landscape #learnPage .flashcard {
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 250px;
+  max-height: 460px;
+}
+
+/* 卡片与操作按钮在剩余空间内分散对齐，横屏下左右更饱满 */
+body.learn-landscape #learnPage .card-stack {
+  justify-content: space-evenly;
+}
+
+/* ---- 旋转后过长内容统一省略号截断（不溢出、不覆盖） ---- */
+/* 单词 / 音标 / 粤字：单行，超出宽度显示「…」 */
+body.learn-landscape #learnPage .flashcard .word,
+body.learn-landscape #learnPage .flashcard .phonetic,
+body.learn-landscape #learnPage .flashcard .cantonese-word {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 释义 / 例句：多行，超出部分省略号截断，避免长文本盖住下方内容 */
+body.learn-landscape #learnPage .flashcard .meaning {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+
+body.learn-landscape #learnPage .flashcard .example,
+body.learn-landscape #learnPage .flashcard .cantonese-example {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+/* 统计卡：数值与标签单行，过长省略 */
+body.learn-landscape #learnPage .stat-value,
+body.learn-landscape #learnPage .stat-label {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 卡片顶部标签（全部 / 字/短语 / 分类）：每个标签限宽，过长省略；
+   收藏按钮是绝对定位的固定尺寸，不受影响 */
+body.learn-landscape #learnPage .flashcard-badge-row {
+  padding: 0 10px;
+  overflow: hidden;
+}
+
+body.learn-landscape #learnPage .flashcard-badge-row .language-badge {
+  max-width: 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ==================== 词库页面 ==================== */
 .library-header {
   padding: 14px 14px;
