@@ -444,7 +444,7 @@ select {
     inset 0 1px 0 rgba(255, 255, 255, 0.8),
     inset 0 -22px 36px -26px rgba(74, 60, 38, 0.13),
     0 2px 4px -2px rgba(74, 60, 38, 0.08),
-    0 16px 32px -16px rgba(74, 60, 38, 0.22);
+    0 16px 32px -16px rgba(74, 60, 38, 0.10);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -765,7 +765,9 @@ select {
   padding: 12px 8px calc(8px + env(safe-area-inset-bottom));
   margin: 0 -8px;
   flex-shrink: 0;
-  background: var(--bg-card);
+  /* 不铺底色：紧贴卡片下方会被不透明底色把卡片圆角投影切成直角硬边，
+     保持透明让卡片投射的柔和阴影自然过渡 */
+  background: transparent;
 }
 
 .action-btn {
@@ -785,7 +787,7 @@ select {
   box-shadow:
     var(--edge-light),
     0 2px 3px -1px rgba(74, 60, 38, 0.1),
-    0 6px 14px -6px rgba(74, 60, 38, 0.16);
+    0 6px 14px -6px rgba(74, 60, 38, 0.1);
 }
 
 .action-btn:active {
@@ -1028,6 +1030,9 @@ select {
   gap: 6px;
   /* 顶部 12px = 学习页「卡片 → 操作按钮」的间距；左右与卡片对齐 */
   padding: 12px 0 4px;
+  /* 与学习页 .card-actions 保持一致：不铺底色，
+     让卡片圆角投影自然过渡，避免被切成直角硬边 */
+  background: transparent;
 }
 
 /* 键盘开关：输入区下方的小手柄，居中且不占输入框宽度 */
