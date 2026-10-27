@@ -79,9 +79,16 @@ const CARD_CLEAR_MARGIN_PX = 8;
 const CARD_PARK_MARGIN_PX = 30;
 /** 新卡入场起点在滑出终点基础上再越界的像素数，0 = 正好接在旧卡离场的位置继续滑入 */
 const CARD_FINISH_MARGIN_PX = 0;
-/** 收藏心形图标（学习卡两个角落与词库列表共用同一颗心） */
+/** 收藏心形图标（学习卡角落与词库列表共用同一颗心） */
 const HEART_ICON_SVG =
   '<svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>';
+
+/** 卡片右上角「横竖屏」按钮图标：竖屏时为顺时针旋转（点击后顺时针转成横屏） */
+const ROTATE_LANDSCAPE_ICON_SVG =
+  '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>';
+/** 横屏时换成逆时针旋转图标（点击后逆时针转回竖屏）；描边颜色由 CSS 控制 */
+const ROTATE_PORTRAIT_ICON_SVG =
+  '<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9c-2.52 0-4.93 1-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>';
 
 // ==================== 练习页参数 ====================
 /**
@@ -470,6 +477,8 @@ class VocabApp {
      */
     this._skippedWordIds = new Set();
     this.isFlipped = false;           // 当前卡片是否处于翻面（释义面朝上）状态
+    /** 卡片横屏：卡片右上角按钮手动切换的状态（仅本次会话内有效，刷新页面回到竖屏） */
+    this._cardLandscapeOn = false;
     // 全部用户设置；启动时由 loadSettings() 从数据库读取覆盖默认值
     this.settings = {
       dailyGoal: 100,                 // 每日目标（每天学习多少张卡片）
@@ -488,8 +497,6 @@ class VocabApp {
       categoryDisplay: true,          // 卡片上方是否显示分类徽标（默认开启；loadSettings 会从库中读取用户选择）
       /** 词库列表卡片中，单词下方是否显示释义（默认开启；只影响词库卡片，查看单词弹窗不受影响） */
       meaningDisplay: true,
-      /** 卡片横屏：手机横过来时，学习页卡片区（统计+单词卡+操作按钮）整体旋转 90° 横屏显示（默认开启） */
-      cardLandscape: true,
       /** 练习页：练习范围 all / phrase / word（独立于学习页的「词典导入」） */
       practiceScope: 'all',
       /** 练习页：输入模式 with 含调值 / without 不含调值 */
@@ -601,7 +608,6 @@ class VocabApp {
       this.initServiceWorker();
       this.bindEvents();
       this.initKeyboardViewport();
-      this.initCardLandscape();
 
       // 先导入词典（字+短语全量常驻并标注分类），再加载按分类归档的统计，
       // 保证首次升级时迁移能按现有词条分类拆分历史累计记录
@@ -1012,95 +1018,59 @@ class VocabApp {
     apply();
   }
 
-  // ==================== 卡片横屏（学习页 · 跟随手机横竖屏） ====================
+  // ==================== 卡片横屏（学习页 · 右上角按钮手动切换） ====================
 
   /**
-   * 「卡片横屏」适配（设置 → 卡片设置 → 卡片横屏，默认开启）。
+   * 切换学习页卡片区的横竖屏（卡片右上角「横竖屏」按钮）。
    *
-   * 开关开启且手机横过来时，给 <body> 加 learn-landscape（styles.css 由此把
-   * 学习页卡片区——统计数字 + 单词卡 + 顶部标签 + 操作按钮——作为一个整体
-   * 旋转 90° 横屏铺满）；旋转方向跟随屏幕转动，手机往哪边横、内容就往哪边转，
-   * 保证按当前握持方向阅读时文字是正的。
-   *
-   * 监听两个事件源：CSS orientation 变化、screen.orientation 变化（拿得到
-   * 90/270 两个横屏方向）。窗口 resize 的兜底与「先转屏再量高度」的顺序
-   * 由 bindEvents 里的统一 resize 处理负责，这里不再重复挂 resize。
+   * 进入横屏：卡片区（统计数字 + 单词卡 + 顶部标签 + 操作按钮）作为一个整体
+   * 顺时针旋转 90° 铺满屏幕；再点一次逆时针转回竖屏。
+   * 整体旋转 = 只旋转内容文字/数值/按钮/图标，不改变任何按钮的尺寸。
    */
-  initCardLandscape() {
-    const apply = () => this.updateLearnLandscape();
-
-    try {
-      const mq = window.matchMedia && window.matchMedia('(orientation: landscape)');
-      if (mq && typeof mq.addEventListener === 'function') {
-        mq.addEventListener('change', apply);
-      } else if (mq && typeof mq.addListener === 'function') {
-        mq.addListener(apply); // 旧版 Safari
-      }
-    } catch (err) { /* 部分环境不支持监听，靠 resize 兜底 */ }
-
-    try {
-      if (window.screen && screen.orientation) {
-        if (typeof screen.orientation.addEventListener === 'function') {
-          screen.orientation.addEventListener('change', apply);
-        } else if ('onchange' in screen.orientation) {
-          screen.orientation.onchange = apply;
-        }
-      }
-    } catch (err) { /* 忽略：拿不到方向时会退回默认旋转方向 */ }
-
-    this.updateLearnLandscape();
+  toggleCardLandscape() {
+    this._cardLandscapeOn = !this._cardLandscapeOn;
+    // 切换瞬间加上 body.learn-anim 启用旋转动画（styles.css）；动画结束后移除，
+    // 切页恢复/返回学习页时直接落位、不再播动画，卡片高度测量也不会量到动画中间态
+    document.body.classList.add('learn-anim');
+    if (this._cardLandscapeAnimTimer) clearTimeout(this._cardLandscapeAnimTimer);
+    this._cardLandscapeAnimTimer = setTimeout(() => {
+      this._cardLandscapeAnimTimer = null;
+      document.body.classList.remove('learn-anim');
+      // 动画结束后的最终几何才量得准（横屏时宽高互换，见 syncPracticeCardHeight）
+      this.syncPracticeCardHeight();
+    }, 420);
+    this._syncCardLandscape();
   }
 
   /**
-   * 横屏状态下卡片区应旋转的角度。
-   * 屏幕往顺时针方向横过来（orientation.angle = 90）→ 内容逆时针转回（-90°）；
-   * 屏幕往逆时针方向横过来（angle = 270 / 旧 API 的 -90）→ 内容顺时针转回（90°）。
-   * 拿不到方向信息时按最常见的握法（home 键在右侧）默认 -90°。
+   * 把「横屏状态 + 当前页面」同步到 body.learn-landscape（styles.css 据此把卡片区
+   * 旋转成横屏）。离开学习页时旋转自动收起，回到学习页时按上次状态恢复；
+   * 状态仅本次会话内记忆，刷新页面回到竖屏。
    */
-  _learnScreenRotateDeg() {
-    let angle = null;
-    if (window.screen && screen.orientation && typeof screen.orientation.angle === 'number') {
-      angle = screen.orientation.angle;
-    } else if (typeof window.orientation === 'number') {
-      angle = window.orientation; // 旧版 iOS Safari：-90 / 0 / 90 / 180
-    }
-    const normalized = ((Number(angle) % 360) + 360) % 360;
-    return normalized === 270 ? 90 : -90;
-  }
-
-  /**
-   * 按「卡片横屏」开关 + 屏幕方向 + 当前页面，维护 body.learn-landscape
-   * 与旋转角度变量 --learn-rotate。只在手机/平板上生效：桌面宽窗口不算
-   * 「手机横过来」，不旋转（兼容桌面调试：视口高度 ≤ 500px 的横屏视口视同手机横屏）。
-   */
-  updateLearnLandscape() {
-    const enabled = this.settings.cardLandscape !== false;
-    const isLandscape = window.innerWidth > window.innerHeight;
-    const touchCapable = (navigator.maxTouchPoints || 0) > 0 ||
-      (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
-    const active = enabled && isLandscape &&
-      (touchCapable || window.innerHeight <= 500) &&
-      this.currentPage === 'learn';
-
-    if (active) {
-      document.documentElement.style.setProperty('--learn-rotate', `${this._learnScreenRotateDeg()}deg`);
-    }
+  _syncCardLandscape() {
+    const active = !!this._cardLandscapeOn && this.currentPage === 'learn';
     document.body.classList.toggle('learn-landscape', active);
+    this._refreshCardRotateBtn();
+  }
+
+  /** 刷新卡片右上角「横竖屏」按钮的图标与激活态（横屏时换成逆时针“转回”图标） */
+  _refreshCardRotateBtn() {
+    const btn = document.getElementById('cardRotateBtn');
+    if (!btn) return;
+    const on = !!this._cardLandscapeOn;
+    btn.classList.toggle('active', on);
+    btn.innerHTML = on ? ROTATE_PORTRAIT_ICON_SVG : ROTATE_LANDSCAPE_ICON_SVG;
+    btn.title = on ? '转回竖屏' : '卡片横屏';
   }
 
   /**
    * 卡片横屏时把视口坐标系的触摸增量 (dx, dy) 换算回卡片自身坐标系的增量。
-   * 卡片区整体旋转 ±90° 后两轴互换，直接用视口增量会把「左右滑」误判成「上下滑」。
+   * 卡片区整体顺时针旋转 90° 后两轴互换（视口向下 = 卡片本地向右），
+   * 直接用视口增量会把「左右滑」误判成「上下滑」。
    */
   _cardLocalDelta(dx, dy) {
-    const deg = document.body.classList.contains('learn-landscape')
-      ? this._learnScreenRotateDeg()
-      : 0;
-    if (!deg) return { x: dx, y: dy };
-    const rad = (-deg) * Math.PI / 180;
-    const cos = Math.cos(rad);
-    const sin = Math.sin(rad);
-    return { x: dx * cos - dy * sin, y: dx * sin + dy * cos };
+    if (!document.body.classList.contains('learn-landscape')) return { x: dx, y: dy };
+    return { x: dy, y: -dx };
   }
 
   /**
@@ -1230,7 +1200,6 @@ class VocabApp {
     this.settings.cardDefinitionFirst = await this.db.getSetting('cardDefinitionFirst', false);
     this.settings.categoryDisplay = await this.db.getSetting('categoryDisplay', true);
     this.settings.meaningDisplay = await this.db.getSetting('meaningDisplay', true);
-    this.settings.cardLandscape = await this.db.getSetting('cardLandscape', true);
     this.settings.learnMode = await this.db.getSetting('learnMode', 'random');
     this.settings.phoneticDelay = await this.db.getSetting('phoneticDelay', 2);
     this.settings.repeatFrequency = await this.db.getSetting('repeatFrequency', 2);
@@ -1992,6 +1961,17 @@ class VocabApp {
       if (e.cancelable) e.preventDefault();
       self.toggleFavorite();
     }
+
+    // 右上角「横竖屏」按钮：点击把卡片区顺时针旋转换成横屏 / 逆时针转回竖屏。
+    // 事件委托到 document：卡片内容（含按钮本体）每次换卡都会被 showCard 重建，
+    // 直接绑在按钮上会随 DOM 一起丢失；委托后首次加载的静态占位按钮、
+    // 之后渲染出的按钮都始终可点，也不会重复绑定（防止一次点击切换两次）
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('.rotate-btn');
+      if (!btn) return;
+      e.stopPropagation();
+      self.toggleCardLandscape();
+    });
     
     // 卡片滑动 + 触屏长按取词（学习卡支持左右滑动切卡）
     this.initCardSwipe(flashcard, () => self.flipCard(), true);
@@ -2020,10 +2000,9 @@ class VocabApp {
     // 练习页（范围下拉、输入模式、卡片翻转、音标输入框）
     this.bindPracticeEvents();
 
-    // 窗口尺寸变化（旋屏、改窗口大小）后：先同步「卡片横屏」状态（学习页布局会随之改变），
-    // 再重新量一次当前可见页面的卡片区位置；顺序反了会量到旋转前后的中间态，写出错误高度
+    // 窗口尺寸变化（旋屏、改窗口大小）后重新量一次当前可见页面的卡片区位置。
+    // 手动横屏的几何全部由 CSS 的 vh/vw 驱动，会自适应窗口变化，无需额外处理
     window.addEventListener('resize', () => {
-      this.updateLearnLandscape();
       this.syncPracticeCardHeight();
     });
     
@@ -2400,8 +2379,6 @@ class VocabApp {
     };
     bindSettingToggle('cardDefinitionFirstToggle', 'cardDefinitionFirst', refreshLearnCard);
     bindSettingToggle('categoryDisplayToggle', 'categoryDisplay', refreshLearnCard);
-    // 卡片横屏：开启后手机横过来时学习页卡片区旋转成横屏（只在学习页生效，切页/转屏自动同步）
-    bindSettingToggle('cardLandscapeToggle', 'cardLandscape', () => self.updateLearnLandscape());
     // 显示释义（只控制词库列表卡片，查看单词弹窗始终显示释义）
     bindSettingToggle('meaningDisplayToggle', 'meaningDisplay', async () => {
       if (self.currentPage === 'library') await self.renderLibrary();
@@ -2534,9 +2511,6 @@ class VocabApp {
 
     const fontSizes = { small: '14px', medium: '16px', large: '20px' };
     document.documentElement.style.setProperty('--font-size-md', fontSizes[this.settings.fontSize] || '16px');
-
-    // 云同步可能刚合并了「卡片横屏」开关：横屏状态跟着刷新
-    this.updateLearnLandscape();
   }
 
   /**
@@ -2572,10 +2546,11 @@ class VocabApp {
     };
 
     card.addEventListener('touchstart', (e) => {
-      // 检查是否点击了收藏按钮
+      // 检查是否点击了收藏 / 横竖屏按钮
       const target = e.target;
       if (
         target.closest('.favorite-btn') ||
+        target.closest('.rotate-btn') ||
         target.closest('.language-badge')
       ) {
         isDragging = false;
@@ -2925,6 +2900,7 @@ class VocabApp {
   _isCardControl(target) {
     return !!(target && target.closest && (
       target.closest('.favorite-btn') ||
+      target.closest('.rotate-btn') ||
       target.closest('.language-badge')
     ));
   }
@@ -3118,8 +3094,8 @@ class VocabApp {
       this.resetLibraryTodayFilter();
     }
 
-    // 切页后同步「卡片横屏」状态：只有停留在学习页且手机横向时才旋转卡片区
-    this.updateLearnLandscape();
+    // 切页后同步「卡片横屏」状态：离开学习页时收起旋转，回来时按上次状态恢复
+    this._syncCardLandscape();
 
     // 新页面已经激活：补量它那一侧卡片区的位置，两侧都齐了就能算出练习卡的补偿高度
     this.syncPracticeCardHeight();
@@ -3743,13 +3719,14 @@ class VocabApp {
       <div class="flashcard-front">
         ${badgeRowHtml}
         <button class="favorite-btn ${word.favorite ? 'active' : ''}" id="favoriteBtn">${HEART_ICON_SVG}</button>
-        <button class="favorite-btn favorite-btn-right ${word.favorite ? 'active' : ''}" id="favoriteBtnRight">${HEART_ICON_SVG}</button>
+        <button class="rotate-btn ${this._cardLandscapeOn ? 'active' : ''}" id="cardRotateBtn" type="button"
+                title="${this._cardLandscapeOn ? '转回竖屏' : '卡片横屏'}" aria-label="横竖屏切换">${this._cardLandscapeOn ? ROTATE_PORTRAIT_ICON_SVG : ROTATE_LANDSCAPE_ICON_SVG}</button>
         <div class="card-content">
           <div class="word">${word.word}</div>
           <div class="phonetic" id="phoneticText">${cantonesePhoneticFirst ? (word.jyutping || word.phonetic || '') : (word.phonetic || word.jyutping || '')}</div>
           ${isCantonese && word.cantonese ? `<div class="cantonese-word">${word.cantonese}</div>` : ''}
         </div>
-        <div class="tap-hint">点击查看释义（Shift）</div>
+        <div class="tap-hint"><< 掌握 · 点击查看释义 Shift · 跳过 >></div>
       </div>
       <div class="flashcard-back">
         <button class="favorite-btn ${word.favorite ? 'active' : ''}" id="favoriteBtnBack">${HEART_ICON_SVG}</button>
@@ -3758,7 +3735,7 @@ class VocabApp {
           <div class="example">${word.example ? `"${word.example}"` : ''}</div>
           ${isCantonese && word.cantoneseExample ? `<div class="cantonese-example">"${word.cantoneseExample}"</div>` : ''}
         </div>
-        <div class="tap-hint tap-hint-back">点击查看词汇（Shift）</div>
+        <div class="tap-hint tap-hint-back"><< 掌握 · 点击查看词汇 Shift · 跳过 >></div>
       </div>
     `;
 
@@ -5880,12 +5857,6 @@ class VocabApp {
     const meaningDisplayToggle = document.getElementById('meaningDisplayToggle');
     if (meaningDisplayToggle) {
       meaningDisplayToggle.classList.toggle('active', this.settings.meaningDisplay !== false);
-    }
-
-    // 卡片横屏：默认开启，未设置过时按 true 处理
-    const cardLandscapeToggle = document.getElementById('cardLandscapeToggle');
-    if (cardLandscapeToggle) {
-      cardLandscapeToggle.classList.toggle('active', this.settings.cardLandscape !== false);
     }
 
     const dictTypeEl = document.getElementById('dictTypeSelect');

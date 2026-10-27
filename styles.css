@@ -429,9 +429,10 @@ select {
 
 .flashcard {
   width: 100%;
-  /* 高度只在这里定义一次（短屏保底 320px，最多 460px）；
+  /* 高度只在这里定义一次（短屏保底 320px，最多 460px：如果去掉了notice提示栏，则可跳转到480px）；
      写进 max-width:400 断点对 412/430px 手机无效 */
-  height: clamp(320px, calc(100% - 96px), 460px);
+  /* height: clamp(320px, calc(100% - 96px), 460px);  */
+     height: clamp(320px, calc(100% - 96px), 480px); 
   /* 不允许被 flex 压缩：空间不够时由 .card-stack 的 min-height 撑开 */
   flex-shrink: 0;
   /* 卡面：米黄纸感 + 淡描边 + 柔和投影 */
@@ -770,7 +771,7 @@ select {
 .action-btn {
   flex: 1;
   min-width: 80px;
-  height: 68px;
+  height: 70px;
   border: 1px solid transparent;
   cursor: pointer;
   display: flex;
@@ -1241,52 +1242,79 @@ select {
   }
 }
 
-/* ==================== 卡片横屏（学习页 · 跟随手机横竖屏） ====================
-   「设置 → 卡片设置 → 卡片横屏」开启且手机横过来时（body.learn-landscape 由
-   app.js 按屏幕方向维护）：把学习页卡片区（进度/统计 + 单词卡 + 操作按钮）
-   作为一个整体旋转 90°，旋转方向跟随屏幕转动（--learn-rotate 由 JS 写入）。
-   整体旋转 = 只旋转内容文字/数值/按钮/图标，不改变任何按钮的尺寸；
-   「全部 / 字/短语 / 分类 / 收藏」仍位于卡片顶部，跳过/掌握/陌生仍位于卡片下方。
-   旋转后过长的内容一律用省略号截断，不溢出、不覆盖其它文字。 */
+/* ==================== 卡片横屏（学习页 · 右上角按钮手动切换） ====================
+   卡片右上角「横竖屏」按钮点击（body.learn-landscape 由 app.js 维护）：
+   学习页卡片区（统计数字 + 单词卡 + 顶部标签 + 操作按钮）作为一个整体顺时针
+   旋转 90° 横屏铺满，再点一次逆时针转回竖屏。整体旋转 = 只旋转内容文字/数值/
+   按钮/图标，不改变任何按钮的尺寸；顶部标签（全部 / 字·短语 / 分类）与收藏
+   按钮仍在卡片顶部，跳过/掌握/陌生仍在卡片下方；过长内容一律省略号截断。 */
+
+/* 旋转动画只在按钮切换瞬间启用（body.learn-anim 由 app.js 短暂添加、动画结束移除）：
+   切页恢复时不播动画、直接落位，卡片高度的测量也不会量到动画中间态 */
+body.learn-anim #learnPage .learn-container {
+  transition: transform 0.4s cubic-bezier(.2, .8, .2, 1);
+}
+
 body.learn-landscape #learnPage .learn-container {
   position: fixed;
   top: 50%;
   left: 50%;
-  /* 宽高互换：旋转 90° 后正好铺满横屏视口。宽度沿用竖屏的窄列（上限 480px，
-     与 .app-container 的最大宽度一致），排版与竖屏完全相同 */
-  width: min(100vh, 480px);
-  height: 100vw;
+  /* 旋转 90° 后视觉尺寸 = (height 宽 × width 高)：宽取视口高（转过来正好铺满竖向），
+     高取 min(视口宽, 480px)（应用单列上限，转过来不超过横向） */
+  width: 100vh;
+  width: 100dvh;
+  height: min(100vw, 480px);
   min-height: 0;
   border-radius: 0;
   z-index: 200;
-  transform: translate(-50%, -50%) rotate(var(--learn-rotate, -90deg));
-  /* 卡片区接管整个横屏：超出部分收在这一层内，绝不盖到其它文字 */
+  /* 横屏：顺时针旋转 90° */
+  transform: translate(-50%, -50%) rotate(90deg);
+  /* 横屏下溢出内容收在这一层内，绝不盖到屏幕外 */
   overflow: hidden;
+  padding: 6px 12px;
 }
 
-/* 等待云同步的遮罩跟着卡片区一起旋转，横屏时同样居中提示 */
-body.learn-landscape #learnPage .learn-sync-mask {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  width: min(100vh, 480px);
-  height: 100vw;
-  transform: translate(-50%, -50%) rotate(var(--learn-rotate, -90deg));
-  z-index: 210;
+/* 卡片右上角「横竖屏」按钮（替代原右上角收藏按钮）：与收藏按钮同规格的
+   44×44 圆形按钮，不改变按钮大小；圆圈里是横竖屏旋转小图标 */
+.rotate-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 44px;
+  height: 44px;
+  border: none;
+  background: rgba(74, 144, 217, 0.12);
+  border-radius: 50%;
+  box-shadow: inset 0 1px 2px rgba(74, 60, 38, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  z-index: 3;
 }
 
-/* 卡片区内部：允许卡片在剩余空间内伸缩（上限与竖屏一致），
-   保证任何横屏尺寸下操作按钮都不会被挤出可视区 */
-body.learn-landscape #learnPage .flashcard {
-  height: auto;
-  flex: 1 1 auto;
-  min-height: 250px;
-  max-height: 460px;
+.rotate-btn:active {
+  transform: scale(0.9);
 }
 
-/* 卡片与操作按钮在剩余空间内分散对齐，横屏下左右更饱满 */
-body.learn-landscape #learnPage .card-stack {
-  justify-content: space-evenly;
+/* 旋转图标：线条风格（fill:none + stroke），颜色随激活态变化 */
+.rotate-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: #7E93A8;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.rotate-btn.active {
+  background: rgba(74, 144, 217, 0.3);
+}
+
+.rotate-btn.active svg {
+  stroke: var(--primary);
 }
 
 /* ---- 旋转后过长内容统一省略号截断（不溢出、不覆盖） ---- */
@@ -1326,9 +1354,9 @@ body.learn-landscape #learnPage .stat-label {
 }
 
 /* 卡片顶部标签（全部 / 字/短语 / 分类）：每个标签限宽，过长省略；
-   收藏按钮是绝对定位的固定尺寸，不受影响 */
+   左上收藏按钮与右上横竖屏按钮是绝对定位的固定尺寸，不受影响 */
 body.learn-landscape #learnPage .flashcard-badge-row {
-  padding: 0 10px;
+  padding: 0 48px;
   overflow: hidden;
 }
 
@@ -1336,6 +1364,36 @@ body.learn-landscape #learnPage .flashcard-badge-row .language-badge {
   max-width: 30%;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ---- 横屏内部空间有限：隐藏滑动提示（不在旋转元素清单内）、放开卡片区
+   最小高度，保证统计数字、卡片、操作按钮在任意机型都放得下且互不覆盖 ---- */
+body.learn-landscape #learnPage .notice {
+  display: none;
+}
+
+body.learn-landscape #learnPage .card-stack {
+  min-height: 0;
+  justify-content: space-evenly;
+  padding: 0;
+  overflow: hidden;
+}
+
+body.learn-landscape #learnPage .flashcard {
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 100px;
+  max-height: 460px;
+  overflow: hidden;
+}
+
+body.learn-landscape #learnPage .card-content {
+  padding-top: 10px;
+  gap: 6px;
+}
+
+body.learn-landscape #learnPage .card-actions {
+  padding: 8px;
 }
 
 /* ==================== 词库页面 ==================== */

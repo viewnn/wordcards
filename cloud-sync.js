@@ -112,8 +112,6 @@
     'cardDefinitionFirst',
     'categoryDisplay',
     'meaningDisplay',
-    // 卡片横屏：多设备共用同一个阅读习惯，横竖屏行为保持一致
-    'cardLandscape',
     // 练习页的范围与调值开关：两端不一致时进度条的分母、题目难度都不同，
     // 用户会以为是「练习数据没同步」，所以一起同步
     'practiceScope',
