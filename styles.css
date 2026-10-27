@@ -1372,6 +1372,17 @@ body.learn-landscape #learnPage .notice {
   display: none;
 }
 
+/* 横屏精简显示（竖屏不受影响）：隐藏顶部四个统计卡（今日/累计 已掌握/待复习），
+   空间让给单词卡本体；进度条保留 */
+body.learn-landscape #learnPage .stats-row {
+  display: none;
+}
+
+/* 横屏精简显示：卡片底部的操作提示行隐藏（正反两面的 tap-hint） */
+body.learn-landscape #learnPage .flashcard .tap-hint {
+  display: none;
+}
+
 body.learn-landscape #learnPage .card-stack {
   min-height: 0;
   justify-content: space-evenly;
@@ -1393,7 +1404,42 @@ body.learn-landscape #learnPage .card-content {
 }
 
 body.learn-landscape #learnPage .card-actions {
-  padding: 8px;
+  padding: 6px 8px;
+  /* 横屏容器已自带 12px 内边距，负 margin 会把按钮挤出容器边缘 */
+  margin: 0;
+}
+
+/* 横屏精简显示：操作按钮去掉图标只留文字，高度按文字内容自适应；
+   文字稍大保证横屏可读性，颜色沿用各自按钮的语义色 */
+body.learn-landscape #learnPage .action-btn {
+  height: auto;
+  min-width: 0;
+  padding: 8px 6px;
+  gap: 0;
+}
+
+body.learn-landscape #learnPage .action-btn svg {
+  display: none;
+}
+
+body.learn-landscape #learnPage .action-btn span {
+  font-size: 14px;
+  letter-spacing: 0.5px;
+}
+
+body.learn-landscape #learnPage .action-btn.mastered span {
+  color: var(--success);
+  font-weight: 500;
+}
+
+body.learn-landscape #learnPage .action-btn.difficult span {
+  color: var(--danger);
+  font-weight: 500;
+}
+
+body.learn-landscape #learnPage .action-btn.skip span {
+  color: #6E8298;
+  font-weight: 500;
 }
 
 /* ==================== 词库页面 ==================== */
