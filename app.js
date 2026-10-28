@@ -528,6 +528,15 @@ class VocabApp {
     this._libraryTodayOnly = false;
     /** _libraryTodayOnly 为 true 时限定只显示该状态（mastered / review） */
     this._libraryTodayKind = null;
+    /**
+     * 词库页是否需要（重新）渲染。
+     * 只有「首次进入词库」以及「筛选条件被显式更新」时才置 true：
+     *   - 学习卡片的分类标签跳转（handleCategoryBadgeClick）
+     *   - 设置页更改「词典导入」范围 / 导入词库
+     *   - 从学习卡的今日/累计统计卡跳转
+     * 普通切页（学习/练习/设置 ←→ 词库）不置位，因此切回来时保持原有筛选条件与列表，不刷新。
+     */
+    this._libraryNeedsRender = true;
     /** 按分类(字/短语)归档的今日统计：{ word:{mastered,review}, phrase:{mastered,review} } */
     this._scopeToday = this._emptyScopeStats();
     /** 按分类(字/短语)归档的今日之前累计统计（每日跨天时并入） */
@@ -669,6 +678,10 @@ class VocabApp {
     await this.updateDictTypeSelectLabels();
     if (this.currentPage === 'library') {
       await this.renderLibrary();
+      this._libraryNeedsRender = false;
+    } else {
+      // 不在词库页：词典导入/清空改变了分类范围，标记下次进入时按新范围重新渲染
+      this._libraryNeedsRender = true;
     }
   }
 
@@ -2045,9 +2058,39 @@ class VocabApp {
     const dropdownTrigger = dropdown.querySelector('.dropdown-trigger');
     const categoryAll = document.getElementById('category-all');
     
+    // 分类下拉：展开时的模糊搜索（仅过滤展示，不影响勾选状态）
+    const categorySearchInput = document.getElementById('categorySearchInput');
+    const categorySearchEmpty = document.getElementById('categorySearchEmpty');
+    const categoryAllItem = categoryAll.closest('.dropdown-item');
+
+    const filterCategories = () => {
+      const q = categorySearchInput.value.trim().toLowerCase();
+      const items = document.querySelectorAll('#categoryOptions .dropdown-item');
+      let visible = 0;
+      items.forEach((item) => {
+        const cb = item.querySelector('input[data-category]');
+        const name = cb ? String(cb.dataset.category || '').toLowerCase() : '';
+        const show = q === '' || name.includes(q);
+        item.style.display = show ? '' : 'none';
+        if (show) visible++;
+      });
+      // 搜索时隐藏「全部分类」项（它不属于某个具体分类）
+      if (categoryAllItem) categoryAllItem.style.display = q === '' ? '' : 'none';
+      if (categorySearchEmpty) categorySearchEmpty.style.display = (q !== '' && visible === 0) ? '' : 'none';
+    };
+
+    categorySearchInput.addEventListener('input', filterCategories);
+
     dropdownTrigger.addEventListener('click', (e) => {
       e.stopPropagation();
+      const willOpen = !dropdown.classList.contains('active');
       dropdown.classList.toggle('active');
+      if (willOpen) {
+        // 每次展开都清空搜索并恢复全量选项，便于直接输入搜索
+        categorySearchInput.value = '';
+        filterCategories();
+        categorySearchInput.focus();
+      }
     });
     
     // 点击其他地方关闭下拉
@@ -2081,11 +2124,25 @@ class VocabApp {
   updateSelectedCategories() {
     const checkedBoxes = document.querySelectorAll('#categoryOptions input[type="checkbox"]:checked');
     this.selectedCategories = Array.from(checkedBoxes).map(cb => cb.dataset.category);
-    
+
     this.updateCategoryLabel();
-    
+    this.updateCategoryFilterIndicator();
+
     this.resetPageNum();
     this.renderLibrary();
+  }
+
+  /**
+   * 标记分类下拉内是否存在筛选条件：只要没有「全部分类」都被勾选（即非全部选中），
+   * 就给下拉触发框加 .has-filter，收起时以蓝色描边提示「有条件已被筛选」。
+   */
+  updateCategoryFilterIndicator() {
+    const target = document.getElementById('categoryDropdown');
+    if (!target) return;
+    const total = document.querySelectorAll('#categoryOptions input[type="checkbox"]').length;
+    const checked = document.querySelectorAll('#categoryOptions input[type="checkbox"]:checked').length;
+    const hasFilter = total > 0 && checked < total;
+    target.classList.toggle('has-filter', hasFilter);
   }
 
   /** 设置页「词典导入」对应的展示文字：全部 / 字 / 短语 */
@@ -2180,6 +2237,8 @@ class VocabApp {
 
     // 默认文字跟随当前词典范围（全部/字/短语）
     this.updateCategoryLabel();
+    // 勾选状态就绪后同步「有筛选条件」的蓝色描边提示
+    this.updateCategoryFilterIndicator();
   }
   
   // 重置页码
@@ -2486,6 +2545,10 @@ class VocabApp {
           await self.renderCategoryOptions();
           if (self.currentPage === 'library') {
             await self.renderLibrary();
+            self._libraryNeedsRender = false;
+          } else {
+            // 不在词库页：标记下次进入时按新范围重新渲染
+            self._libraryNeedsRender = true;
           }
 
           // 按新范围重建今日队列并渲染；currentPage 为学习页时这一步就是用户看到的卡片
@@ -3078,8 +3141,13 @@ class VocabApp {
         });
       }
     } else if (page === 'library') {
-      this.renderCategoryOptions();
-      this.renderLibrary();
+      // 仅首次进入、或筛选条件被显式更新过（标签跳转 / 词典范围变更 / 统计卡跳转）时才渲染；
+      // 普通切页回来时保持词库页原有筛选条件与列表，不刷新、不重置分类勾选
+      if (this._libraryNeedsRender) {
+        this._libraryNeedsRender = false;
+        this.renderCategoryOptions();
+        this.renderLibrary();
+      }
     } else if (page === 'practice') {
       // 队列重建/渲染是异步的，这里兜住异常，避免个别失败变成未捕获的 Promise 异常
       this.enterPracticePage().catch((error) => {
@@ -3089,10 +3157,8 @@ class VocabApp {
       this.renderSettings();
     }
 
-    // 离开词库页即结束“只看今天学过”的筛选，避免下次直接进词库时列表仍是今日口径
-    if (page !== 'library') {
-      this.resetLibraryTodayFilter();
-    }
+    // 词库页的筛选条件（含「只看今天学过」）在切页时保持不变，
+    // 仅由标签跳转 / 统计卡跳转 / 词典范围变更显式更新，因此这里不做重置
 
     // 切页后同步「卡片横屏」状态：离开学习页时收起旋转，回来时按上次状态恢复
     this._syncCardLandscape();
@@ -3688,8 +3754,8 @@ class VocabApp {
     }
 
     this._learnView = 'card';
-    // 切换学习卡片时，把词库菜单的分类勾选恢复为默认（全部分类），避免残留上一张卡筛选
-    this.resetLibraryCategorySelection();
+    // 注意：换卡时不再重置词库菜单的分类勾选 / 按字精确筛选。
+    // 词库筛选条件在切页或换卡时保持不变，仅由「分类标签跳转 / 统计卡跳转 / 词典范围变更」显式更新。
     // 切换范围/重新建队后，红色「已学完」提示与按钮冻结状态都要撤掉
     this.hideScopeComplete();
 
@@ -3979,13 +4045,6 @@ class VocabApp {
     return `${badgeHtml}${badgeHtml && categoryHtml ? '&nbsp;&nbsp;' : ''}${categoryHtml}`;
   }
 
-  /** 切换学习卡片时，把词库菜单的分类勾选与「按字精确筛选」恢复为默认（全部分类） */
-  resetLibraryCategorySelection() {
-    // 置空后，下次 renderCategoryOptions 会把它恢复为「全部分类」勾选
-    this.selectedCategories = null;
-    this._libraryWordExactFilter = null;
-  }
-
   /**
    * 学习卡片顶部「分类」标签点击：跳转词库菜单并按该分类筛选。
    * - 分类 tab 一律切到「全部」；
@@ -4018,6 +4077,8 @@ class VocabApp {
     } else {
       this._libraryWordExactFilter = null;
     }
+    // 标签跳转：显式更新了筛选条件，标记词库页需要重新渲染
+    this._libraryNeedsRender = true;
     this.switchPage('library');
   }
 
@@ -4499,6 +4560,7 @@ class VocabApp {
       this.filterStatus = filter;
       this._libraryTodayOnly = true;
       this._libraryTodayKind = filter;
+      this._libraryNeedsRender = true;
       this.switchPage('library');
     }
   }
@@ -4512,6 +4574,7 @@ class VocabApp {
       this.filterStatus = filter;
       this._libraryTodayOnly = false;
       this._libraryTodayKind = null;
+      this._libraryNeedsRender = true;
       this.switchPage('library');
     }
   }

@@ -1529,6 +1529,13 @@ body.learn-landscape #learnPage .action-btn.skip span {
   border-color: var(--primary);
 }
 
+/* 下拉内已有筛选条件（未全选分类）时：收起状态也保持蓝色描边，
+   便于一眼看出「有条件已被筛选」 */
+.category-dropdown.has-filter .dropdown-trigger {
+  border-color: var(--primary);
+  box-shadow: var(--edge-light), var(--shadow-sm);
+}
+
 .category-dropdown.active .dropdown-trigger svg {
   transform: rotate(180deg);
   fill: var(--primary);
@@ -1544,14 +1551,67 @@ body.learn-landscape #learnPage .action-btn.skip span {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
   padding: 8px;
-  max-height: 240px;
-  overflow-y: auto;
   display: none;
+  flex-direction: column;
+  gap: 6px;
   z-index: 200;
 }
 
+/* 搜索框固定在下拉顶部，选项列表独立滚动 */
+.dropdown-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.dropdown-search svg {
+  width: 16px;
+  height: 16px;
+  fill: var(--text-light);
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+.dropdown-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}
+
+.dropdown-search input::placeholder {
+  color: var(--text-light);
+}
+
+.dropdown-list {
+  max-height: 204px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#categoryOptions {
+  display: contents;
+}
+
+.category-empty {
+  padding: 10px 12px;
+  text-align: center;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
 .category-dropdown.active .dropdown-content {
-  display: block;
+  display: flex;
 }
 
 .dropdown-item {
@@ -1611,7 +1671,7 @@ body.learn-landscape #learnPage .action-btn.skip span {
   border: none;
   outline: none;
   font-size: 14px;
-  color: var(--text-primary);
+  color: var(--text-primary); 
 }
 
 .search-input::placeholder {

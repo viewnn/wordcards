@@ -1,3 +1,0 @@
-job_id	pid	log_file	purpose
-job-20261022-071602-df2c2481	24600	.temp\background-registry-20261022-151533-23556-baad2f36.-job-20261022-071602-df2c2481.log	本地静态服务器8080端口用于页面验证
-job-20261022-071712-1f152773	1616	.temp\background-registry-20261022-151533-23556-baad2f36.-job-20261022-071712-1f152773.log	本地静态服务器8899端口用于页面验证
