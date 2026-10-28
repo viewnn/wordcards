@@ -154,6 +154,67 @@
   }
 
   /**
+   * 按需加载 Supabase JS SDK（UMD 版），加载成功后 window.supabase 可用。
+   *
+   * 之前这份 SDK 在 index.html <head> 里同步加载（约 130KB），会阻塞首屏渲染，
+   * 而且未开启云同步的用户也要为它付出下载与解析时间。
+   * 现在改为：确认 supabase-config.js 已配置、确实要用云同步时才动态注入。
+   * CDN 地址取自 supabase-config.js 的 sdkUrl（可换成配置里注释的其它镜像）。
+   *
+   * 同时只允许一个 <script> 在加载：多处并发调用共用同一个 Promise；
+   * 失败/超时后清掉缓存，网络恢复后下次调用可以重试。
+   */
+  var _sdkLoadPromise = null;
+  function loadSupabaseSdk(url) {
+    if (global.supabase && typeof global.supabase.createClient === 'function') {
+      return Promise.resolve(global.supabase);
+    }
+    if (_sdkLoadPromise) return _sdkLoadPromise;
+
+    var src = String(url || '').trim();
+    if (!src) {
+      return Promise.reject(new Error('supabase-config.js 里没有可用的 sdkUrl'));
+    }
+
+    var TIMEOUT_MS = 20000;
+    _sdkLoadPromise = new Promise(function (resolve, reject) {
+      var script = document.createElement('script');
+      var timer = setTimeout(function () {
+        cleanup();
+        script.remove();
+        reject(new Error('SDK 加载超时'));
+      }, TIMEOUT_MS);
+      function cleanup() {
+        clearTimeout(timer);
+        script.onload = null;
+        script.onerror = null;
+      }
+      script.src = src;
+      script.onload = function () {
+        if (!global.supabase || typeof global.supabase.createClient !== 'function') {
+          cleanup();
+          reject(new Error('SDK 加载完成但全局对象缺失'));
+          return;
+        }
+        cleanup();
+        resolve(global.supabase);
+      };
+      script.onerror = function () {
+        cleanup();
+        script.remove();
+        reject(new Error('SDK 加载失败（CDN 不可达）'));
+      };
+      document.head.appendChild(script);
+    }).catch(function (error) {
+      // 失败后允许下次重试（例如网络恢复之后）
+      _sdkLoadPromise = null;
+      throw error;
+    });
+
+    return _sdkLoadPromise;
+  }
+
+  /**
    * 给 Promise 加超时。
    * 网络不通时 fetch 可能挂起很久，界面就会一直停在「注册中…」，
    * 用户看到的就是「点了没反应」。加超时才能给出明确的失败原因。
@@ -435,50 +496,67 @@
       this.ready = Promise.resolve(false);
       return this.ready;
     }
-    if (!global.supabase || typeof global.supabase.createClient !== 'function') {
-      this.sdkReady = false;
-      this.status = 'disabled';
-      this.statusDetail = 'Supabase SDK 未加载';
-      this.renderUi();
-      console.warn('[cloud-sync] 未检测到 supabase-js SDK，云同步停用。');
-      this.ready = Promise.resolve(false);
-      return this.ready;
-    }
-    this.sdkReady = true;
+    // ---- Supabase SDK 按需加载（原先在 index.html <head> 里同步预载，现在按需注入）----
+    // SDK 已在（例如旧缓存页面还带着 <script>）→ 直接进入初始化；
+    // 未在 → 按 supabase-config.js 的 sdkUrl 动态注入 <script>，加载完成后再建客户端；
+    // 加载失败（CDN 不可达 / 超时）→ 与原先 head 预载失败一样走「SDK 未加载，云同步停用」，
+    // 不影响本地模式使用。
+    var sdkStep = (global.supabase && typeof global.supabase.createClient === 'function')
+      ? Promise.resolve(true)
+      : loadSupabaseSdk(CONFIG.sdkUrl).then(
+          function () { return true; },
+          function (error) {
+            console.warn('[cloud-sync] 未检测到 supabase-js SDK，云同步停用。', error);
+            return false;
+          }
+        );
 
-    // 自动纠正「把 /rest/v1 一起复制进来」这类常见填错
-    var normalized = normalizeSupabaseUrl(CONFIG.url);
-    this.resolvedUrl = normalized.url;
-    if (normalized.corrected) {
-      console.warn(
-        '[cloud-sync] supabase-config.js 里的 url 带了多余的路径，已自动纠正。\n' +
-        '  你填的：' + normalized.original + '\n' +
-        '  实际用：' + normalized.url + '\n' +
-        '  createClient 需要的是项目根地址（形如 https://xxxx.supabase.co，不带 /rest/v1）。'
-      );
-      // 提示一次即可，避免每次刷新都弹
-      if (!this._urlNoticeShown) {
-        this._urlNoticeShown = true;
-        try {
-          this.app.showToast('配置里的 Supabase 地址带了多余路径，已自动纠正');
-        } catch (e) { /* 界面还没就绪时忽略 */ }
-      }
-    }
-
-    // 先按「已配置、未登录」渲染一次：这样登录入口立刻可见，
-    // 不会在 bootstrap 的这几十毫秒里显示成「未启用」而让人以为没生效
-    this.renderUi();
-
-    // 再读本机元数据（自动同步开关、上次同步时间等），然后建立客户端并恢复登录态。
-    // 这个 Promise 会在首次同步（或未登录判定）结束时落定，启动阶段据此决定
-    // 是否等云端进度回来后再渲染学习页。
-    this.ready = this.loadMeta()
-      .catch(function () {})
-      .then(this.bootstrap.bind(this))
-      .catch(function (error) {
-        console.error('[cloud-sync] 初始化失败:', error);
+    // ready 链整体挂在 SDK 就绪之后。attach 仍在同步返回前就把 this.ready 构造好，
+    // 启动阶段（app.init 里的 whenReady）看到的时序与原来完全一致
+    this.ready = sdkStep.then(function (ok) {
+      if (!ok) {
+        this.sdkReady = false;
+        this.status = 'disabled';
+        this.statusDetail = 'Supabase SDK 未加载';
+        this.renderUi();
         return false;
-      });
+      }
+      this.sdkReady = true;
+
+      // 自动纠正「把 /rest/v1 一起复制进来」这类常见填错
+      var normalized = normalizeSupabaseUrl(CONFIG.url);
+      this.resolvedUrl = normalized.url;
+      if (normalized.corrected) {
+        console.warn(
+          '[cloud-sync] supabase-config.js 里的 url 带了多余的路径，已自动纠正。\n' +
+          '  你填的：' + normalized.original + '\n' +
+          '  实际用：' + normalized.url + '\n' +
+          '  createClient 需要的是项目根地址（形如 https://xxxx.supabase.co，不带 /rest/v1）。'
+        );
+        // 提示一次即可，避免每次刷新都弹
+        if (!this._urlNoticeShown) {
+          this._urlNoticeShown = true;
+          try {
+            this.app.showToast('配置里的 Supabase 地址带了多余路径，已自动纠正');
+          } catch (e) { /* 界面还没就绪时忽略 */ }
+        }
+      }
+
+      // 先按「已配置、未登录」渲染一次：这样登录入口立刻可见，
+      // 不会在 bootstrap 的这几十毫秒里显示成「未启用」而让人以为没生效
+      this.renderUi();
+
+      // 再读本机元数据（自动同步开关、上次同步时间等），然后建立客户端并恢复登录态。
+      // 这个 Promise 会在首次同步（或未登录判定）结束时落定，启动阶段据此决定
+      // 是否等云端进度回来后再渲染学习页。
+      return this.loadMeta()
+        .catch(function () {})
+        .then(this.bootstrap.bind(this))
+        .catch(function (error) {
+          console.error('[cloud-sync] 初始化失败:', error);
+          return false;
+        });
+    }.bind(this));
     return this.ready;
   };
 

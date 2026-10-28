@@ -16,9 +16,11 @@
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="cloud-sync.css">
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <!-- Supabase JS SDK（云同步用）。若访问不畅，可换成 supabase-config.js 里注释的其它 CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- 性能：xlsx.full.min.js（约 900KB）与 supabase-js 已不在 <head> 同步加载——
+       两者都不在首屏关键路径上（xlsx 只在解析 dict.xlsx 时用，supabase 只在云同步时用），
+       同步加载会阻塞首屏渲染。现改为按需动态加载：
+         xlsx      → app.js 的 ensureXlsxLoaded()，解析词典前注入
+         supabase-js → cloud-sync.js 检测到已配置后注入（地址来自 supabase-config.js 的 sdkUrl） -->
   <link rel="icon" type="image/png" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>

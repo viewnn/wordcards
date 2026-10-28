@@ -673,12 +673,15 @@ class VocabApp {
   
   /** 词典导入或清空后同步词库分类勾选与列表 */
   async refreshLibraryFiltersAfterDictChange() {
-    await this.syncLibraryCategoryFilterToDictType();
-    await this.renderCategoryOptions();
-    await this.updateDictTypeSelectLabels();
+    // 三个子步骤（分类勾选同步 / 下拉选项渲染 / 顶部范围统计）各读全库一次，
+    // 几千条词条时是最重复的开销；读一次共用即可，结果与各自读取完全一致
+    const allWords = await this.db.getAllWords();
+    await this.syncLibraryCategoryFilterToDictType(allWords);
+    await this.renderCategoryOptions(allWords);
+    await this.updateDictTypeSelectLabels(allWords);
     if (this.currentPage === 'library') {
-      await this.renderLibrary();
       this._libraryNeedsRender = false;
+      await this.renderLibrary(allWords);
     } else {
       // 不在词库页：词典导入/清空改变了分类范围，标记下次进入时按新范围重新渲染
       this._libraryNeedsRender = true;
@@ -726,6 +729,63 @@ class VocabApp {
     );
   }
 
+  /**
+   * 按需加载 XLSX 解析库（xlsx.full.min.js，约 900KB），返回可用的 window.XLSX。
+   *
+   * 这份库只在「解析 dict.xlsx」时才用得上，且常规启动词典未变时根本不需要它，
+   * 因此已从 index.html 的 <head> 移除，改为第一次真正要解析时才注入 <script>：
+   *   - 页面首屏不再被这 900KB 的下载/解析阻塞；
+   *   - 词典未变的启动完全不加载它；
+   *   - 已加载过（或 script 仍在加载中）时复用同一次加载，不重复注入。
+   * 失败（CDN 不可达、超时）时给出中文提示并抛错，由调用方决定后续行为。
+   */
+  ensureXlsxLoaded() {
+    // 已就绪：直接返回（调用方随后使用 window.XLSX）
+    if (typeof window.XLSX !== 'undefined') return Promise.resolve(window.XLSX);
+    // 加载中：多个调用方共用同一个 Promise
+    if (this._xlsxLoadPromise) return this._xlsxLoadPromise;
+
+    const CDN_URL = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+    const TIMEOUT_MS = 20000;
+
+    this._xlsxLoadPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      const timer = setTimeout(() => {
+        cleanup();
+        script.remove();
+        reject(new Error('XLSX 加载超时'));
+      }, TIMEOUT_MS);
+      const cleanup = () => {
+        clearTimeout(timer);
+        script.onload = null;
+        script.onerror = null;
+      };
+      script.src = CDN_URL;
+      script.onload = () => {
+        if (typeof window.XLSX === 'undefined') {
+          cleanup();
+          reject(new Error('XLSX 加载完成但全局对象缺失'));
+          return;
+        }
+        cleanup();
+        resolve(window.XLSX);
+      };
+      script.onerror = () => {
+        cleanup();
+        script.remove();
+        reject(new Error('XLSX 加载失败'));
+      };
+      document.head.appendChild(script);
+    }).catch((error) => {
+      // 失败后清掉缓存，允许用户（网络恢复后）下一次重试
+      this._xlsxLoadPromise = null;
+      this.showToast('词典解析组件加载失败，请检查网络后重试');
+      throw error;
+    });
+
+    return this._xlsxLoadPromise;
+  }
+
   // 自动加载 dict.xlsx 文件
   // 字（word sheet）与短语（phrase sheet）始终全量导入并常驻词库，每个词条标注
   // dictScope（'word'|'phrase'），同一文本若同时出现在两个字库（如「一」「钱」），
@@ -739,6 +799,35 @@ class VocabApp {
         await this.refreshLibraryFiltersAfterDictChange();
         return;
       }
+
+      // ---- 词典指纹短路：文件没变就不必再走「下载 SDK → 解析 → 全库匹配」----
+      // dict.xlsx 约半 MB，每次启动都用 xlsx.full（900KB）解析并与全库逐条匹配，
+      // 是启动路径上最大的开销；而绝大多数启动词典根本没有变化。
+      // 这里用响应的「Last-Modified + Content-Length」作为指纹存进数据库：
+      //   - 指纹一致 → 本地词库已是这套词典导入后的结果，直接跳过整个流程；
+      //   - 指纹不一致（用户更新了词典）→ 走完整解析与合并，并把新指纹记下；
+      //   - 服务器不给这两个头 → 拿不到可靠指纹，退回原有全流程，行为不变。
+      // 附带的行为差异（偏保守、不丢数据）：应用内手动新增的词条在旧逻辑里
+      // 会被「以 dict.xlsx 为最终来源」的清理步骤删掉；指纹一致跳过时它们会被保留。
+      // 指纹存在本地 settings（每台设备/浏览器各自独立）：换设备、清站点数据后
+      // 指纹同样为空，仍会走完整导入，不受这里影响。
+      const tagStamp = [
+        response.headers.get('Last-Modified') || '',
+        response.headers.get('Content-Length') || ''
+      ].join('|');
+      const stampUsable = Boolean(response.headers.get('Last-Modified') || response.headers.get('Content-Length'));
+      if (stampUsable) {
+        const savedStamp = await this.db.getSetting('dictStamp', null);
+        if (savedStamp === tagStamp) {
+          console.log('dict.xlsx 未变化（指纹一致），跳过解析与合并');
+          return;
+        }
+      }
+
+      // 只有确定要解析词典时才加载 XLSX：
+      // 这份 900KB 的解析库已从 index.html 移除（改为按需加载），
+      // 词典未变的常规启动不再为它付出下载与解析时间
+      await this.ensureXlsxLoaded();
 
       const arrayBuffer = await response.arrayBuffer();
       const data = new Uint8Array(arrayBuffer);
@@ -963,6 +1052,12 @@ class VocabApp {
         const formatted = this.formatDictUpdateTime(now);
         await this.db.setSetting('dictUpdateTime', now.toISOString());
         this.displayDictUpdateTime(formatted);
+      }
+
+      // 全流程跑完且没有抛错：记下本次响应的指纹，
+      // 下次启动若指纹一致即可跳过「加载 XLSX → 解析 → 全库匹配」
+      if (stampUsable) {
+        await this.db.setSetting('dictStamp', tagStamp);
       }
 
       await this.refreshLibraryFiltersAfterDictChange();
@@ -2493,9 +2588,10 @@ class VocabApp {
     goalValue.textContent = String(this.settings.dailyGoal);
   }
 
-  /** 词典导入/范围切换后：分类下拉勾选当前展示分类下的全部真实分类（等同于「全部」） */
-  async syncLibraryCategoryFilterToDictType() {
-    const words = (await this.db.getAllWords()).filter((w) => this.isWordInActiveScope(w));
+  /** 词典导入/范围切换后：分类下拉勾选当前展示分类下的全部真实分类（等同于「全部」）
+   *  preloadedWords：调用方已读好的全量词条，传入可省一次重复读库 */
+  async syncLibraryCategoryFilterToDictType(preloadedWords = null) {
+    const words = (preloadedWords || await this.db.getAllWords()).filter((w) => this.isWordInActiveScope(w));
     const userCats = [...new Set(words.map((w) => w.category || '未分类'))];
     this.selectedCategories = [...userCats];
   }

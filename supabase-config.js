@@ -42,10 +42,11 @@ window.SUPABASE_CONFIG = {
   autoSync: true,
 
   /**
-   * Supabase JS SDK 的 CDN 地址（index.html 里也用同一个）。
-   * 如果 jsdelivr 访问不畅，可换成下面任意一个：
-   *   https://unpkg.com/@supabase/supabase-js@2
-   *   https://cdn.bootcdn.net/ajax/libs/supabase-js/2.45.4/supabase.min.js
-   */
+    * Supabase JS SDK 的 CDN 地址（cloud-sync.js 在确认已配置、需要启用云同步时
+    * 用它动态注入 <script>，不再由 index.html 预载，以免阻塞首屏加载）。
+    * 如果 jsdelivr 访问不畅，可换成下面任意一个：
+    *   https://unpkg.com/@supabase/supabase-js@2
+    *   https://cdn.bootcdn.net/ajax/libs/supabase-js/2.45.4/supabase.min.js
+    */
   sdkUrl: 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2'
 };
