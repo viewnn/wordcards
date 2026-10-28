@@ -1690,8 +1690,9 @@ class VocabApp {
    *   全部（5794） · 字（3828） · 短语（1966），当前词典范围高亮
    * 词库数据变化时（导入、删除、编辑、词典范围切换、进入词库页）调用。
    */
-  async updateDictTypeSelectLabels() {
-    const allWords = await this.db.getAllWords();
+  // preloadedWords：调用方（如 renderLibrary）已读好的全量词条，避免同一次渲染重复读全库
+  async updateDictTypeSelectLabels(preloadedWords = null) {
+    const allWords = preloadedWords || await this.db.getAllWords();
     let wordCount = 0, phraseCount = 0;
     for (const w of allWords) {
       if (w.dictScope === 'word') wordCount++;
@@ -2026,11 +2027,15 @@ class VocabApp {
     const searchInput = document.getElementById('searchInput');
     const searchClearBtn = document.getElementById('searchClearBtn');
     
+    // 搜索输入防抖（150ms）：词库列表动辄几千条，逐键全量重渲会连续阻塞主线程；
+    // 快速连续输入合并为停顿后的一次渲染，最终过滤结果与逐键渲染完全一致
+    let searchInputRenderTimer = null;
     searchInput.addEventListener('input', (e) => {
       this.searchQuery = e.target.value.toLowerCase();
       searchClearBtn.style.display = this.searchQuery ? 'flex' : 'none';
       this.resetPageNum();
-      this.renderLibrary();
+      clearTimeout(searchInputRenderTimer);
+      searchInputRenderTimer = setTimeout(() => this.renderLibrary(), 150);
     });
     
     searchClearBtn.addEventListener('click', () => {
@@ -2038,6 +2043,7 @@ class VocabApp {
       this.searchQuery = '';
       searchClearBtn.style.display = 'none';
       this.resetPageNum();
+      clearTimeout(searchInputRenderTimer);
       this.renderLibrary();
     });
     
@@ -2063,33 +2069,57 @@ class VocabApp {
     const categorySearchEmpty = document.getElementById('categorySearchEmpty');
     const categoryAllItem = categoryAll.closest('.dropdown-item');
 
+    // 性能：每次击键都「全量查 DOM + 每项再查一次 input + 分类名重复小写化」开销不小（500+ 项）。
+    // 这里把选项元素与预计算好的小写分类名缓存成数组；renderCategoryOptions 重建列表后会
+    // 置空 this._categoryFilterItems，下次过滤时自动重建
+    const ensureCategoryFilterCache = () => {
+      if (Array.isArray(this._categoryFilterItems)) return this._categoryFilterItems;
+      this._categoryFilterItems = Array.from(
+        document.querySelectorAll('#categoryOptions .dropdown-item'),
+        (item) => {
+          const cb = item.querySelector('input[data-category]');
+          return { item, nameLower: cb ? String(cb.dataset.category || '').toLowerCase() : '' };
+        }
+      );
+      return this._categoryFilterItems;
+    };
+
     const filterCategories = () => {
       const q = categorySearchInput.value.trim().toLowerCase();
-      const items = document.querySelectorAll('#categoryOptions .dropdown-item');
       let visible = 0;
-      items.forEach((item) => {
-        const cb = item.querySelector('input[data-category]');
-        const name = cb ? String(cb.dataset.category || '').toLowerCase() : '';
-        const show = q === '' || name.includes(q);
+      for (const { item, nameLower } of ensureCategoryFilterCache()) {
+        const show = q === '' || nameLower.includes(q);
         item.style.display = show ? '' : 'none';
         if (show) visible++;
-      });
+      }
       // 搜索时隐藏「全部分类」项（它不属于某个具体分类）
       if (categoryAllItem) categoryAllItem.style.display = q === '' ? '' : 'none';
       if (categorySearchEmpty) categorySearchEmpty.style.display = (q !== '' && visible === 0) ? '' : 'none';
     };
 
-    categorySearchInput.addEventListener('input', filterCategories);
+    // 同一帧内多次击键只过滤一次（rAF 合帧），避免连续 input 事件重复扫描全部选项
+    let categoryFilterScheduled = false;
+    const scheduleFilterCategories = () => {
+      if (categoryFilterScheduled) return;
+      categoryFilterScheduled = true;
+      requestAnimationFrame(() => {
+        categoryFilterScheduled = false;
+        filterCategories();
+      });
+    };
+
+    categorySearchInput.addEventListener('input', scheduleFilterCategories);
 
     dropdownTrigger.addEventListener('click', (e) => {
       e.stopPropagation();
       const willOpen = !dropdown.classList.contains('active');
       dropdown.classList.toggle('active');
       if (willOpen) {
-        // 每次展开都清空搜索并恢复全量选项，便于直接输入搜索
+        // 每次展开都清空搜索并恢复全量选项，便于直接输入搜索。
+        // 注意：这里不做自动 focus——手机端会立刻弹出软键盘、顶起下拉面板，影响体验；
+        // 键盘只在用户明确点击搜索框之后再弹出
         categorySearchInput.value = '';
         filterCategories();
-        categorySearchInput.focus();
       }
     });
     
@@ -2118,6 +2148,150 @@ class VocabApp {
         this.updateSelectedCategories();
       }
     });
+
+    // ---- 词库列表事件委托 ----
+    // 列表动辄几千条：原来每次渲染后对每条词条逐个 addEventListener
+    // （4 轮全量 querySelectorAll + 上万个监听器闭包）是词库页加载卡顿的主要来源。
+    // 现在只在容器上绑一个监听器，按 closest 分发到各交互元素，
+    // 处理逻辑与原来逐条绑定的版本完全一致（各分支保留 stopPropagation，
+    // 事件不会像以前一样继续冒泡到 document，行为不变）
+    const libraryWords = document.getElementById('libraryWords');
+    if (libraryWords) {
+      libraryWords.addEventListener('click', async (e) => {
+        // 「➔收藏」标签：点一下即把该单词加入收藏，收藏列表按收藏时间倒序
+        const favSwitch = e.target.closest('.favorite-switch');
+        if (favSwitch) {
+          e.stopPropagation();
+          const id = parseInt(favSwitch.dataset.id, 10);
+          const word = await this.toggleFavorite(id);
+          if (word) {
+            // 收藏 tab 的成员变了：把它从“学过一遍”集合里移除，收藏 tab 重新变为没学完
+            this.markScopePassPending(word, ['favorite']);
+            // 学习范围正好是「收藏」时，刚收藏的词要立刻进入学习队列（不能继续停在“已学完”）
+            if (this.normalizeStudyScope(this.settings.studyScope) === 'favorite') {
+              await this.refreshScopedStudySessionAfterExternalChange(word, word.favorite);
+            } else {
+              await this.saveScopePass();
+            }
+          }
+          await this.renderLibrary();
+          return;
+        }
+
+        // 状态转换标签事件（只处理带 data-status 的标签，避免误伤「➔收藏」）
+        const statusSwitch = e.target.closest('.status-switch[data-status]');
+        if (statusSwitch) {
+          e.stopPropagation();
+          const id = parseInt(statusSwitch.dataset.id);
+          const newStatus = statusSwitch.dataset.status;
+
+          // 按主键直读该词条（原来读全库再 find，几千条词条时明显更慢）
+          const word = await this.db.getWord(id);
+          if (word) {
+            // 记下改动前是否属于当前学习范围：状态标签变化可能让词条进入/离开该范围
+            const studyScope = this.normalizeStudyScope(this.settings.studyScope);
+            const scopedStudy = this.isScopedStudyRange(studyScope);
+            const wasInStudyScope = scopedStudy && this.isWordInStudyScope(word, studyScope);
+
+            word.status = newStatus;
+            word.lastStudied = this.nowMs();
+            await this.db.updateWord(word);
+            // 同一个词的多条词条（同音同字的义项）状态保持一致，云端那一行才代表完整记录
+            await this.applyStatusToWordGroup(word, newStatus, word.lastStudied);
+
+            // 更新学习页面的状态数据
+            if (this.todayWords && this.todayWords.length > 0) {
+              const todayWordIndex = this.todayWords.findIndex(w => w.id === id);
+              if (todayWordIndex !== -1) {
+                this.todayWords[todayWordIndex].status = newStatus;
+
+                // 统计不在此处按 delta 增减：词条状态已变更，统一交给下方
+                // refreshStatusCounts() 依据最终状态整体重算，避免来回切换状态时数字虚增
+
+                // 更新学习会话快照（以便切换回学习页面时能看到更新后的数据）
+                if (this._learnSessionSnapshot) {
+                  const snapWordIndex = this._learnSessionSnapshot.todayWords.findIndex(w => w.id === id);
+                  if (snapWordIndex !== -1) {
+                    this._learnSessionSnapshot.todayWords[snapWordIndex].status = newStatus;
+                    this._learnSessionSnapshot.todayStats = { ...this.todayStats };
+                  }
+                }
+
+                // 如果当前在学习页面，更新UI
+                if (this.currentPage === 'learn') {
+                  this.updateProgress();
+                }
+              }
+            }
+
+            // 刷新累计统计缓存（词库内状态切换后，确保学习页累计数字一致）
+            await this.refreshStatusCounts();
+            if (this.currentPage === 'learn') {
+              this.updateProgress();
+            }
+
+            // 状态标签变化后，该词条进入了另一个 tab。把它从新 tab 的
+            // “学过一遍”集合里移除：对那个 tab 来说它是新增的，不能算已学完。
+            if (newStatus === 'new' || newStatus === 'review' || newStatus === 'mastered') {
+              this.markScopePassPending(word, [newStatus]);
+            }
+
+            // 状态标签变化让词条进入/离开当前学习范围时，学习页的红字提示与队列
+            // 必须跟着更新：例如「待复习」已显示学完，在词库把一条新词改成待复习后，
+            // 再回学习页应当直接看到这张卡，而不是继续显示「已学完【待复习】」。
+            const nowInStudyScope = scopedStudy && this.isWordInStudyScope(word, studyScope);
+            if (scopedStudy && wasInStudyScope !== nowInStudyScope) {
+              await this.refreshScopedStudySessionAfterExternalChange(word, nowInStudyScope);
+            } else {
+              await this.saveScopePass();
+            }
+
+            this.renderLibrary();
+            // this.showToast(newStatus === 'mastered' ? '已标记为掌握' : '已标记为待复习'); // 请勿删除该注释
+          }
+          return;
+        }
+
+        // 取消收藏按钮事件
+        const unfavoriteBtn = e.target.closest('.unfavorite-btn');
+        if (unfavoriteBtn) {
+          e.stopPropagation();
+          const id = parseInt(unfavoriteBtn.dataset.id);
+          const word = await this.toggleFavorite(id);
+          if (word) {
+            // 取消收藏后它已经不在收藏 tab；同时清掉旧完成标记，下次重新收藏会算新增
+            this.markScopePassPending(word, ['favorite']);
+            // 学习范围是「收藏」时，取消收藏意味着该词离开范围，队列与提示要同步更新
+            if (this.normalizeStudyScope(this.settings.studyScope) === 'favorite') {
+              await this.refreshScopedStudySessionAfterExternalChange(word, word.favorite);
+            } else {
+              await this.saveScopePass();
+            }
+          }
+          this.renderLibrary();
+          return;
+        }
+
+        // 「查看」小眼睛按钮
+        const viewBtnTrigger = e.target.closest('.view-btn');
+        if (viewBtnTrigger) {
+          e.stopPropagation();
+          this.viewWord(parseInt(viewBtnTrigger.dataset.id));
+          return;
+        }
+
+        // 卡片点击事件 - 显示详情弹窗
+        // 如果点击的是按钮或标签等可交互元素，则不触发卡片点击
+        // （这些元素在前面的分支已各自处理并 return，这里再判一次 closest 与原实现一致）
+        const wordItem = e.target.closest('.word-item');
+        if (wordItem) {
+          if (e.target.closest('.word-action-btn') || e.target.closest('.status-switch') || e.target.closest('.unfavorite-btn')) {
+            return;
+          }
+          this.viewWord(parseInt(wordItem.dataset.id));
+        }
+      });
+    }
   }
   
   // 更新选中的分类
@@ -2139,9 +2313,11 @@ class VocabApp {
   updateCategoryFilterIndicator() {
     const target = document.getElementById('categoryDropdown');
     if (!target) return;
-    const total = document.querySelectorAll('#categoryOptions input[type="checkbox"]').length;
-    const checked = document.querySelectorAll('#categoryOptions input[type="checkbox"]:checked').length;
-    const hasFilter = total > 0 && checked < total;
+    // 一次查询同时数出总数与勾选数（原来两次全量 querySelectorAll）
+    const boxes = document.querySelectorAll('#categoryOptions input[type="checkbox"]');
+    let checked = 0;
+    boxes.forEach((box) => { if (box.checked) checked++; });
+    const hasFilter = boxes.length > 0 && checked < boxes.length;
     target.classList.toggle('has-filter', hasFilter);
   }
 
@@ -2161,8 +2337,10 @@ class VocabApp {
    * 数量用与 renderLibrary 完全相同的筛选条件（applyLibraryFilters）现算，
    * 因此「标签上的数字」永远等于「列表里的条目数」，切换选项卡/开关今日筛选、
    * 切换词典范围或分类勾选后都会同步。
+   *
+   * preloadedWords：renderLibrary 已读过全库时直接传入复用，省掉一次重复的全库读取与过滤。
    */
-  async updateCategoryLabel() {
+  async updateCategoryLabel(preloadedWords = null) {
     const label = document.getElementById('categoryLabel');
     if (!label) return;
 
@@ -2180,18 +2358,19 @@ class VocabApp {
     const known = typeof this._libraryTabCount === 'number' ? this._libraryTabCount : null;
     label.textContent = known === null ? name : `${name}（${known}）`;
 
-    const allWords = await this.db.getAllWords();
+    const allWords = preloadedWords || await this.db.getAllWords();
     const fresh = this.applyLibraryFilters(allWords).length;
     this._libraryTabCount = fresh;
     label.textContent = `${name}（${fresh}）`;
   }
   
   // 渲染分类选项（仅当前展示分类内的词条；词典短语/字不设单独勾选项）
-  async renderCategoryOptions() {
+  // preloadedWords：调用方已读好的全量词条，可省掉一次重复的全库读取
+  async renderCategoryOptions(preloadedWords = null) {
     // 进入词库页时先清掉上一次的计数，避免下拉按钮短暂显示过期数字；
     // 真正的数量由随后的 renderLibrary / updateCategoryLabel 现算并写入
     this._libraryTabCount = null;
-    const words = (await this.db.getAllWords()).filter((w) => this.isWordInActiveScope(w));
+    const words = (preloadedWords || await this.db.getAllWords()).filter((w) => this.isWordInActiveScope(w));
 
     // 统计每个分类在当前词典范围内的词条数。
     // 之前这个数字显示在词库列表每个分类的小标题上（aa (12)），
@@ -2209,31 +2388,39 @@ class VocabApp {
       allLabel.textContent = `全部分类 (${categories.length})`;
     }
 
+    // 勾选状态在生成 HTML 时直接写好：
+    // 原实现先生成未勾选列表，再用两轮全量 querySelectorAll 回填勾选并统计全选框，
+    // 500+ 项时这几轮 DOM 查询与遍历是下拉渲染变慢的主要原因
+    const hasSelection = Array.isArray(this.selectedCategories) && this.selectedCategories.length > 0;
+    const selection = hasSelection ? new Set(this.selectedCategories) : null;
+    let checkedCount = 0;
     container.innerHTML = categories
       .map(
-        (cat) => `
+        (cat) => {
+          const on = selection ? selection.has(cat) : true;
+          if (on) checkedCount++;
+          return `
       <label class="dropdown-item">
-        <input type="checkbox" data-category="${this.escapeHtml(cat)}">
+        <input type="checkbox" data-category="${this.escapeHtml(cat)}"${on ? ' checked' : ''}>
         <span>${this.escapeHtml(cat)}（${countByCategory.get(cat) || 0}）</span>
       </label>
-    `
+    `;
+        }
       )
       .join('');
 
-    if (this.selectedCategories && this.selectedCategories.length > 0) {
-      document.querySelectorAll('#categoryOptions input[type="checkbox"]').forEach((cb) => {
-        cb.checked = this.selectedCategories.includes(cb.dataset.category);
-      });
-      const allChecked = document.querySelectorAll('#categoryOptions input[type="checkbox"]:checked').length;
-      const allTotal = document.querySelectorAll('#categoryOptions input[type="checkbox"]').length;
-      document.getElementById('category-all').checked = allChecked === allTotal && allTotal > 0;
+    const allTotal = categories.length;
+    if (selection) {
+      // 显式筛选：全选框是否勾选取决于「是否全部命中」（与原回填+统计的判定一致）
+      document.getElementById('category-all').checked = checkedCount === allTotal && allTotal > 0;
     } else {
-      document.querySelectorAll('#categoryOptions input[type="checkbox"]').forEach((cb) => {
-        cb.checked = true;
-      });
-      document.getElementById('category-all').checked = categories.length > 0;
+      // 没有筛选：全部勾选，并补全 selectedCategories（与原回填逻辑一致）
+      document.getElementById('category-all').checked = allTotal > 0;
       this.selectedCategories = [...categories];
     }
+
+    // 选项列表已重建：下拉搜索过滤器缓存的元素引用全部作废，置空待下次重建
+    this._categoryFilterItems = null;
 
     // 默认文字跟随当前词典范围（全部/字/短语）
     this.updateCategoryLabel();
@@ -3145,8 +3332,18 @@ class VocabApp {
       // 普通切页回来时保持词库页原有筛选条件与列表，不刷新、不重置分类勾选
       if (this._libraryNeedsRender) {
         this._libraryNeedsRender = false;
-        this.renderCategoryOptions();
-        this.renderLibrary();
+        // 分类下拉与列表共用一次全量读库：几千条词条的 IndexedDB 反序列化
+        // 是进词库页最大的开销，避免两个渲染各自重复读一遍
+        this.db.getAllWords()
+          .then((allWords) => {
+            this.renderCategoryOptions(allWords);
+            this.renderLibrary(allWords);
+          })
+          .catch((error) => {
+            console.error('[library] 共享读库渲染失败，退回各自渲染:', error);
+            this.renderCategoryOptions();
+            this.renderLibrary();
+          });
       }
     } else if (page === 'practice') {
       // 队列重建/渲染是异步的，这里兜住异常，避免个别失败变成未捕获的 Promise 异常
@@ -5627,9 +5824,14 @@ class VocabApp {
     });
   }
 
-  async renderLibrary() {
+  // preloadedWords：调用方已读好的全量词条；一次渲染原来要读 3 次全库
+  //（本函数 + updateDictTypeSelectLabels + updateCategoryLabel），几千条的
+  // IndexedDB 反序列化正是进词库页最大的开销，这里改为共用同一份
+  async renderLibrary(preloadedWords = null) {
+    const sourceWords = preloadedWords || await this.db.getAllWords();
+
     // 先刷新顶部范围统计行（数量可能因词典范围切换/词条状态变更而变）
-    await this.updateDictTypeSelectLabels();
+    await this.updateDictTypeSelectLabels(sourceWords);
 
     // 更新筛选按钮状态
     document.querySelectorAll('.filter-tab').forEach(tab => {
@@ -5637,12 +5839,11 @@ class VocabApp {
     });
 
     // 当前选项卡下的词条（范围/状态/今日/分类/搜索条件完全一致 → 列表条数即标签数字）
-    const allWords = await this.db.getAllWords();
-    const words = this.applyLibraryFilters(allWords);
+    const words = this.applyLibraryFilters(sourceWords);
 
     // 分类下拉按钮上显示当前选项卡的词条数量，如「字（27）」
     this._libraryTabCount = words.length;
-    this.updateCategoryLabel();
+    this.updateCategoryLabel(sourceWords);
 
     const container = document.getElementById('libraryWords');
     
@@ -5726,147 +5927,14 @@ class VocabApp {
     `;
     
     container.innerHTML = html;
-
-    container.querySelectorAll('.view-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const id = parseInt(btn.dataset.id);
-        this.viewWord(id);
-      });
-    });
-
-    // 卡片点击事件 - 显示详情弹窗
-    container.querySelectorAll('.word-item').forEach(item => {
-      item.style.cursor = 'pointer';
-      item.addEventListener('click', (e) => {
-        // 如果点击的是按钮或标签等可交互元素，则不触发卡片点击
-        if (e.target.closest('.word-action-btn') || e.target.closest('.status-switch') || e.target.closest('.unfavorite-btn')) {
-          return;
-        }
-        const id = parseInt(item.dataset.id);
-        this.viewWord(id);
-      });
-    });
-
-    // 「➔收藏」标签：点一下即把该单词加入收藏，收藏列表按收藏时间倒序
-    container.querySelectorAll('.favorite-switch').forEach(span => {
-      span.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const id = parseInt(span.dataset.id, 10);
-        const word = await this.toggleFavorite(id);
-        if (word) {
-          // 收藏 tab 的成员变了：把它从“学过一遍”集合里移除，收藏 tab 重新变为没学完
-          this.markScopePassPending(word, ['favorite']);
-          // 学习范围正好是「收藏」时，刚收藏的词要立刻进入学习队列（不能继续停在“已学完”）
-          if (this.normalizeStudyScope(this.settings.studyScope) === 'favorite') {
-            await this.refreshScopedStudySessionAfterExternalChange(word, word.favorite);
-          } else {
-            await this.saveScopePass();
-          }
-        }
-        await this.renderLibrary();
-      });
-    });
-
-    // 状态转换标签事件（只绑定带 data-status 的标签，避免误伤「➔收藏」）
-    container.querySelectorAll('.status-switch[data-status]').forEach(span => {
-      span.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const id = parseInt(span.dataset.id);
-        const newStatus = span.dataset.status;
-        
-        const words = await this.db.getAllWords();
-        const word = words.find(w => w.id === id);
-        if (word) {
-          // 记下改动前是否属于当前学习范围：状态标签变化可能让词条进入/离开该范围
-          const studyScope = this.normalizeStudyScope(this.settings.studyScope);
-          const scopedStudy = this.isScopedStudyRange(studyScope);
-          const wasInStudyScope = scopedStudy && this.isWordInStudyScope(word, studyScope);
-
-          word.status = newStatus;
-          word.lastStudied = this.nowMs();
-          await this.db.updateWord(word);
-          // 同一个词的多条词条（同音同字的义项）状态保持一致，云端那一行才代表完整记录
-          await this.applyStatusToWordGroup(word, newStatus, word.lastStudied);
-          
-          // 更新学习页面的状态数据
-          if (this.todayWords && this.todayWords.length > 0) {
-            const todayWordIndex = this.todayWords.findIndex(w => w.id === id);
-            if (todayWordIndex !== -1) {
-              this.todayWords[todayWordIndex].status = newStatus;
-              
-              // 统计不在此处按 delta 增减：词条状态已变更，统一交给下方
-              // refreshStatusCounts() 依据最终状态整体重算，避免来回切换状态时数字虚增
-              
-              // 更新学习会话快照（以便切换回学习页面时能看到更新后的数据）
-              if (this._learnSessionSnapshot) {
-                const snapWordIndex = this._learnSessionSnapshot.todayWords.findIndex(w => w.id === id);
-                if (snapWordIndex !== -1) {
-                  this._learnSessionSnapshot.todayWords[snapWordIndex].status = newStatus;
-                  this._learnSessionSnapshot.todayStats = { ...this.todayStats };
-                }
-              }
-              
-              // 如果当前在学习页面，更新UI
-              if (this.currentPage === 'learn') {
-                this.updateProgress();
-              }
-            }
-          }
-
-          // 刷新累计统计缓存（词库内状态切换后，确保学习页累计数字一致）
-          await this.refreshStatusCounts();
-          if (this.currentPage === 'learn') {
-            this.updateProgress();
-          }
-
-          // 状态标签变化后，该词条进入了另一个 tab。把它从新 tab 的
-          // “学过一遍”集合里移除：对那个 tab 来说它是新增的，不能算已学完。
-          if (newStatus === 'new' || newStatus === 'review' || newStatus === 'mastered') {
-            this.markScopePassPending(word, [newStatus]);
-          }
-
-          // 状态标签变化让词条进入/离开当前学习范围时，学习页的红字提示与队列
-          // 必须跟着更新：例如「待复习」已显示学完，在词库把一条新词改成待复习后，
-          // 再回学习页应当直接看到这张卡，而不是继续显示「已学完【待复习】」。
-          const nowInStudyScope = scopedStudy && this.isWordInStudyScope(word, studyScope);
-          if (scopedStudy && wasInStudyScope !== nowInStudyScope) {
-            await this.refreshScopedStudySessionAfterExternalChange(word, nowInStudyScope);
-          } else {
-            await this.saveScopePass();
-          }
-
-          this.renderLibrary();
-          // this.showToast(newStatus === 'mastered' ? '已标记为掌握' : '已标记为待复习'); // 请勿删除该注释
-        }
-      });
-    });
-
-    // 取消收藏按钮事件
-    container.querySelectorAll('.unfavorite-btn').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const id = parseInt(btn.dataset.id);
-        const word = await this.toggleFavorite(id);
-        if (word) {
-          // 取消收藏后它已经不在收藏 tab；同时清掉旧完成标记，下次重新收藏会算新增
-          this.markScopePassPending(word, ['favorite']);
-          // 学习范围是「收藏」时，取消收藏意味着该词离开范围，队列与提示要同步更新
-          if (this.normalizeStudyScope(this.settings.studyScope) === 'favorite') {
-            await this.refreshScopedStudySessionAfterExternalChange(word, word.favorite);
-          } else {
-            await this.saveScopePass();
-          }
-        }
-        this.renderLibrary();
-      });
-    });
+    // 注：列表的点击交互（查看弹窗 / 收藏 / 状态切换）已改为容器级事件委托，
+    // 见 bindLibraryEvents 里的「词库列表事件委托」；不再对几千个词条逐个 addEventListener
   }
 
   /** 打开弹窗查看指定词条（只读模式：禁用输入框、隐藏保存按钮） */
   async viewWord(id) {
-    const words = await this.db.getAllWords();
-    const word = words.find(w => w.id === id);
+    // 按主键直读（原来读全库再 find，词库几千条时打开弹窗明显更慢）
+    const word = await this.db.getWord(id);
     if (!word) return;
 
     document.getElementById('wordId').value = word.id;
@@ -6085,8 +6153,17 @@ class VocabApp {
 
       this.closeModals();
       if (this.currentPage === 'library') {
-        this.renderLibrary();
-        this.renderCategoryOptions();
+        // 保存词条后词库页两个全量渲染共用一次读库（与进入词库页的处理一致）
+        this.db.getAllWords()
+          .then((allWords) => {
+            this.renderLibrary(allWords);
+            this.renderCategoryOptions(allWords);
+          })
+          .catch((error) => {
+            console.error('[library] 保存后刷新词库失败:', error);
+            this.renderLibrary();
+            this.renderCategoryOptions();
+          });
       }
       if (this.currentPage === 'learn') {
         this.prepareLearnSession();
