@@ -1500,9 +1500,9 @@ body.learn-landscape #learnPage .action-btn.skip span {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 16px;
+  padding: 10px 16px;
   background: var(--bg-primary);
-  border: 2px solid transparent;
+  border: 1px solid transparent;
   border-radius: var(--radius-md);
   font-size: var(--font-size-md);
   color: var(--text-secondary);
@@ -1529,12 +1529,10 @@ body.learn-landscape #learnPage .action-btn.skip span {
   border-color: var(--primary);
 }
 
-/* 下拉内已有筛选条件（未全选分类）时：收起状态也保持蓝色描边，
-   便于一眼看出「有条件已被筛选」 */
+/* 下拉内已有筛选条件（未全选分类）时：收起状态也保持蓝色描边，便于一眼看出「有条件已被筛选」 */
 .category-dropdown.has-filter .dropdown-trigger {
-  border: 2px solid var(--primary);
+  border: 1px solid var(--primary);
   box-shadow: var(--edge-light), var(--shadow-sm);
-  
 }
 
 .category-dropdown.active .dropdown-trigger svg {
