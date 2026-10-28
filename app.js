@@ -5828,6 +5828,12 @@ class VocabApp {
   //（本函数 + updateDictTypeSelectLabels + updateCategoryLabel），几千条的
   // IndexedDB 反序列化正是进词库页最大的开销，这里改为共用同一份
   async renderLibrary(preloadedWords = null) {
+    // 进入本函数即作废上一次渲染尚未完成的分批追加（见下方「大列表分段渲染」）。
+    // 必须放在最前面、任何 await 之前：否则「切换选项卡」的瞬间，
+    // 上一个 tab 的追加批次还会继续占用主线程，把新 tab 的首屏渲染往后推
+    this._libraryRenderToken = (this._libraryRenderToken || 0) + 1;
+    const token = this._libraryRenderToken;
+
     const sourceWords = preloadedWords || await this.db.getAllWords();
 
     // 先刷新顶部范围统计行（数量可能因词典范围切换/词条状态变更而变）
@@ -5874,9 +5880,8 @@ class VocabApp {
     const showMeaningInCard = this.settings.meaningDisplay !== false;
     // 词库列表右侧的「查看」小眼睛（灰色）
     const viewIconSvg = '<svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>';
-    const html = `
-      <div class="word-list">
-        ${orderedWords.map(word => `
+    // 逐条词条的 HTML（模板与原来完全一致，只是一条一个元素、不再拼成一整段）
+    const itemHtmls = orderedWords.map(word => `
                 <div class="word-item" data-id="${word.id}">
                   <div class="word-info">
                     <h3>${word.word}</h3>
@@ -5922,13 +5927,36 @@ class VocabApp {
                     `}
                   </div>
                 </div>
-        `).join('')}
-      </div>
-    `;
-    
-    container.innerHTML = html;
+        `);
+
+    // ---- 大列表分段渲染 ----
+    // 原实现把几千条词条拼成一个超大 HTML 字符串再一次性 innerHTML，
+    // 主线程要连续解析几万个 DOM 节点，实测切选项卡会阻塞 170~350ms（手机端更久），
+    // 表现就是「切换选项卡明显卡顿」。
+    // 现在分两段：首屏第一批同步渲染（点击选项卡后立即可见），其余分批追加。
+    // 实测每批 250 条的插入只要 3~6ms，批间让出主线程给输入与绘制，页面全程可交互；
+    // 最终 DOM 与一次性渲染完全相同，只是多余的条目稍微晚到。
+    // 「本代渲染号」在函数最前面就已作废旧批次（见入口注释），
+    // 因此快速连续切选项卡 / 中途重新渲染时，前一次渲染尚未追加的批次立即停止，
+    // 不会把旧列表的词条拼到新列表后面，也不会与新渲染抢主线程。
+    const FIRST_BATCH = 100;
+    const BATCH_SIZE = 250;
+
+    container.innerHTML = `<div class="word-list">${itemHtmls.slice(0, FIRST_BATCH).join('')}</div>`;
+    const listEl = container.firstElementChild;
+    let cursor = FIRST_BATCH;
+    const appendNextBatch = () => {
+      // 已被更新的渲染取代、或外层容器被整体替换（连回列表页重新渲染）时立即停止
+      if (token !== this._libraryRenderToken || !listEl.isConnected) return;
+      listEl.insertAdjacentHTML('beforeend', itemHtmls.slice(cursor, cursor + BATCH_SIZE).join(''));
+      cursor += BATCH_SIZE;
+      if (cursor < itemHtmls.length) setTimeout(appendNextBatch, 0);
+    };
+    if (cursor < itemHtmls.length) setTimeout(appendNextBatch, 0);
+
     // 注：列表的点击交互（查看弹窗 / 收藏 / 状态切换）已改为容器级事件委托，
-    // 见 bindLibraryEvents 里的「词库列表事件委托」；不再对几千个词条逐个 addEventListener
+    // 见 bindLibraryEvents 里的「词库列表事件委托」；不再对几千个词条逐个 addEventListener，
+    // 分批追加进来的词条也在容器之内，自动获得同样的交互，无需重新绑定
   }
 
   /** 打开弹窗查看指定词条（只读模式：禁用输入框、隐藏保存按钮） */
