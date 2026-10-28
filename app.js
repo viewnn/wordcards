@@ -5713,7 +5713,7 @@ class VocabApp {
                         <span class="status-switch to-review" data-id="${word.id}" data-status="review">➔陌生</span>
                       ` : ''}
                       ${word.status === 'new' ? `
-                        <span class="status-switch to-mastered" data-id="${word.id}" data-status="mastered">➔已掌握</span>
+                        <span class="status-switch to-mastered" data-id="${word.id}" data-status="mastered">➔掌握</span>
                       ` : ''}
                       <button type="button" class="word-action-btn library-view-btn view-btn" data-id="${word.id}" title="查看" aria-label="查看单词">
                         ${viewIconSvg}
