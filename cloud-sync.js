@@ -112,8 +112,9 @@
     'cardDefinitionFirst',
     'categoryDisplay',
     'meaningDisplay',
-    // 练习页的范围与调值开关：两端不一致时进度条的分母、题目难度都不同，
-    // 用户会以为是「练习数据没同步」，所以一起同步
+    // 练习页的范围与调值开关：范围决定练习的数量与进度条口径、调值决定题目难度。
+    // practiceScope 独立于 dictImportType（只作用于练习页），两端不一致时用户会
+    // 以为是「练习数据没同步」，所以一起同步
     'practiceScope',
     'practiceToneMode',
     // 练习页的练习进度（按 字/短语 记录的已完成词条标识）：云端按并集合并，见 applyRemoteSettings
@@ -252,10 +253,13 @@
       .toLowerCase();
   }
 
-  /** 词条的词典归属：word（字）/ phrase（短语）；旧数据未标注时按「字」兜底 */
+  /** 词条的词典归属：word（字）/ phrase（短语）/ eng5k（英语词）；旧数据未标注时按「字」兜底。
+   *  必须与 app.js 的 normalizeDictScope / practiceScopeKeyOf 口径完全一致：
+   *  dict_key 的首段就是它，两边不一致会导致同一词条两端生成不同 key、永远对不上。 */
   function scopeOf(word) {
     if (!word) return 'word';
     if (word.dictScope === 'phrase') return 'phrase';
+    if (word.dictScope === 'eng5k') return 'eng5k';
     if (word.dictScope === 'word') return 'word';
     // 与 app.js 的兜底口径保持一致：未标注的旧词条按「字」处理
     return 'word';
@@ -275,7 +279,9 @@
    */
   function mergePracticeProgress(local, remote) {
     var out = {};
-    var keys = ['word', 'phrase'];
+    // 与 app.js 的 DICT_SCOPES 对应：按 字 / 短语 / Eng5k 分别取并集
+    // （旧版云端数据没有 eng5k 键时按空列表处理，不影响前两组）
+    var keys = ['word', 'phrase', 'eng5k'];
     for (var i = 0; i < keys.length; i++) {
       var key = keys[i];
       var seen = new Set();
@@ -321,7 +327,8 @@
   function parseDictKey(key) {
     var parts = String(key || '').split(SEP);
     if (parts.length < 2) return null;
-    var scope = parts[0] === 'phrase' ? 'phrase' : 'word';
+    // 首段是词典范围：与 scopeOf 的取值保持一致（word/phrase/eng5k），其余按「字」兜底
+    var scope = parts[0] === 'phrase' || parts[0] === 'eng5k' ? parts[0] : 'word';
     return { scope: scope, text: parts[1] };
   }
 
@@ -1144,19 +1151,27 @@
 
   /**
    * 【钩子 3】用户点了设置页的「清除」（app.js 的 clearProgress 末尾）。
-   * scopeKeys：本次清除的词典范围，['word'] / ['phrase'] / ['word','phrase']。
+   * scopeKeys：本次清除的词典范围，如 ['word'] / ['phrase'] / ['eng5k'] / 多个范围。
    *
    * 旧实现是广播一个只增不减的全局重置时间戳（user_state.progress_reset_at），
    * 其它设备收到后会把**所有**范围的记录一起清零；而「清除」现在是按词典范围
    * 生效的，所以改为让这批刚被重置为 new 的词条走普通上行同步：
-   * 云端按 dict_key 逐条覆盖成 new，字/短语各自独立，也不需要改数据库结构。
+   * 云端按 dict_key 逐条覆盖成 new，字/短语/Eng5k 各自独立，也不需要改数据库结构。
    */
   CloudSyncEngine.prototype.onProgressCleared = async function (scopeKeys) {
     if (!this.isActive()) return;
 
-    var labels = { word: '字', phrase: '短语' };
+    var engine = this;
+    var labels = { word: '字', phrase: '短语', eng5k: 'Eng5k' };
+    // 范围名跟随词典 sheet 名（与设置页下拉一致）；app 未就绪/无该方法时用上面的通用名兜底
+    var labelOf = function (key) {
+      if (engine.app && typeof engine.app.dictScopeLabelOf === 'function') {
+        return engine.app.dictScopeLabelOf(key);
+      }
+      return labels[key] || '当前范围';
+    };
     var scopeLabel = Array.isArray(scopeKeys) && scopeKeys.length === 1
-      ? labels[scopeKeys[0]] || '当前范围'
+      ? labelOf(scopeKeys[0])
       : '全部';
 
     try {
@@ -1585,6 +1600,7 @@
 
     var applied = 0;
     var rangeChanged = false;
+    var practiceScopeChanged = false;
     var goalChanged = false;
     var studyScopeChanged = false;
     this._suppress = true;
@@ -1609,6 +1625,7 @@
         if (this.app.settings[key] === settings[key]) continue;
         this.app.settings[key] = settings[key];
         if (key === 'dictImportType') rangeChanged = true;
+        if (key === 'practiceScope') practiceScopeChanged = true;
         if (key === 'dailyGoal') goalChanged = true;
         if (key === 'studyScope') studyScopeChanged = true;
         await this.app.db.setSetting(key, settings[key]);
@@ -1628,7 +1645,8 @@
       }
 
       // 云端改过「词典导入」范围或「每日目标」：本地学习队列必须按新设置重建，
-      // 否则学习页会继续展示旧范围（如「字」）的卡片，或停在旧目标的进度的完成页上
+      // 否则学习页会继续展示旧范围（如「字」）的卡片，或停在旧目标的进度的完成页上。
+      // （练习页不在此列：它按自己的 practiceScope 抽题，与词典导入互不联动）
       if (rangeChanged || goalChanged || studyScopeChanged) {
         try {
           this.app._learnSessionSnapshot = null;
@@ -1652,6 +1670,17 @@
           if (this.app.currentPage === 'library') await this.app.renderLibrary();
         } catch (error) {
           console.warn('[cloud-sync] 应用云端设置后重建学习队列失败:', error);
+        }
+      }
+
+      // 云端改过练习范围（practiceScope，独立于词典导入）：练习队列按新范围重建，
+      // 单词数量与进度条分母随之变化（下次进入练习页时重算，见 app.js 的 preparePracticePool）
+      if (practiceScopeChanged) {
+        this.app._practicePoolKey = null;
+        this.app.practiceWords = [];
+        this.app._practiceScopeTotal = 0;
+        if (typeof this.app.refreshPracticeProgressUI === 'function') {
+          this.app.refreshPracticeProgressUI();
         }
       }
 

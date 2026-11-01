@@ -23,10 +23,10 @@
  *               词典范围等
  *
  * 关键概念：
- *   - dictScope：词条的词典归属，'word'=字、'phrase'=短语。两类词条始终
- *     全量常驻词库；settings.dictImportType（all/word/phrase）只决定
+ *   - dictScope：词条的词典归属，'word'=字、'phrase'=短语、'eng5k'=英语5000词。
+ *     各类词条始终全量常驻词库；settings.dictImportType（all/word/phrase/eng5k）只决定
  *     “当前学哪一类、展示哪一类、统计算哪一类”，切换范围不会删词或清记录。
- *   - 学习统计：内部按 字/短语 分别计数（_scopeToday 今日、_scopeTotal 累计），
+ *   - 学习统计：内部按 字/短语/Eng5k 分别计数（_scopeToday 今日、_scopeTotal 累计），
  *     再按当前展示范围汇总成 todayStats / totalStats 供界面显示；
  *     每天首次打开时会把昨日“今日计数”并入“累计计数”。
  *   - 学习进度：今日队列 todayWords + 当前卡片下标 currentCardIndex。
@@ -129,6 +129,28 @@ const STUDY_SCOPE_LABELS = {
   mastered: '已掌握',
   favorite: '收藏'
 };
+
+// ==================== 词典范围（设置页 → 词典管理 → 词典导入） ====================
+/**
+ * 词典范围：词条的词典归属（dictScope），与 dict.xlsx 里的 sheet 一一对应：
+ *   word   字（sheet「Can字」等不含 短/phrase/eng 的表）
+ *   phrase 短语（sheet 名含「短」或 phrase，如「Can短语」）
+ *   eng5k  英语 5000 词（sheet 名以 eng/英语 开头，如「Eng5k」）
+ * 三类词条始终全量常驻词库并各自保留学习记录；
+ * settings.dictImportType（all/word/phrase/eng5k）只决定当前学习/展示/统计的范围。
+ */
+const DICT_SCOPES = ['word', 'phrase', 'eng5k'];
+/** 词典范围对应的中文名（设置页下拉、词库页范围统计行、清除确认弹窗共用） */
+const DICT_SCOPE_LABELS = {
+  word: '字',
+  phrase: '短语',
+  eng5k: 'Eng5k'
+};
+/** 把任意值规范成合法的词典范围；非法/旧数据按「字」处理（与旧版兜底口径一致） */
+function normalizeDictScope(value) {
+  const v = String(value == null ? '' : value).trim();
+  return DICT_SCOPES.includes(v) ? v : 'word';
+}
 
 // ==================== IndexedDB 数据库操作（数据层） ====================
 /**
@@ -490,24 +512,27 @@ class VocabApp {
       phoneticDelay: 2,
       /** 单词重复出现频率（天），0表示每日目标内不重复 */
       repeatFrequency: 2,
-      /** 词典导入范围：all / phrase / word，与设置页下拉同步 */
+      /** 词典导入范围：all / word / phrase / eng5k，与设置页下拉同步；
+       *  同时决定学习页与练习页的范围（练习的单词数量与进度都跟随它） */
       dictImportType: 'all',
       /** 学习范围：all / new / review / mastered / favorite（决定学习页卡片抽词范围） */
       studyScope: 'all',
       categoryDisplay: true,          // 卡片上方是否显示分类徽标（默认开启；loadSettings 会从库中读取用户选择）
       /** 词库列表卡片中，单词下方是否显示释义（默认开启；只影响词库卡片，查看单词弹窗不受影响） */
       meaningDisplay: true,
-      /** 练习页：练习范围 all / phrase / word（独立于学习页的「词典导入」） */
+      /** 练习页：练习范围 all / word / phrase / eng5k。
+       *  独立于学习页的「词典导入」（dictImportType）：只决定练习页抽词、
+       *  单词数量与进度条分母，两边互不联动 */
       practiceScope: 'all',
-      /** 练习页：输入模式 with 含调值 / without 不含调值 */
+      /** 练习页：输入模式 with 含调值 / without 不含调值（调值只对粤拼音标有意义） */
       practiceToneMode: 'with',
       /**
-       * 练习进度：按「字 / 短语」分别记录已经答对过的词条标识（进度条口径）。
+       * 练习进度：按「字 / 短语 / Eng5k」分别记录已经答对过的词条标识（进度条口径）。
        * 标识用 practiceDictKey()（分类|词汇|音标）而不是词条 id：id 是 IndexedDB 自增主键，
        * 换设备后会错位，同步过去会贴到别的词条上。
        * 与学习记录完全无关（练习不改 status/收藏），但会随云同步在多设备间合并。
        */
-      practiceProgress: { word: [], phrase: [] }
+      practiceProgress: { word: [], phrase: [], eng5k: [] }
     };
     this.todayStats = {               // 今日统计（按当前展示范围汇总后的镜像值）
       mastered: 0,                    //   今日“已掌握”次数
@@ -520,6 +545,13 @@ class VocabApp {
     };
     this.searchQuery = '';            // 词库页搜索框内容（已转小写）
     this.filterStatus = 'all';        // 词库页状态筛选：all/new/review/mastered/favorite
+    /**
+     * 词典范围 → dict.xlsx 里实际 sheet 名的映射（如 { word:'Can字', phrase:'Can短语', eng5k:'Eng5k' }）。
+     * 从词典文件解析时记下、存在本地（不上云）；
+     * 设置页「词典导入」下拉选项与词库顶部统计行的显示文字都以它为准，
+     * 这样更改 sheet 名后界面文字自动跟随。未导入/缺失时退回 DICT_SCOPE_LABELS 的通用名。
+     */
+    this._dictSheetNames = null;
     /**
      * 词库页是否只显示“今天学过的那些”词条。
      * 仅当用户从学习卡上方的「今日已掌握 / 今日待复习」点进来时为 true，
@@ -574,8 +606,8 @@ class VocabApp {
     this._practiceSolved = false;
     /** 答对那一刻输入框里的内容（锁定期间用来还原被误敲的字符） */
     this._practiceSolvedValue = '';
-    /** 练习进度索引 { word:Set, phrase:Set }，与 settings.practiceProgress 保持同步，便于 O(1) 查询 */
-    this._practiceDone = { word: new Set(), phrase: new Set() };
+    /** 练习进度索引 { word:Set, phrase:Set, eng5k:Set }，与 settings.practiceProgress 保持同步，便于 O(1) 查询 */
+    this._practiceDone = { word: new Set(), phrase: new Set(), eng5k: new Set() };
     /**
      * 「dict_key → 同一个词的全部词条」索引（refreshStatusCounts 时重建）。
      * 用于让同音同字的多条词条（义项）学习状态保持一致 —— 云端一行 dict_key 代表整组。
@@ -614,6 +646,9 @@ class VocabApp {
       if (dictTypeSelectInit) {
         dictTypeSelectInit.value = this.settings.dictImportType || 'word';
       }
+      // 「词典导入」下拉的选项文字按上次解析词典记下的 sheet 名显示（如 Can字 / Can短语 / Eng5k）；
+      // 词典未变的常规启动走指纹短路、不重新解析，映射从库里读（loadSettings）后在此处应用
+      this.applyDictScopeLabelsToUI();
       this.initServiceWorker();
       this.bindEvents();
       this.initKeyboardViewport();
@@ -621,6 +656,9 @@ class VocabApp {
       // 先导入词典（字+短语全量常驻并标注分类），再加载按分类归档的统计，
       // 保证首次升级时迁移能按现有词条分类拆分历史累计记录
       await this.autoLoadDict();
+      // 词典里的 sheet 可能有增删：若当前「词典导入 / 练习范围」选中的范围
+      // 在词典里已没有对应 sheet（如删掉了 Eng5k），自动切回「全部」
+      await this.reconcileScopeSelectionsWithDict();
       // 给旧数据里的收藏补上「收藏时间」—— 没有它收藏列表只能退化成按学习时间排，
       // 看起来就是「顺序乱的」，而用户期望的是最近收藏的排在最上面
       await this.backfillFavoriteAt();
@@ -688,10 +726,13 @@ class VocabApp {
     }
   }
 
-  /** 依据 sheet 名判断词条分类（对应设置页的 短语/字） */
+  /** 依据 sheet 名判断词条分类：短/phrase → 短语；eng/英语 → Eng5k；其余（如 Can字）→ 字 */
   sheetDictScope(sheetName) {
     const n = String(sheetName || '').toLowerCase();
-    return /phrase|短/.test(n) ? 'phrase' : 'word';
+    if (/phrase|短/.test(n)) return 'phrase';
+    // Eng5k 之类的英语词表：sheet 名以 eng 或 英语 开头（如「Eng5k」「英语5000」）
+    if (/^(eng|英语)/.test(n)) return 'eng5k';
+    return 'word';
   }
 
   /**
@@ -712,7 +753,9 @@ class VocabApp {
     return score;
   }
 
-  /** 同分类内的两个词条内容列是否一致（一致则无需重写） */
+  /** 同分类内的两个词条内容列是否一致（一致则无需重写）。
+   *  typeLabel 也参与比较：新增「类型」列的词典更新后，已在库里的旧词条
+   *  会因此被判为不一致、走一次重写把 typeLabel 补写进去（学习记录原样保留） */
   _sameScopeContentEqual(row, existing) {
     const eq = (a, b) => String(a ?? '').trim() === String(b ?? '').trim();
     const rowMeaning = String(row.meaning ?? row.definition ?? '').trim();
@@ -720,6 +763,7 @@ class VocabApp {
     return (
       eq(rowMeaning, oldMeaning) &&
       eq(row.category, existing.category) &&
+      eq(row.typeLabel, existing.typeLabel) &&
       eq(row.phonetic, existing.phonetic) &&
       eq(row.example, existing.example) &&
       eq(row.language, existing.language) &&
@@ -787,9 +831,10 @@ class VocabApp {
   }
 
   // 自动加载 dict.xlsx 文件
-  // 字（word sheet）与短语（phrase sheet）始终全量导入并常驻词库，每个词条标注
-  // dictScope（'word'|'phrase'），同一文本若同时出现在两个字库（如「一」「钱」），
-  // 会保留两条各自独立的记录，绝不跨分类覆盖。
+  // 字（word sheet，如「Can字」）、短语（phrase sheet，如「Can短语」）与
+  // 英语词（eng5k sheet，如「Eng5k」）始终全量导入并常驻词库，每个词条标注
+  // dictScope（'word'|'phrase'|'eng5k'），同一文本若同时出现在多个字库（如「一」「钱」），
+  // 会保留多条各自独立的记录，绝不跨分类覆盖。
   // settings.dictImportType 只决定当前“学习/展示/统计”使用哪个分类。
   async autoLoadDict() {
     try {
@@ -804,8 +849,9 @@ class VocabApp {
       // dict.xlsx 约半 MB，每次启动都用 xlsx.full（900KB）解析并与全库逐条匹配，
       // 是启动路径上最大的开销；而绝大多数启动词典根本没有变化。
       // 这里用响应的「Last-Modified + Content-Length」作为指纹存进数据库：
-      //   - 指纹一致 → 本地词库已是这套词典导入后的结果，直接跳过整个流程；
-      //   - 指纹不一致（用户更新了词典）→ 走完整解析与合并，并把新指纹记下；
+      //   - 指纹一致（且 sheet 名映射已登记齐全，见下方 sheetNamesKnown）→ 本地词库
+      //     已是这套词典导入后的结果，直接跳过整个流程；
+      //   - 指纹不一致（用户更新了词典）或映射缺失（升级后首次启动）→ 走完整解析与合并，并把新指纹记下；
       //   - 服务器不给这两个头 → 拿不到可靠指纹，退回原有全流程，行为不变。
       // 附带的行为差异（偏保守、不丢数据）：应用内手动新增的词条在旧逻辑里
       // 会被「以 dict.xlsx 为最终来源」的清理步骤删掉；指纹一致跳过时它们会被保留。
@@ -816,7 +862,17 @@ class VocabApp {
         response.headers.get('Content-Length') || ''
       ].join('|');
       const stampUsable = Boolean(response.headers.get('Last-Modified') || response.headers.get('Content-Length'));
-      if (stampUsable) {
+      // 「词典范围 → sheet 名」映射是否已登记齐全（每个范围都有键，没有 sheet 的范围值为 null）。
+      // 只有指纹一致且映射齐全才跳过；升级到「标签跟随 sheet 名」版本后的第一次启动
+      // 映射还是空的，会补一次完整解析把 sheet 名登记下来，之后恢复跳过
+      const sheetNamesKnown = !!this._dictSheetNames &&
+        DICT_SCOPES.every((s) => Object.prototype.hasOwnProperty.call(this._dictSheetNames, s));
+      // 词条的「类型」字段（typeLabel）是否已随词典导入写进库里。
+      // 升级到「卡片标签显示类型」版本后，库里的旧词条还没有该字段，需要补一次
+      // 完整解析重写（_sameScopeContentEqual 会发现差异并把 typeLabel 补上），
+      // 之后此标记为 true，恢复指纹短路的快速启动
+      const typeLabelKnown = Boolean(await this.db.getSetting('dictTypeLabelImported', false));
+      if (stampUsable && sheetNamesKnown && typeLabelKnown) {
         const savedStamp = await this.db.getSetting('dictStamp', null);
         if (savedStamp === tagStamp) {
           console.log('dict.xlsx 未变化（指纹一致），跳过解析与合并');
@@ -837,17 +893,32 @@ class VocabApp {
       const dictType = this.settings.dictImportType || dictTypeSelect?.value || 'all';
       if (dictTypeSelect) dictTypeSelect.value = dictType;
 
-      // 遍历全部 sheet 导入（按 sheet 归属标注 字/短语 分类）
+      // 遍历全部 sheet 导入（按 sheet 归属标注 字/短语/Eng5k 分类）。
+      // 顺手记下「词典范围 → sheet 名」映射：设置页下拉选项与词库顶部统计行
+      // 的显示文字以此为准，保证界面文字与 dict.xlsx 的 sheet 名一致；
+      // 同一范围有多个 sheet 时取工作簿顺序里的第一个。
+      // 每个范围都先落一个 null 键（词典里没有该范围的 sheet 时保持 null）：
+      // 上面的指纹短路据此判断「映射已登记齐全」，不会因为缺某个范围而反复全量解析
+      const sheetNamesByScope = { word: null, phrase: null, eng5k: null };
       let allWords = [];
       for (const sheetName of workbook.SheetNames) {
         const worksheet = workbook.Sheets[sheetName];
         if (!worksheet) continue;
         const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-        const words = this.parseExcel(jsonData, this.sheetDictScope(sheetName));
+        const scope = this.sheetDictScope(sheetName);
+        if (!sheetNamesByScope[scope]) sheetNamesByScope[scope] = sheetName;
+        const words = this.parseExcel(jsonData, scope);
         if (Array.isArray(words) && words.length > 0) {
           allWords = allWords.concat(words);
         }
       }
+
+      // sheet 名映射落库（存在本地，不参与云同步），并同步到设置页下拉的选项文字。
+      // 紧随其后的统计/渲染都会经 dictScopeLabelOf() 取到新文字，
+      // 词库顶部统计行也会在导入完成后的刷新流程里按 sheet 名显示
+      this._dictSheetNames = sheetNamesByScope;
+      await this.db.setSetting('dictSheetNames', sheetNamesByScope);
+      this.applyDictScopeLabelsToUI();
 
       // 源词典同一 sheet 内可能存在完全重复的行，按“分类+内容签名”去重，避免词库出现重复词条
       if (allWords.length > 1) {
@@ -881,11 +952,12 @@ class VocabApp {
       // 因此只按文本建立分组，再按“内容吻合度”把词典行对应到它原本的那条记录上；
       // 未标注分类的旧词条单独收集，稍后同样按内容吻合度认领到它原本所属的分类。
       const existingWords = await this.db.getAllWords();
-      const scopedByText = { word: new Map(), phrase: new Map() };
+      // 按词典范围（字/短语/Eng5k）分别建索引，与 DICT_SCOPES 一一对应
+      const scopedByText = { word: new Map(), phrase: new Map(), eng5k: new Map() };
       const untaggedByText = new Map();
       for (const e of existingWords) {
         const t = String(e.word || '').toLowerCase();
-        if (e.dictScope === 'word' || e.dictScope === 'phrase') {
+        if (DICT_SCOPES.includes(e.dictScope)) {
           if (!scopedByText[e.dictScope].has(t)) scopedByText[e.dictScope].set(t, []);
           scopedByText[e.dictScope].get(t).push(e);
         } else {
@@ -930,12 +1002,13 @@ class VocabApp {
       // 每个“分类+文本”在词典文件中的行数（用于修复此前被整行覆盖的脏数据）
       const fileCountByKey = new Map();
       for (const w of allWords) {
-        const key = (w.dictScope === 'phrase' ? 'phrase' : 'word') + '|' + String(w.word || '').toLowerCase();
+        const key = normalizeDictScope(w.dictScope) + '|' + String(w.word || '').toLowerCase();
         fileCountByKey.set(key, (fileCountByKey.get(key) || 0) + 1);
       }
       for (const w of allWords) {
         const t = String(w.word || '').toLowerCase();
-        const scope = w.dictScope === 'phrase' ? 'phrase' : 'word';
+        // sheet 归属范围（parseExcel 已按 sheetDictScope 标注；异常值按「字」兼容旧数据）
+        const scope = normalizeDictScope(w.dictScope);
         const arr = scopedByText[scope];
         let list = arr.get(t);
         if (!list) {
@@ -1055,10 +1128,13 @@ class VocabApp {
       }
 
       // 全流程跑完且没有抛错：记下本次响应的指纹，
-      // 下次启动若指纹一致即可跳过「加载 XLSX → 解析 → 全库匹配」
+      // 下次启动若指纹一致即可跳过「加载 XLSX → 解析 → 全库匹配」。
+      // 同时记下「类型字段已导入」：所有词条本轮已带上 typeLabel（新增的写入、
+      // 旧的按 _sameScopeContentEqual 差异重写补齐），之后指纹一致即可安心跳过
       if (stampUsable) {
         await this.db.setSetting('dictStamp', tagStamp);
       }
+      await this.db.setSetting('dictTypeLabelImported', true);
 
       await this.refreshLibraryFiltersAfterDictChange();
 
@@ -1312,10 +1388,17 @@ class VocabApp {
     this.settings.phoneticDelay = await this.db.getSetting('phoneticDelay', 2);
     this.settings.repeatFrequency = await this.db.getSetting('repeatFrequency', 2);
     this.settings.dictImportType = await this.db.getSetting('dictImportType', 'all');
+    // 「词典范围 → sheet 名」映射：上一次解析 dict.xlsx 时记下（见 autoLoadDict），
+    // 设置页下拉与词库顶部统计行的显示文字跟随词典文件的 sheet 名
+    this._dictSheetNames = await this.db.getSetting('dictSheetNames', null);
+    // 练习范围独立于词典导入（旧值只可能是 all/word/phrase，eng5k 为后来新增的合法值）
+    const savedPracticeScope = await this.db.getSetting('practiceScope', 'all');
+    this.settings.practiceScope = savedPracticeScope === 'all' || DICT_SCOPES.includes(savedPracticeScope)
+      ? savedPracticeScope
+      : 'all';
     this.settings.studyScope = this.normalizeStudyScope(await this.db.getSetting('studyScope', 'all'));
-    this.settings.practiceScope = await this.db.getSetting('practiceScope', 'all');
     this.settings.practiceToneMode = await this.db.getSetting('practiceToneMode', 'with');
-    this.settings.practiceProgress = await this.db.getSetting('practiceProgress', { word: [], phrase: [] });
+    this.settings.practiceProgress = await this.db.getSetting('practiceProgress', { word: [], phrase: [], eng5k: [] });
     // 各学习范围「已经学过一遍」的词条集合（dict_key），用于判断 tab 是否学完
     await this.loadScopePass();
     // 进度索引（Set）由持久化的列表重建
@@ -1329,12 +1412,14 @@ class VocabApp {
   // 学习记录按词条分类（word=字 / phrase=短语）分开统计：
   //   scopeToday = 今天学习且当前状态为 mastered/review 的词条数
   //   scopeTotal = 当前词库中所有 mastered/review 的词条数
-  // 展示时：全部 = 字 + 短语之和；字/短语 = 各自分类。
+  // 展示时：全部 = 字 + 短语 + Eng5k 之和；字/短语/Eng5k = 各自分类。
 
   _emptyScopeStats() {
+    // 与 DICT_SCOPES 对应：word 字 / phrase 短语 / eng5k 英语5000词
     return {
       word: { mastered: 0, review: 0 },
-      phrase: { mastered: 0, review: 0 }
+      phrase: { mastered: 0, review: 0 },
+      eng5k: { mastered: 0, review: 0 }
     };
   }
 
@@ -1472,19 +1557,23 @@ class VocabApp {
     await this.saveScopePass();
   }
 
-  /** 当前设置（全部/字/短语）对应的分类键列表；全部 = 字+短语 */
+  /** 当前设置（全部/字/短语/Eng5k）对应的分类键列表；
+   *  全部 = 词典里仍存在的范围之和（删掉了 Eng5k sheet 后，全部就只是 字+短语） */
   activeScopeKeys() {
     const t = this.settings.dictImportType || 'all';
     if (t === 'phrase') return ['phrase'];
     if (t === 'word') return ['word'];
-    return ['word', 'phrase'];
+    if (t === 'eng5k') return ['eng5k'];
+    return DICT_SCOPES.filter((s) => this.dictScopeAvailable(s));
   }
 
   /** 词条归属的分类键；旧数据/示例词未标注时按当前展示范围兜底 */
   scopeKeyOfWord(w) {
-    if (w && (w.dictScope === 'word' || w.dictScope === 'phrase')) return w.dictScope;
+    if (w && DICT_SCOPES.includes(w.dictScope)) return w.dictScope;
     const t = this.settings.dictImportType || 'all';
-    return t === 'phrase' ? 'phrase' : 'word';
+    if (t === 'phrase') return 'phrase';
+    if (t === 'eng5k') return 'eng5k';
+    return 'word';
   }
 
   /** 词条是否属于当前学习/展示范围（字+短语词条常驻词库，仅按分类展示与学习） */
@@ -1667,16 +1756,16 @@ class VocabApp {
     const today = this.todayKey();
     const savedDate = await this.db.getSetting('statsDate', '');
 
-    // 确保计数结构完整：{ word:{mastered,review}, phrase:{mastered,review} }
+    // 确保计数结构完整：{ word:{mastered,review}, phrase:{mastered,review}, eng5k:{mastered,review} }
+    // （旧版库里的统计数据没有 eng5k 键，这里统一补齐，避免后面按范围求和时读到 undefined）
+    const pickScope = (obj, key) => ({
+      mastered: Number(obj && obj[key] && obj[key].mastered) || 0,
+      review: Number(obj && obj[key] && obj[key].review) || 0
+    });
     const ensureShape = (obj) => ({
-      word: {
-        mastered: Number(obj && obj.word && obj.word.mastered) || 0,
-        review: Number(obj && obj.word && obj.word.review) || 0
-      },
-      phrase: {
-        mastered: Number(obj && obj.phrase && obj.phrase.mastered) || 0,
-        review: Number(obj && obj.phrase && obj.phrase.review) || 0
-      }
+      word: pickScope(obj, 'word'),
+      phrase: pickScope(obj, 'phrase'),
+      eng5k: pickScope(obj, 'eng5k')
     });
 
     let scopeToday = await this.db.getSetting('scopeToday', null);
@@ -1734,7 +1823,8 @@ class VocabApp {
       scopeTotal = ensureShape(scopeTotal);
       if (savedDate !== today) {
         // 新的一天：把昨日各类别的今日统计并入该类别的累计
-        for (const key of ['word', 'phrase']) {
+        // （遍历全部词典范围，新加入 的 eng5k 分类同样要跨天结转）
+        for (const key of DICT_SCOPES) {
           scopeTotal[key].mastered += scopeToday[key].mastered;
           scopeTotal[key].review += scopeToday[key].review;
         }
@@ -1760,7 +1850,7 @@ class VocabApp {
     await this.db.setSetting('scopeTotal', this._scopeTotal);
   }
 
-  /** 把按分类的计数映射为当前展示范围（全部=字+短语合计）的今日/累计统计 */
+  /** 把按分类的计数映射为当前展示范围（全部 = 字+短语+Eng5k 合计）的今日/累计统计 */
   syncActiveStatsMirrors() {
     const keys = this.activeScopeKeys();
     let todayMastered = 0;
@@ -1768,10 +1858,13 @@ class VocabApp {
     let totalMastered = 0;
     let totalReview = 0;
     for (const key of keys) {
-      todayMastered += this._scopeToday[key].mastered;
-      todayReview += this._scopeToday[key].review;
-      totalMastered += this._scopeTotal[key].mastered;
-      totalReview += this._scopeTotal[key].review;
+      // 旧版统计数据没有 eng5k 键时补 0，避免求和读到 undefined
+      const t = this._scopeToday[key] || { mastered: 0, review: 0 };
+      const g = this._scopeTotal[key] || { mastered: 0, review: 0 };
+      todayMastered += t.mastered || 0;
+      todayReview += t.review || 0;
+      totalMastered += g.mastered || 0;
+      totalReview += g.review || 0;
     }
     this.todayStats.mastered = todayMastered;
     this.todayStats.review = todayReview;
@@ -1788,31 +1881,41 @@ class VocabApp {
   // preloadedWords：调用方（如 renderLibrary）已读好的全量词条，避免同一次渲染重复读全库
   async updateDictTypeSelectLabels(preloadedWords = null) {
     const allWords = preloadedWords || await this.db.getAllWords();
-    let wordCount = 0, phraseCount = 0;
+    const counts = { word: 0, phrase: 0, eng5k: 0 };
     for (const w of allWords) {
-      if (w.dictScope === 'word') wordCount++;
-      else if (w.dictScope === 'phrase') phraseCount++;
+      if (DICT_SCOPES.includes(w.dictScope)) counts[w.dictScope]++;
       else if (!w.dictScope) {
         // 兜底：没有 dictScope 的旧词条粗略归类
         const t = String(w.word || '').trim();
-        if (/^[\u4e00-\u9fa5]$/.test(t)) wordCount++;
-        else phraseCount++;
+        if (/^[\u4e00-\u9fa5]$/.test(t)) counts.word++;
+        else counts.phrase++;
       }
     }
     const totalCount = allWords.length;
 
-    const labels = { all: '全部', word: '字', phrase: '短语' };
-    const counts = { all: totalCount, word: wordCount, phrase: phraseCount };
+    // 「全部」的数量只累加词典里仍存在的范围：删掉范围后即便有极少量
+    // 词条残留（清理时序），顶部「全部」也不会把它算进去，与标签列表口径一致
+    const visibleScopes = DICT_SCOPES.filter((s) => this.dictScopeAvailable(s));
+    const visibleTotal = visibleScopes.reduce((n, s) => n + counts[s], 0);
+
+    // 各范围显示文字跟随 dict.xlsx 的 sheet 名（如 Can字 / Can短语 / Eng5k），
+    // 与设置页「词典导入」下拉选项保持同一份来源（dictScopeLabelOf）
+    const labels = { all: '全部' };
+    for (const s of DICT_SCOPES) labels[s] = this.dictScopeLabelOf(s);
+    const shown = { all: visibleTotal, ...counts };
     const current = this.settings.dictImportType || 'all';
 
-    // 只更新词库页顶部统计行（设置页下拉框保持原样：全部/短语/字）
+    // 更新词库页顶部统计行：全部 · Can字 · Can短语（当前词典范围高亮）。
+    // 只显示词典里仍存在对应 sheet 的范围：删掉 Eng5k sheet 后该标签不再出现，
+    // 「全部」的数量也不把它算进去（词条本身会随词典同步被清理，这里按可用范围兜底）。
+    // 设置页下拉框的选项文案与隐藏见 applyDictScopeLabelsToUI
     const scopeCountsEl = document.getElementById('dictScopeCounts');
     if (scopeCountsEl) {
-      const items = ['all', 'word', 'phrase'].map((key) => {
+      const items = ['all', ...visibleScopes].map((key) => {
         const cls = key === current ? 'scope-active' : '';
-        return `<span class="${cls}">${labels[key]}（${counts[key]}）</span>`;
+        return `<span class="${cls}">${labels[key]}(${shown[key]})</span>`;
       });
-      scopeCountsEl.innerHTML = items.join('<span class="scope-sep">·</span>');
+      scopeCountsEl.innerHTML = items.join('<span class="scope-sep">|</span>');
     }
   }
 
@@ -1839,11 +1942,11 @@ class VocabApp {
       const today = this._emptyScopeStats();
       const total = this._emptyScopeStats();
 
-      // 本次只重算「当前词典范围」覆盖的分类，另一个分类沿用已有计数。
-      // 否则每次学习/清除都会把另一个范围（当前是「字」时的「短语」）的统计一起抹成 0，
-      // 而「按范围清除」的要求正是另一个范围完全不受影响。
+      // 本次只重算「当前词典范围」覆盖的分类，其它分类沿用已有计数。
+      // 否则每次学习/清除都会把另一个范围（当前是「字」时的「短语/Eng5k」）的统计
+      // 一起抹成 0，而「按范围清除」的要求正是其它范围完全不受影响。
       const activeKeys = this.activeScopeKeys();
-      for (const key of ['word', 'phrase']) {
+      for (const key of DICT_SCOPES) {
         if (activeKeys.includes(key)) continue;
         today[key] = { ...this._scopeToday[key] };
         total[key] = { ...this._scopeTotal[key] };
@@ -1902,10 +2005,11 @@ class VocabApp {
 
   /**
    * 清空今日与累计统计（设置页「清除」时调用）。
-   * keys 省略 = 两个分类都清；传入 ['word'] / ['phrase'] 时只清对应分类的计数，
-   * 这样按词典范围清除时，另一个范围（例如当前是「字」时的「短语」）的数字原样保留。
+   * keys 省略 = 所有词典范围都清；传入 ['word'] / ['phrase'] / ['eng5k'] 时只清
+   * 对应分类的计数，这样按词典范围清除时，其它范围（例如当前是「字」时的
+   * 「短语/Eng5k」）的数字原样保留。
    */
-  async resetScopeStats(keys = ['word', 'phrase']) {
+  async resetScopeStats(keys = DICT_SCOPES) {
     for (const key of keys) {
       if (!this._scopeToday[key] || !this._scopeTotal[key]) continue;
       this._scopeToday[key] = { mastered: 0, review: 0 };
@@ -2416,12 +2520,168 @@ class VocabApp {
     target.classList.toggle('has-filter', hasFilter);
   }
 
-  /** 设置页「词典导入」对应的展示文字：全部 / 字 / 短语 */
+  /**
+   * 某个词典范围的显示文字：优先用 dict.xlsx 里的实际 sheet 名（如「Can字」「Can短语」「Eng5k」），
+   * 让设置页下拉选项、词库顶部统计行、清除确认弹窗的文案与词典文件保持一致；
+   * 词典未导入过或映射缺失时，退回 DICT_SCOPE_LABELS 的通用名（字/短语/Eng5k）。
+   */
+  dictScopeLabelOf(scope) {
+    const stored = this._dictSheetNames && this._dictSheetNames[scope];
+    if (typeof stored === 'string' && stored.trim()) return stored.trim();
+    return DICT_SCOPE_LABELS[scope] || String(scope);
+  }
+
+  /**
+   * 某个词典范围在当前 dict.xlsx 里是否真实存在（有没有对应的 sheet）。
+   * 解析词典时每个范围都登记过映射：有 sheet 的值为 sheet 名、没有的为 null
+   * （见 autoLoadDict 的 sheetNamesByScope）。
+   * 词典未导入过（映射还是 null）时按「可用」处理——此时无从判断，
+   * 保持默认的完整选项，不会把 never-imported 场景误判成已删除。
+   * 用途：下拉里隐藏没有对应 sheet 的范围（如删掉 Eng5k sheet 后不再显示该选项）、
+   * 词库顶部统计行不显示对应标签、「全部」口径只汇总仍存在的范围。
+   */
+  dictScopeAvailable(scope) {
+    const names = this._dictSheetNames;
+    if (!names) return true;
+    return typeof names[scope] === 'string' && names[scope].trim() !== '';
+  }
+
+  /**
+   * 把「词典范围 → sheet 名」的显示文字应用到设置页两个「词典导入」下拉的选项上
+   * （学习设置区的 #dictTypeSelect 与练习设置区的 #practiceScopeSelect），
+   * 并隐藏词典里已没有对应 sheet 的范围（如删掉 Eng5k sheet 后不再显示「Eng5k」）。
+   * 词库顶部的统计行不走这里，它在 updateDictTypeSelectLabels 里现算。
+   */
+  applyDictScopeLabelsToUI() {
+    for (const id of ['dictTypeSelect', 'practiceScopeSelect']) {
+      const select = document.getElementById(id);
+      if (!select) continue;
+      for (const scope of DICT_SCOPES) {
+        const opt = select.querySelector(`option[value="${scope}"]`);
+        if (!opt) continue;
+        opt.textContent = this.dictScopeLabelOf(scope);
+        // 词典里没有该范围的 sheet：整个选项隐藏（原生 option 的 hidden 即 display:none）
+        opt.hidden = !this.dictScopeAvailable(scope);
+      }
+    }
+  }
+
+  /**
+   * 词典 sheet 增删后，把仍然选在「已不存在的范围」上的设置拨回「全部」。
+   *
+   * 触发场景：词典导入或指纹跳转读完（init 里、autoLoadDict 之后）调用一次。
+   * 例如当前「词典导入」「练习范围」都选着 Eng5k，随后用户从 dict.xlsx 里删掉了
+   * Eng5k sheet —— 该范围的词条已被词典同步清理，选中值若不变，学习页/练习页
+   * 会一直停在空范围上，且下拉里那个选项已被隐藏，用户连改的入口都找不到。
+   *
+   * 只改内存值、落库并镜像到下拉显示，不在这里重建学习队列：
+   * 本方法运行在 init 的 render() 之前，render 里的 prepareLearnSession
+   * 会用回退后的新范围一次性建队（autoLoadDict 里连调两次会把恢复的进度清零，
+   * 见那里的详细说明）。
+   */
+  async reconcileScopeSelectionsWithDict() {
+    // 从未解析过词典（映射为 null）时无从判断，保持现状
+    if (!this._dictSheetNames) return;
+    const gone = DICT_SCOPES.filter((s) => !this.dictScopeAvailable(s));
+    if (gone.length === 0) return;
+
+    // 词典导入：选中范围已不存在 → 回到「全部」
+    if (gone.includes(this.settings.dictImportType)) {
+      const oldLabel = this.dictScopeLabelOf(this.settings.dictImportType);
+      this.settings.dictImportType = 'all';
+      await this.db.setSetting('dictImportType', 'all');
+      // 旧范围的会话快照已无对应词条，一并丢掉；队列由随后的 render 重建
+      this._learnSessionSnapshot = null;
+      this.todayWords = [];
+      this.currentCardIndex = 0;
+      this.clearCardDisplay();
+      const dictSelect = document.getElementById('dictTypeSelect');
+      if (dictSelect) dictSelect.value = 'all';
+      console.info(`[dict] 词典里已没有「${oldLabel}」对应的 sheet，「词典导入」已切回「全部」`);
+    }
+
+    // 练习范围：同上（它是独立设置，单独判断与回退）
+    if (gone.includes(this.normalizePracticeScope(this.settings.practiceScope))) {
+      const oldLabel = this.dictScopeLabelOf(this.settings.practiceScope);
+      this.settings.practiceScope = 'all';
+      await this.db.setSetting('practiceScope', 'all');
+      // 练习队列按新范围失效，下次进入练习页自动重建
+      this._practicePoolKey = null;
+      this.practiceWords = [];
+      this._practiceScopeTotal = 0;
+      const practiceSelect = document.getElementById('practiceScopeSelect');
+      if (practiceSelect) practiceSelect.value = 'all';
+      console.info(`[dict] 词典里已没有「${oldLabel}」对应的 sheet，「练习范围」已切回「全部」`);
+    }
+  }
+
+  /** 设置页「词典导入」对应的展示文字：全部 / 各 sheet 名（如 Can字 / Can短语 / Eng5k） */
   getDictScopeLabel() {
     const t = this.settings.dictImportType || 'all';
-    if (t === 'word') return '字';
-    if (t === 'phrase') return '短语';
-    return '全部';
+    if (t === 'all') return '全部';
+    return this.dictScopeLabelOf(t);
+  }
+
+  /**
+   * 切换「词典导入」范围（学习设置区的下拉「词典导入」）。
+   *
+   * 字（word）/短语（phrase）/英语词（eng5k）的词条始终全量常驻词库并保留各自学习记录，
+   * 切换范围只是改变“当前学习/展示/统计的分类”，不删除任何词条、不清空任何记录。
+   *
+   * 只影响学习页（队列与统计）和词库展示；练习页有自己的范围设置
+   * （settings.practiceScope，见练习设置区的下拉），与本设置互不联动。
+   */
+  async switchDictImportType(newType) {
+    const next = String(newType || 'all');
+    this.settings.dictImportType = next;
+
+    // 先同步丢掉旧范围的会话（快照 / 队列 / 下标）并清空卡片文字，再去做异步的落库与重建。
+    // 否则用户在下面任意一个 await 期间点回「学习」，都会先恢复或看到旧范围（如「字」）的卡片。
+    this._learnSessionSnapshot = null;
+    this.todayWords = [];
+    this.currentCardIndex = 0;
+    this._externalScopeIncludeIds.clear();
+    this.clearCardDisplay();
+
+    // 词典导入下拉同步显示新范围。练习设置里的范围下拉（practiceScope）是独立设置，
+    // 这里刻意不动它 —— 两个逻辑分开，各管各的页面
+    const dictSelect = document.getElementById('dictTypeSelect');
+    if (dictSelect) dictSelect.value = next;
+
+    try {
+      await this.db.setSetting('dictImportType', next);
+
+      // 按当前分类重新映射统计数字（全部 = 字 + 短语 + Eng5k）
+      this.syncActiveStatsMirrors();
+
+      // 词典范围已变更，重新统计真实状态计数
+      await this.refreshStatusCounts();
+
+      // 学习队列按新范围重建，清除会话缓存，避免返回学习页时恢复旧范围的队列
+      await this.db.setSetting('learnProgress', null);
+      // 换了词典范围，进度条的口径也换了，累计数一并归零
+      await this.resetTodayDoneCount();
+
+      // 词库页展示范围已变化，同步分类勾选并刷新列表
+      await this.syncLibraryCategoryFilterToDictType();
+      await this.renderCategoryOptions();
+      if (this.currentPage === 'library') {
+        await this.renderLibrary();
+        this._libraryNeedsRender = false;
+      } else {
+        // 不在词库页：标记下次进入时按新范围重新渲染
+        this._libraryNeedsRender = true;
+      }
+
+      // 按新范围重建今日队列并渲染；currentPage 为学习页时这一步就是用户看到的卡片。
+      // 练习页不受影响（它按自己的 practiceScope 抽题）
+      await this.prepareLearnSession();
+
+      this.showToast('词典已更新');
+    } catch (error) {
+      console.error('[dict] 切换词典范围失败:', error);
+      this.showToast('切换词典范围失败，请重试');
+    }
   }
 
   /**
@@ -2451,12 +2711,12 @@ class VocabApp {
 
     // 先按已知结果刷新，避免等待读库期间数字停留在上一次选项卡的值
     const known = typeof this._libraryTabCount === 'number' ? this._libraryTabCount : null;
-    label.textContent = known === null ? name : `${name}（${known}）`;
+    label.textContent = known === null ? name : `${name}(${known})`;
 
     const allWords = preloadedWords || await this.db.getAllWords();
     const fresh = this.applyLibraryFilters(allWords).length;
     this._libraryTabCount = fresh;
-    label.textContent = `${name}（${fresh}）`;
+    label.textContent = `${name}(${fresh})`;
   }
   
   // 渲染分类选项（仅当前展示分类内的词条；词典短语/字不设单独勾选项）
@@ -2497,7 +2757,7 @@ class VocabApp {
           return `
       <label class="dropdown-item">
         <input type="checkbox" data-category="${this.escapeHtml(cat)}"${on ? ' checked' : ''}>
-        <span>${this.escapeHtml(cat)}（${countByCategory.get(cat) || 0}）</span>
+        <span>${this.escapeHtml(cat)}(${countByCategory.get(cat) || 0})</span>
       </label>
     `;
         }
@@ -2726,19 +2986,20 @@ class VocabApp {
       if (self.currentPage === 'library') await self.renderLibrary();
     });
 
-    // ---------- 练习设置（练习页的范围与调值开关都在这里） ----------
+    // ---------- 练习设置（练习范围与调值开关；范围独立于学习设置的「词典导入」，互不联动） ----------
     const practiceScopeSelect = document.getElementById('practiceScopeSelect');
     if (practiceScopeSelect) {
+      practiceScopeSelect.value = self.normalizePracticeScope(self.settings.practiceScope);
       practiceScopeSelect.addEventListener('change', async () => {
-        self.settings.practiceScope = practiceScopeSelect.value || 'all';
-        await self.db.setSetting('practiceScope', self.settings.practiceScope);
+        const next = self.normalizePracticeScope(practiceScopeSelect.value);
+        self.settings.practiceScope = next;
+        await self.db.setSetting('practiceScope', next);
         // 范围变了：练习队列与进度条分母都要重来（下次进练习页时会自动重建）
         self._practicePoolKey = null;
         self.practiceWords = [];
         self._practiceScopeTotal = 0;
         self.refreshPracticeProgressUI();
-        const label = self.settings.practiceScope === 'phrase' ? '短语'
-          : (self.settings.practiceScope === 'word' ? '字' : '全部');
+        const label = next === 'all' ? '全部' : self.dictScopeLabelOf(next);
         self.showToast(`练习范围已切换为「${label}」`);
       });
     }
@@ -2791,57 +3052,11 @@ class VocabApp {
     // 清除进度按钮
     this._bindTap(document.getElementById('clearProgressBtn'), () => self.clearProgress());
     
-    // 词典类型选择事件
+    // 词典类型选择事件（完整流程见 switchDictImportType，练习设置区的镜像下拉走同一份逻辑）
     const dictTypeSelect = document.getElementById('dictTypeSelect');
     if (dictTypeSelect) {
       dictTypeSelect.addEventListener('change', async () => {
-        const newType = dictTypeSelect.value;
-
-        // 字（word）与短语（phrase）的词条始终全量常驻词库并保留各自学习记录，
-        // 切换范围只是改变“当前学习/展示/统计的分类”，不删除任何词条、不清空任何记录
-        self.settings.dictImportType = newType;
-
-        // 先同步丢掉旧范围的会话（快照 / 队列 / 下标）并清空卡片文字，再去做异步的落库与重建。
-        // 否则用户在下面任意一个 await 期间点回「学习」，都会先恢复或看到旧范围（如「字」）的卡片。
-        self._learnSessionSnapshot = null;
-        self.todayWords = [];
-        self.currentCardIndex = 0;
-        self._externalScopeIncludeIds.clear();
-        self.clearCardDisplay();
-
-        try {
-          await self.db.setSetting('dictImportType', newType);
-
-          // 按当前分类重新映射统计数字（全部 = 字 + 短语）
-          self.syncActiveStatsMirrors();
-
-          // 词典范围已变更，重新统计真实状态计数
-          await self.refreshStatusCounts();
-
-          // 学习队列按新范围重建，清除会话缓存，避免返回学习页时恢复旧范围的队列
-          await self.db.setSetting('learnProgress', null);
-          // 换了词典范围，进度条的口径也换了，累计数一并归零
-          await self.resetTodayDoneCount();
-
-          // 词库页展示范围已变化，同步分类勾选并刷新列表
-          await self.syncLibraryCategoryFilterToDictType();
-          await self.renderCategoryOptions();
-          if (self.currentPage === 'library') {
-            await self.renderLibrary();
-            self._libraryNeedsRender = false;
-          } else {
-            // 不在词库页：标记下次进入时按新范围重新渲染
-            self._libraryNeedsRender = true;
-          }
-
-          // 按新范围重建今日队列并渲染；currentPage 为学习页时这一步就是用户看到的卡片
-          await self.prepareLearnSession();
-
-          self.showToast('词典已更新');
-        } catch (error) {
-          console.error('[dict] 切换词典范围失败:', error);
-          self.showToast('切换词典范围失败，请重试');
-        }
+        await self.switchDictImportType(dictTypeSelect.value);
       });
     }
 
@@ -4098,13 +4313,14 @@ class VocabApp {
       </div>
     `;
 
-    // 顶部「分类」标签可点击：跳转词库并按该分类筛选（语言标签、收藏按钮等仍不跳转）
+    // 顶部「类型/分类」标签可点击：跳转词库并按该词条的真实分类筛选
+    //（语言标签、收藏按钮等仍不跳转；显示的是类型文字，筛选逻辑见 handleCategoryBadgeClick）
     const catBadge = cardInner.querySelector('.category-badge');
     if (catBadge) {
       catBadge.classList.add('clickable-badge');
       catBadge.addEventListener('click', (e) => {
         e.stopPropagation();
-        this.handleCategoryBadgeClick(catBadge.textContent);
+        this.handleCategoryBadgeClick(word);
       });
     }
     
@@ -4192,11 +4408,15 @@ class VocabApp {
     if (!raw) return null;
     const lowerAscii = /^[\x00-\x7f]+$/.test(raw) ? raw.toLowerCase() : raw;
     const pairs = [
-      ['word', ['word', '词汇', '字', '短语', 'phrase']],
-      ['meaning', ['meaning', '释义']],
+      // 新版词典表头为「字词」（旧版「词汇/word」）、「释意」（旧版「释义/meaning」）、「类型」，两套别名都保留
+      ['word', ['word', '词汇', '字词', '字', '短语', 'phrase']],
+      ['meaning', ['meaning', '释义', '释意']],
       ['phonetic', ['phonetic', '音标']],
       ['example', ['example', '例句']],
       ['category', ['category', '分类']],
+      // 「类型」列：词表内的分组名（如「字 · 常用一音」「短语」「人称称呼」），
+      // 单独存为 typeLabel，不用 language —— language 参与语种推断（粤语/英语/中文），两者语义不同
+      ['typeLabel', ['类型']],
       ['language', ['language', '语言']],
       ['jyutping', ['jyutping', '粤拼', 'jytping']],
       ['cantonese', ['cantonese', '粤语字', 'cantonese_word']],
@@ -4254,12 +4474,15 @@ class VocabApp {
       phonetic: String(raw.phonetic ?? '').trim(),
       example: String(raw.example ?? '').trim(),
       category: String(raw.category ?? '').trim() || '未分类',
+      // 类型列原文（如「字 · 常用一音」「短语」「人称称呼」）：卡片第二个顶部标签的显示文字。
+      // 词典里没有该列时为空串，显示层会回退到 category
+      typeLabel: String(raw.typeLabel ?? '').trim(),
       language,
       jyutping: String(raw.jyutping ?? '').trim(),
       cantonese: String(raw.cantonese ?? '').trim(),
       cantoneseExample: String(raw.cantoneseExample ?? '').trim(),
-      // 词条分类标注：仅当明确为 word/phrase 时写入，供按分类统计/筛选使用
-      dictScope: raw.dictScope === 'phrase' || raw.dictScope === 'word' ? raw.dictScope : undefined,
+      // 词条分类标注：仅当为合法词典范围（word/phrase/eng5k）时写入，供按分类统计/筛选使用
+      dictScope: DICT_SCOPES.includes(raw.dictScope) ? raw.dictScope : undefined,
       favorite: !!raw.favorite,
       status: raw.status || 'new',
       reviewCount: raw.reviewCount ?? 0,
@@ -4307,7 +4530,7 @@ class VocabApp {
 
   /** 卡片角标：优先使用表中 language 列原文，兼容旧数据 */
   getLanguageBadgeLabel(word) {
-    let raw = String(word.language || '').trim();
+    let raw = String(word.typeLabel || '').trim();
     const low = raw.toLowerCase();
     if (low === 'mandarin') raw = '英语';
     else if (low === 'cantonese') raw = '粤语';
@@ -4317,18 +4540,21 @@ class VocabApp {
   }
 
   /**
-   * 卡片顶部标签（语言 + 分类）的内层 HTML，学习页与练习页共用，保证两处完全一致。
-   * 语言标签取词典 language 列；分类标签（如「家电数码」）受「分类显示」开关控制，
-   * 没有可显示的内容时返回空串（调用方据此决定要不要渲染整行标签）。
+   * 卡片顶部标签（语言 + 类型/分类）的内层 HTML，学习页与练习页共用，保证两处完全一致。
+   * - 语言标签取词典 language 列（缺省按发音推断：粤语/英语/中文）；
+   * - 第二个标签优先取词典「类型」列（typeLabel，如「字 · 常用一音」「短语」「人称称呼」），
+   *   词典里没有类型列的旧数据回退显示「分类」列（category），显示口径保持有值可用；
+   * - 受「分类显示」开关控制，没有可显示的内容时返回空串（调用方据此决定要不要渲染整行标签）。
    */
   buildCardBadgesHtml(word) {
     if (!word) return '';
     const badgeLabel = this.getLanguageBadgeLabel(word);
+    // 类型/分类标签的显示文字：优先词典的「类型」列，其次「分类」列
+    const typeText = this.getCardTypeBadgeText(word);
     let categoryHtml = '';
     if (this.settings.categoryDisplay !== false) {
-      const category = word.category || '';
-      if (category) {
-        categoryHtml = `<span class="language-badge category-badge">${this.escapeHtml(category)}</span>`;
+      if (typeText) {
+        categoryHtml = `<span class="language-badge category-badge">${this.escapeHtml(typeText)}</span>`;
       }
     }
     const badgeHtml = badgeLabel
@@ -4339,28 +4565,47 @@ class VocabApp {
   }
 
   /**
-   * 学习卡片顶部「分类」标签点击：跳转词库菜单并按该分类筛选。
-   * - 分类 tab 一律切到「全部」；
-   * - 普通分类（如「常用短语」）：分类下拉框按 category-badge 内容精确筛选；
-   * - 一字类分类（一字多音 / 一字一音 / 常用一音）：除了按该分类筛选，还进一步按学习卡
-   *   当前的 word 字精确筛选，词库只展示该字（word）的全部记录，而不是该分类下的所有字。
+   * 第二个顶部标签（category-badge）的显示文字：
+   * 优先取词典「类型」列的值（typeLabel，如「字 · 常用一音」「短语」「人称称呼」），
+   * 词典没有类型列的旧词条回退用「分类」列（category，如「数字」「aa」）。
+   * 与筛选无关 —— 点击标签跳词库时按词条真实 category 筛选（见 handleCategoryBadgeClick）。
    */
-  handleCategoryBadgeClick(categoryText) {
-    const cat = String(categoryText ?? '').trim();
+  getCardTypeBadgeText(word) {
+    const category = String(word && word.category || '').trim();
+    if (category) return category;
+    return String(word && word.category || '').trim();
+  }
+
+  /**
+   * 学习卡片顶部第二个标签（类型/分类）点击：跳转词库菜单并按该词条的真实分类筛选。
+   * - 分类 tab 一律切到「全部」；
+   * - 筛选按词条的 category（分类列的真实值），而不是标签上显示的「类型」文字 ——
+   *   类型（如「字 · 常用一音」「人称称呼」）不参与词库分类下拉的筛选，
+   *   显示的只是词典里的分组名，跳词库必须按分类列筛才能得到正确结果；
+   * - 一字类分类（标签里含 一字多音 / 一字一音 / 常用一音）：除了按该分类筛选，
+   *   还进一步按学习卡当前的 word 字精确筛选，词库只展示该字（word）的全部记录，
+   *   而不是该分类下的所有字（按显示文字判断：新版类型值为「字 · 常用一音」这一格式，
+   *   旧数据直接是「常用一音」，统一用包含匹配兼容两者）。
+   */
+  handleCategoryBadgeClick(word) {
+    if (!word) return;
+    // 实际筛选用的分类值（词库下拉的选项按它划分）
+    const cat = String(word.category || '').trim();
     if (!cat) return;
-    // 一字类分类：跳转后只展示学习卡当前 word 字，而非整个分类的所有字
+    // 一字类判断用标签显示文字（类型列的值），与用户看到的分组对应
+    const label = this.getCardTypeBadgeText(word);
     const ONE_CHAR_CLASSES = ['一字多音', '一字一音', '常用一音'];
-    const isOneCharClass = ONE_CHAR_CLASSES.includes(cat);
+    const isOneCharClass = ONE_CHAR_CLASSES.some((k) => label.includes(k));
     // 清掉「今日已掌握/今日待复习」带过来的今日筛选，保证是从「全部」口径进入
     this.resetLibraryTodayFilter();
     this.filterStatus = 'all';
     this.resetPageNum();
     this.selectedCategories = [cat];
     if (isOneCharClass) {
-      const currentWord = this.todayWords && this.todayWords[this.currentCardIndex]
-        ? String(this.todayWords[this.currentCardIndex].word || '').trim()
-        : '';
-      this._libraryWordExactFilter = currentWord || null;
+      // 按字精确筛选用被点击词条自己的 word（而不是 todayWords[currentCardIndex]）：
+      // 点击处传进来的就是那张卡的词条，两者本来就相同；直接取参数则连
+      // 「换卡动画中点了上一张卡的标签」这类时序偏差也一并躲开
+      this._libraryWordExactFilter = String(word.word || '').trim() || null;
       // 清掉搜索词，避免它与「按字精确筛选」叠加出错误结果
       this.searchQuery = '';
       const searchInput = document.getElementById('searchInput');
@@ -4999,10 +5244,11 @@ class VocabApp {
 
   // ==================== 练习页面 ====================
   // 与学习页的区别：只看词汇写出粤拼音标，不写任何学习记录（不改 status/收藏/今日统计）。
-  //   1) 范围可单独选（全部 / 短语 / 字），与设置页的「词典导入」互不影响；
+  //   1) 范围可单独选（全部 / 字 / 短语 / Eng5k），与学习设置的「词典导入」互不影响；
   //   2) 输入模式可选「含调值 / 不含调值」，决定音标里的声调数字要不要一起输入；
+  //      英语词（Eng5k）没有调值概念，走「看释义默写拼写」模式；
   //   3) 卡片只保留翻转，去掉滑动、收藏与三个操作按钮；
-  //   4) 卡片下方是输入框：每音节输入正确自动补空格，错误标红，整条正确标绿。
+  //   4) 卡片下方是输入框：每音节（英语题为每个单词）输入正确自动补空格，错误标红，整条正确标绿。
 
   /** 练习页事件绑定：卡片翻面、输入框、键盘开关、再练一轮（范围与调值开关在设置页） */
   bindPracticeEvents() {
@@ -5151,14 +5397,21 @@ class VocabApp {
     }
   }
 
-  /** 把设置页「练习设置」里的控件刷新成当前设置值（词典导入下拉、显示调值开关） */
+  /** 把设置页「练习设置」里的控件刷新成当前设置值（练习范围下拉、显示调值开关） */
   refreshPracticeSettingsControls() {
+    // 练习范围 是独立设置（与学习页的「词典导入」互不联动），下拉只代表练习页自己的范围
     const scopeSelect = document.getElementById('practiceScopeSelect');
-    if (scopeSelect) scopeSelect.value = this.settings.practiceScope || 'all';
+    if (scopeSelect) scopeSelect.value = this.normalizePracticeScope(this.settings.practiceScope);
     const toneToggle = document.getElementById('practiceToneToggle');
     if (toneToggle) {
       toneToggle.classList.toggle('active', this.settings.practiceToneMode !== 'without');
     }
+  }
+
+  /** 把任意值规范成合法的练习范围（all / word / phrase / eng5k）；非法/旧数据按「全部」处理 */
+  normalizePracticeScope(value) {
+    const v = String(value ?? '').trim();
+    return (v === 'all' || DICT_SCOPES.includes(v)) ? v : 'all';
   }
 
   /** 进入练习页：范围 / 单词顺序没变就接着上次的进度，变了才重新抽题 */
@@ -5173,17 +5426,23 @@ class VocabApp {
   }
 
   /**
-   * 练习队列的标识：范围 + 单词顺序。
-   * 设置页改了「词典导入」（范围）或「单词顺序」（顺序 / 随机）都会让这个值变化，
-   * 下次进入练习页就会按新设置重排队列。
+   * 练习队列的标识：练习范围 + 单词顺序。
+   * 练习范围是独立设置（practiceScope，与「词典导入」互不联动）：
+   * 设置页改了它、或改了「单词顺序」（顺序 / 随机），这个值都会变化，
+   * 下次进入练习页就会按新设置重新抽题、重算分母与进度。
    */
   practicePoolKey() {
-    return `${this.settings.practiceScope || 'all'}|${this.settings.learnMode || 'random'}`;
+    return `${this.normalizePracticeScope(this.settings.practiceScope)}|${this.settings.learnMode || 'random'}`;
   }
 
   /**
-   * 组织本轮练习队列：取当前练习范围内的词条，只保留「音标能解析出音节」的，
+   * 组织本轮练习队列：取练习范围内的词条，只保留「能出一道练习题」的，
    * 从第一题开始。练习不写学习记录，因此不做重复频率、进度恢复等处理。
+   *
+   * 可出题的词条：
+   *   - 粤语字/短语 —— 音标能解析出粤拼音节（parsePracticeSyllables）；
+   *   - 英语词（Eng5k 等）—— 音标是 IPA，练习题改为「看释义默写拼写」，
+   *     只要拼写非空就能出题（同样由 parsePracticeSyllables 返回非空判定）。
    *
    * 队列顺序：
    *   1) 先排「还没练过」的词条，再把练过的排在后面 —— 进度条会一直往前走，
@@ -5191,7 +5450,9 @@ class VocabApp {
    *   2) 组内顺序跟随设置页的「单词顺序」：随机 = 打乱，顺序 = 保持词典本身的顺序。
    */
   async preparePracticePool() {
-    const scope = this.settings.practiceScope || 'all';
+    // 练习范围用练习页自己的设置（practiceScope），与「词典导入」分开、互不影响：
+    //   all = 全部词典（字 + 短语 + Eng5k）；word / phrase / eng5k = 对应词典范围
+    const scope = this.normalizePracticeScope(this.settings.practiceScope);
     const allWords = await this.db.getAllWords();
     const pool = [];
     for (const word of allWords) {
@@ -5220,9 +5481,11 @@ class VocabApp {
     this.refreshPracticeProgressUI();
   }
 
-  /** 词条归属的练习范围键：'phrase'（短语）或 'word'（字） */
+  /** 词条归属的练习范围键：'word'（字）/'phrase'（短语）/'eng5k'（英语词）
+   *  （英语词无粤拼，parsePracticeSyllables 拆不出音节，实际不会进入练习队列，
+   *  这里只是保证 dict_key 与云同步 makeDictKey 生成完全一致的标识） */
   practiceScopeKeyOf(word) {
-    return word && word.dictScope === 'phrase' ? 'phrase' : 'word';
+    return word ? normalizeDictScope(word.dictScope) : 'word';
   }
 
   /**
@@ -5345,9 +5608,12 @@ class VocabApp {
       }
       return set;
     };
+    // 与 DICT_SCOPES 对应：按「字 / 短语 / Eng5k」分别记录已练过的词条
+    // （旧数据没有 eng5k 分组时初始化为空集合，不影响前两组）
     this._practiceDone = {
       word: toSet(raw && raw.word),
-      phrase: toSet(raw && raw.phrase)
+      phrase: toSet(raw && raw.phrase),
+      eng5k: toSet(raw && raw.eng5k)
     };
     this.refreshPracticeProgressUI();
   }
@@ -5443,7 +5709,8 @@ class VocabApp {
     const toList = (set) => Array.from(set).map(String).sort();
     const payload = {
       word: toList(this._practiceDone.word),
-      phrase: toList(this._practiceDone.phrase)
+      phrase: toList(this._practiceDone.phrase),
+      eng5k: toList(this._practiceDone.eng5k)
     };
     this.settings.practiceProgress = payload;
     await this.db.setSetting('practiceProgress', payload);
@@ -5477,15 +5744,33 @@ class VocabApp {
   }
 
   /**
+   * 该词条是否按「英语拼写默写」模式练习。
+   * 英语词表（Eng5k 等）的音标是 IPA（如 /mi:/），既没有粤拼的「字母 + 声调」写法，
+   * 也无法用练习键盘（26 字母 + 1~6）敲出来；因此这类词条的练习题改为：
+   * 正面显示释义，答案是要默写的英文拼写（输入与判定逻辑与粤拼逐音节判定共用）。
+   */
+  isEnglishPracticeWord(word) {
+    if (!word) return false;
+    return this.getSpeechKind(word) === 'english';
+  }
+
+  /**
    * 从词条的 phonetic（缺省时用 jyutping）里取出「这个词怎么读」的粤拼音节数组。
    *
    * 词典里两种表的写法不同：
    *   - 短语表：phonetic 就是纯拼音串，如「细路仔」= "sai3 lou6 zai2"；
    *   - 字表：phonetic 后面还跟着组词，如「䂿」= "dam6，䂿（跺）脚 dam6 goek3"。
    * 所以只取开头连续的「字母 + 可选声调数字」片段，遇到中文/标点即停止。
+   *
+   * 英语词（如 Eng5k 词表）走另一条路：答案就是单词拼写本身，按空白切分段
+   * （多词词条逐词对齐），切不出任何内容（拼写为空）的词条不会进入练习队列。
    */
   parsePracticeSyllables(word) {
     if (!word) return [];
+    // 英语默写模式：目标是单词拼写（大小写统一由 normalizePracticeSyllable 处理）
+    if (this.isEnglishPracticeWord(word)) {
+      return String(word.word || '').trim().split(/[ \t]+/).filter(Boolean);
+    }
     const raw = String(word.phonetic || word.jyutping || '').trim();
     if (!raw) return [];
     const matched = raw.match(/^[A-Za-z]+[1-6]?(?:[ \t]+[A-Za-z]+[1-6]?)*/);
@@ -5512,7 +5797,13 @@ class VocabApp {
     this._practiceSyllables = syllables;
     this._practiceTargets = syllables.map((s) => this.normalizePracticeSyllable(s));
     const answerEl = document.getElementById('practicePhonetic');
-    if (answerEl) answerEl.textContent = this._practiceTargets.join(' ');
+    if (answerEl) {
+      // 英语默写题：答案区除拼写外一并给出音标（IPA），答对翻面时能对照发音
+      const ipa = word && this.isEnglishPracticeWord(word)
+        ? String(word.phonetic || '').trim()
+        : '';
+      answerEl.textContent = this._practiceTargets.join(' ') + (ipa ? `  ${ipa}` : '');
+    }
     return syllables;
   }
 
@@ -5544,8 +5835,16 @@ class VocabApp {
     if (inputArea) inputArea.style.display = 'flex';
     this.applyPracticeKeyboardState(true);
 
+    // 英语默写题：正面显示释义（答案正是要默写的英文拼写，不能先亮出来）；
+    // 粤语字/短语保持原样：正面显示词汇，答案（粤拼）在背面
+    const english = this.isEnglishPracticeWord(word);
     const wordEl = document.getElementById('practiceWord');
-    if (wordEl) wordEl.textContent = word.word || '';
+    if (wordEl) {
+      wordEl.textContent = english ? (word.definition || word.meaning || '') : (word.word || '');
+    }
+    // 正面底部提示随题切换：英语题翻面看的是「答案」，粤拼题翻面看的是「音标释义」
+    const frontHint = document.querySelector('#practiceFlashcard .flashcard-front .tap-hint');
+    if (frontHint) frontHint.textContent = english ? '点击查看答案 Shift' : '点击查看释义 Shift';
     // 顶部标签（语言 / 分类）与学习卡完全一致，用的是同一个生成方法
     const badgeRow = document.getElementById('practiceBadgeRow');
     if (badgeRow) {
@@ -5646,23 +5945,33 @@ class VocabApp {
     display.innerHTML = html;
   }
 
-  /** 输入框下方的提示文字 */
+  /** 输入框下方的提示文字（英语默写题与粤拼题分别给出对应口径的文案） */
   updatePracticeHint(state, matchedCount) {
     const hint = document.getElementById('practiceHint');
     if (!hint) return;
     hint.classList.toggle('error', state === 'error');
     hint.classList.toggle('success', state === 'success');
 
+    // 取当前题判定模式；可能拿到 undefined（如队列已清空），按粤拼题兜底
+    const current = this.practiceWords[this.practiceIndex];
+    const english = current ? this.isEnglishPracticeWord(current) : false;
+
     if (state === 'success') {
       hint.textContent = '✓ 全部正确';
       return;
     }
     if (state === 'error') {
-      hint.textContent = '✗ 与音标不一致，请修改标红的部分';
+      hint.textContent = english ? '✗ 与拼写不一致，请修改标红的部分' : '✗ 与音标不一致，请修改标红的部分';
       return;
     }
     const total = this._practiceTargets.length;
-    const modeText = this.settings.practiceToneMode === 'without' ? '不含调值' : '含调值';
+    // 英语默写题：没有调值概念，按「词数」表述；单词条题直接说明要输入什么
+    if (english) {
+      hint.textContent = total > 1
+        ? `共 ${total} 个单词，已完整输入【 ${Math.max(0, matchedCount)} 】个`
+        : '根据释义输入对应的英文单词';
+      return;
+    }
     if (this.settings.practiceToneMode === 'without') {
       hint.textContent = total > 1
         ? `共 ${total} 个音节（不含调值），已完整输入【 ${Math.max(0, matchedCount)} 】个`
@@ -6068,10 +6377,10 @@ class VocabApp {
     document.getElementById('exampleInput').value = word.example || '';
     document.getElementById('categoryInput').value = word.category || '';
 
-    // 「词汇」后面的语种标签：取词典 language 列原文；该词条没有语种时隐藏标签
+    // 「词汇」后面的语种标签：取词典 language 列原文（dict表的“类型”列）；该词条没有语种时隐藏标签
     const languageTag = document.getElementById('wordLanguageTag');
     if (languageTag) {
-      const language = String(word.language || '').trim();
+      const language = String(word.typeLabel || '').trim();
       languageTag.textContent = language;
       languageTag.hidden = !language;
     }
@@ -6141,8 +6450,13 @@ class VocabApp {
   async clearProgress() {
     const scopeKeys = this.activeScopeKeys();
     const isAll = scopeKeys.length > 1;
-    const scopeLabel = isAll ? '全部（字 + 短语）' : (scopeKeys[0] === 'word' ? '字' : '短语');
-    const keepLabel = isAll ? null : (scopeKeys[0] === 'word' ? '短语' : '字');
+    // 当前范围的名称：「字 / 短语 / Eng5k」；全部时列出仍存在的范围（被删 sheet 的不算）
+    const scopeLabel = isAll
+      ? `全部（${DICT_SCOPES.filter((k) => this.dictScopeAvailable(k)).map((k) => this.dictScopeLabelOf(k)).join(' + ')}）`
+      : this.dictScopeLabelOf(scopeKeys[0]);
+    // 其余范围的名称（确认弹窗里说明它们的记录会保留）；全部时没有需要保留的范围
+    const keepKeys = DICT_SCOPES.filter((k) => !scopeKeys.includes(k) && this.dictScopeAvailable(k));
+    const keepLabel = isAll ? null : keepKeys.map((k) => this.dictScopeLabelOf(k)).join('、');
     const cloudHint = window.CloudSync?.isActive?.() ? '（已登录，云端记录也会一起清除）' : '';
     const keepHint = keepLabel ? `\n「${keepLabel}」的学习记录会保留。` : '';
 
@@ -6299,7 +6613,7 @@ class VocabApp {
   }
 
   // 解析Excel数据（首行为表头，列名规则与 resolveImportHeaderKey 一致）
-  // dictScope：该 sheet 归属的词典分类（word=字 / phrase=短语）
+  // dictScope：该 sheet 归属的词典分类（word=字 / phrase=短语 / eng5k=英语词）
   parseExcel(data, dictScope) {
     if (!data || data.length < 2) return [];
     const headerCells = data[0].map((c) => String(c ?? '').trim());
@@ -6327,6 +6641,7 @@ class VocabApp {
           phonetic: get('phonetic'),
           example: get('example'),
           category: get('category'),
+          typeLabel: get('typeLabel'),
           language: get('language'),
           jyutping: get('jyutping'),
           cantonese: get('cantonese'),

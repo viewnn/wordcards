@@ -2257,6 +2257,7 @@ body.learn-landscape #learnPage .action-btn.skip span {
 .setting-info p {
   font-size: 13px;
   color: var(--text-secondary);
+  opacity: 0.65;
 }
 
 /* Toggle 开关 */

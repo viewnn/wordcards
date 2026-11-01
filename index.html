@@ -347,8 +347,22 @@
             </div>
             <div class="setting-item">
               <div class="setting-info">
+                <h4>词典导入</h4>
+                <p>词典导入的范围仅影响「学习」页面</p>
+              </div>
+              <select id="dictTypeSelect" class="dict-select">
+                <option value="all">全部</option>
+                <option value="phrase">短语</option>
+                <option value="word" selected>字</option>
+                <!-- Eng5k：dict.xlsx 里的英语词表（sheet 名以 eng/英语 开头），
+                     与 字/短语 一样全量常驻词库，这里只控制当前学习/展示的范围 -->
+                <option value="eng5k">Eng5k</option>
+              </select>
+            </div>
+            <div class="setting-item">
+              <div class="setting-info">
                 <h4>学习范围</h4>
-                <p>会显示到学习卡片内</p>
+                <p>在「词库」页面中可查看到范围数量</p>
               </div>
               <select id="studyScopeSelect" class="dict-select study-scope-select">
                 <option value="all" selected>全部</option>
@@ -356,22 +370,6 @@
                 <option value="review">待复习</option>
                 <option value="mastered">已掌握</option>
                 <option value="favorite">收藏</option>
-              </select>
-            </div>
-          </div>
-
-          <!-- 词典管理 -->
-          <div class="settings-section">
-            <h3 class="settings-section-title">词典管理</h3>
-            <div class="setting-item">
-              <div class="setting-info">
-                <h4>词典导入</h4>
-                <p>选择要导入的词典，默认展示为全部</p>
-              </div>
-              <select id="dictTypeSelect" class="dict-select">
-                <option value="all">全部</option>
-                <option value="phrase">短语</option>
-                <option value="word" selected>字</option>
               </select>
             </div>
             <div class="setting-item">
@@ -420,7 +418,7 @@
             <div class="setting-item">
               <div class="setting-info">
                 <h4>显示释义</h4>
-                <p>开启后，词库菜单内会显示单词释义</p>
+                <p>仅在「词库」页面内的单词卡上显示</p>
               </div>
               <div class="toggle active" id="meaningDisplayToggle"></div>
             </div>
@@ -439,13 +437,17 @@
             <h3 class="settings-section-title">练习设置</h3>
             <div class="setting-item">
               <div class="setting-info">
-                <h4>词典导入</h4>
-                <p>选择要导入的词典，默认展示为全部</p>
+                <h4>练习范围</h4>
+                <p>词典导入的范围仅影响「练习」页面</p>
               </div>
+              <!-- 练习范围（practiceScope）：与学习设置的「词典导入」(dictImportType) 分开、
+                   互不联动，只决定练习页抽题、单词数量与进度；
+                   选项文字由 JS 按 dict.xlsx 的 sheet 名刷新（applyDictScopeLabelsToUI） -->
               <select id="practiceScopeSelect" class="dict-select">
                 <option value="all" selected>全部</option>
                 <option value="phrase">短语</option>
                 <option value="word">字</option>
+                <option value="eng5k">Eng5k</option>
               </select>
             </div>
             <div class="setting-item">
@@ -572,22 +574,22 @@
           <div class="form-group">
             <div class="form-label-row">
               <label class="form-label">词汇</label>
-              <!-- 语种标签：显示词典 language 列原文，没有该值时不展示（由 viewWord 填充） -->
+              <!-- 语种标签：显示词典 language 列原文（dict表的“类型”列），没有该值时不展示（由 viewWord 填充） -->
               <span class="word-language-tag" id="wordLanguageTag" hidden></span>
             </div>
-            <input type="text" class="form-input" id="wordInput" placeholder="请输入词汇" required>
+            <input type="text" class="form-input" id="wordInput" placeholder="暂无词汇" required>
           </div>
           <div class="form-group">
             <label class="form-label">音标</label>
-            <input type="text" class="form-input" id="phoneticInput" placeholder="请输入音标">
+            <input type="text" class="form-input" id="phoneticInput" placeholder="暂无音标">
           </div>
           <div class="form-group">
             <label class="form-label">释义</label>
-            <input type="text" class="form-input" id="meaningInput" placeholder="请输入释义" required>
+            <input type="text" class="form-input" id="meaningInput" placeholder="暂无释义" required>
           </div>
           <div class="form-group">
             <label class="form-label">例句</label>
-            <textarea class="form-textarea" id="exampleInput" placeholder="请输入例句（可选）"></textarea>
+            <textarea class="form-textarea" id="exampleInput" placeholder="暂无例句（可选）"></textarea>
           </div>
         </form>
       </div>
