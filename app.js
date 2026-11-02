@@ -230,17 +230,33 @@ class VocabDB {
   }
 
   // ---------- 词汇（words 表）操作 ----------
+  /**
+   * 在事务内同步创建请求，提交完成后才返回结果。
+   * request 成功不代表事务已提交；中止时必须拒绝，避免界面/同步误报写入成功。
+   * enqueue 不得使用 await，否则 IndexedDB 可能在后续请求入队前关闭事务。
+   */
+  _transaction(storeName, mode, enqueue) {
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction([storeName], mode);
+      let request;
+      transaction.oncomplete = () => resolve(request?.result);
+      transaction.onerror = transaction.onabort = () => reject(
+        transaction.error || new Error('IndexedDB transaction aborted')
+      );
+      try {
+        request = enqueue(transaction.objectStore(storeName));
+      } catch (error) {
+        transaction.abort();
+        reject(error);
+      }
+    });
+  }
+
   /** 新增一条词条；自动补 createdAt（创建时间）和 status='new'（新词），返回新 id */
   async addWord(word) {
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['words'], 'readwrite');
-      const store = transaction.objectStore('words');
-      word.createdAt = new Date().toISOString();
-      word.status = 'new';
-      const request = store.add(word);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
+    word.createdAt = new Date().toISOString();
+    word.status = 'new';
+    return this._transaction('words', 'readwrite', store => store.add(word));
   }
 
   /**
@@ -274,103 +290,60 @@ class VocabDB {
       if (learningChanged) window.CloudSync?.stampWord?.(word);
     }
 
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['words'], 'readwrite');
-      const store = transaction.objectStore('words');
-      const request = store.put(word);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
+    return this._transaction('words', 'readwrite', store => store.put(word));
   }
 
   /** 读取词库中的全部词条（返回对象数组） */
   async getAllWords() {
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['words'], 'readonly');
-      const store = transaction.objectStore('words');
-      const request = store.getAll();
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
+    return this._transaction('words', 'readonly', store => store.getAll());
   }
 
   /** 按主键 id 读取单条词条 */
   async getWord(id) {
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['words'], 'readonly');
-      const store = transaction.objectStore('words');
-      const request = store.get(id);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
+    return this._transaction('words', 'readonly', store => store.get(id));
   }
 
   /** 批量新增词条（在同一个事务内完成，性能更好）；返回成功写入的条数 */
   async batchAddWords(words) {
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['words'], 'readwrite');
-      const store = transaction.objectStore('words');
-      let count = 0;
-      
-      words.forEach(word => {
-        word.createdAt = new Date().toISOString();
+    if (words.length === 0) return 0;
+    const createdAt = new Date().toISOString();
+    await this._transaction('words', 'readwrite', store => {
+      for (const word of words) {
+        word.createdAt = createdAt;
         word.status = 'new';
-        const request = store.add(word);
-        request.onsuccess = () => count++;
-      });
-      
-      transaction.oncomplete = () => resolve(count);
-      transaction.onerror = () => reject(transaction.error);
+        store.add(word);
+      }
     });
+    return words.length;
   }
 
-  /** 批量删除词条（在同一个事务内完成）；返回实际删除的条数 */
+  /** 批量删除词条；返回已提交的去重 id 数（IndexedDB 删除不存在的 id 也算成功）。 */
   async deleteWordsByIds(ids) {
     const uniqueIds = [...new Set(ids)].filter((id) => id !== undefined && id !== null);
     if (uniqueIds.length === 0) return 0;
 
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['words'], 'readwrite');
-      const store = transaction.objectStore('words');
-      let count = 0;
-
-      uniqueIds.forEach(id => {
-        const request = store.delete(id);
-        request.onsuccess = () => count++;
-      });
-
-      transaction.oncomplete = () => resolve(count);
-      transaction.onerror = () => reject(transaction.error);
+    await this._transaction('words', 'readwrite', store => {
+      for (const id of uniqueIds) store.delete(id);
     });
+    return uniqueIds.length;
   }
 
   // ---------- 设置（settings 表）操作：键值对存取 ----------
   /** 读取某项设置；库里没有该 key 时返回 defaultValue（即“默认值”） */
   async getSetting(key, defaultValue = null) {
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['settings'], 'readonly');
-      const store = transaction.objectStore('settings');
-      const request = store.get(key);
-      request.onsuccess = () => resolve(request.result ? request.result.value : defaultValue);
-      request.onerror = () => reject(request.error);
-    });
+    const setting = await this._transaction('settings', 'readonly', store => store.get(key));
+    return setting ? setting.value : defaultValue;
   }
 
   /** 写入某项设置（以 { key, value } 形式存储，同名 key 会被覆盖） */
   async setSetting(key, value) {
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction(['settings'], 'readwrite');
-      const store = transaction.objectStore('settings');
-      const request = store.put({ key, value });
-      request.onsuccess = () => {
-        resolve();
-        // 【云同步钩子 2】设置写完后通知 CloudSync。
-        // 只有参与同步的设置项和 learnProgress（今日学习会话）会触发上传，
-        // 其余 key（统计快照、词典更新时间、同步元数据等）会被它忽略。
-        window.CloudSync?.onSettingWritten?.(key, value);
-      };
-      request.onerror = () => reject(request.error);
-    });
+    await this._transaction('settings', 'readwrite', store => store.put({ key, value }));
+    // 【云同步钩子 2】只在本地提交后通知；钩子异常不改变本地写入结果。
+    try {
+      window.CloudSync?.onSettingWritten?.(key, value);
+    } catch (error) {
+      console.warn('Cloud sync setting notification failed', error);
+    }
   }
 }
 
@@ -511,7 +484,7 @@ class VocabApp {
       /** 音标渐显延迟（秒），0表示立即显示 */
       phoneticDelay: 2,
       /** 单词重复出现频率（天），0表示每日目标内不重复 */
-      repeatFrequency: 2,
+      repeatFrequency: 3,
       /** 词典导入范围：all / word / phrase / eng5k，与设置页下拉同步；
        *  同时决定学习页与练习页的范围（练习的单词数量与进度都跟随它） */
       dictImportType: 'all',
@@ -1386,7 +1359,7 @@ class VocabApp {
     this.settings.meaningDisplay = await this.db.getSetting('meaningDisplay', true);
     this.settings.learnMode = await this.db.getSetting('learnMode', 'random');
     this.settings.phoneticDelay = await this.db.getSetting('phoneticDelay', 2);
-    this.settings.repeatFrequency = await this.db.getSetting('repeatFrequency', 2);
+    this.settings.repeatFrequency = this.normalizeRepeatFrequency(await this.db.getSetting('repeatFrequency', 3));
     this.settings.dictImportType = await this.db.getSetting('dictImportType', 'all');
     // 「词典范围 → sheet 名」映射：上一次解析 dict.xlsx 时记下（见 autoLoadDict），
     // 设置页下拉与词库顶部统计行的显示文字跟随词典文件的 sheet 名
@@ -1499,11 +1472,25 @@ class VocabApp {
   countPendingScopeWords(pool, scope = this.settings.studyScope) {
     const list = Array.isArray(pool) ? pool : [];
     const done = this._scopePassDone[this.normalizeStudyScope(scope)];
-    if (!done) return list.length;
     return list.filter((w) => {
+      if (!this.isWordOutsideRepeatWindow(w)) return false;
       const key = this.dictKeyOf(w);
-      return !key || !done.has(key);
+      return !key || !done?.has(key);
     }).length;
+  }
+
+  /** 0 表示不设时间间隔；非法设置回退到默认 3 天。 */
+  normalizeRepeatFrequency(value) {
+    const days = Number(value);
+    return value !== null && value !== '' && Number.isInteger(days) && days >= 0 && days <= 7 ? days : 3;
+  }
+
+  /** 按连续 24 小时计算冷却期，使用与 lastStudied 相同的校准时间。 */
+  isWordOutsideRepeatWindow(word, now = this.nowMs()) {
+    const days = this.normalizeRepeatFrequency(this.settings.repeatFrequency);
+    const studiedAt = Number(word.lastStudied);
+    return days === 0 || !Number.isFinite(studiedAt) || studiedAt <= 0 ||
+      now - studiedAt >= days * 86400000;
   }
 
   /**
@@ -1875,7 +1862,9 @@ class VocabApp {
 
   /**
    * 更新词库页顶部的范围统计行，显示各分类的词条总数：
-   *   全部（5794） · 字（3828） · 短语（1966），当前词典范围高亮
+   *   全部（5772） | Can短语（2005） | Can字（3767） —— 顺序与设置页「词典导入」
+   *   下拉的选项顺序完全一致，当前词典范围高亮；
+   *   数量为 0 的范围不显示标签，词库为空时整行只显示「全部(0)」。
    * 词库数据变化时（导入、删除、编辑、词典范围切换、进入词库页）调用。
    */
   // preloadedWords：调用方（如 renderLibrary）已读好的全量词条，避免同一次渲染重复读全库
@@ -1891,12 +1880,27 @@ class VocabApp {
         else counts.phrase++;
       }
     }
-    const totalCount = allWords.length;
+    // 显示顺序与设置页「词典导入」下拉完全一致：直接取该下拉的选项（DOM）顺序，
+    // 下拉里怎么排、这里就怎么排，两处永不脱节（选项运行期只会隐藏、不会重排）
+    const dictSelectEl = document.getElementById('dictTypeSelect');
+    let orderKeys = dictSelectEl
+      ? Array.from(dictSelectEl.options)
+          .map((o) => String(o.value))
+          .filter((v) => v === 'all' || DICT_SCOPES.includes(v))
+      : [];
+    if (orderKeys.length === 0 || !orderKeys.includes('all')) {
+      // 下拉元素缺失/异常时的兜底顺序（与 index.html 里的选项顺序一致）
+      orderKeys = ['all', 'phrase', 'word', 'eng5k'];
+    }
 
-    // 「全部」的数量只累加词典里仍存在的范围：删掉范围后即便有极少量
-    // 词条残留（清理时序），顶部「全部」也不会把它算进去，与标签列表口径一致
-    const visibleScopes = DICT_SCOPES.filter((s) => this.dictScopeAvailable(s));
-    const visibleTotal = visibleScopes.reduce((n, s) => n + counts[s], 0);
+    // 只显示「仍有词条」的范围：数量为 (0) 的范围没有可查看的内容，一并隐藏 ——
+    // 删掉了 Eng5k sheet（词条会随词典同步清理）、词典整个被删除或尚未导入时，
+    // 顶部不会出现一排 (0) 的空标签；词库为空时整行只剩「全部(0)」一项。
+    // 条数 > 0 的范围即使已没有对应 sheet（云同步残留等）也照常显示：词条真实存在、可查看
+    const shownScopes = DICT_SCOPES.filter((s) => counts[s] > 0);
+    // 「全部」的数量 = 各显示范围之和：删掉范围后即便有极少量词条残留（清理时序），
+    // 顶部「全部」也不会把它算进去，与标签列表口径保持一致
+    const visibleTotal = shownScopes.reduce((n, s) => n + counts[s], 0);
 
     // 各范围显示文字跟随 dict.xlsx 的 sheet 名（如 Can字 / Can短语 / Eng5k），
     // 与设置页「词典导入」下拉选项保持同一份来源（dictScopeLabelOf）
@@ -1905,16 +1909,17 @@ class VocabApp {
     const shown = { all: visibleTotal, ...counts };
     const current = this.settings.dictImportType || 'all';
 
-    // 更新词库页顶部统计行：全部 · Can字 · Can短语（当前词典范围高亮）。
-    // 只显示词典里仍存在对应 sheet 的范围：删掉 Eng5k sheet 后该标签不再出现，
-    // 「全部」的数量也不把它算进去（词条本身会随词典同步被清理，这里按可用范围兜底）。
+    // 更新词库页顶部统计行：全部 · Can短语 · Can字（当前词典范围高亮）。
+    // 顺序取自下拉、只为仍有词条的范围显示标签（见上方 orderKeys / shownScopes 的说明）；
     // 设置页下拉框的选项文案与隐藏见 applyDictScopeLabelsToUI
     const scopeCountsEl = document.getElementById('dictScopeCounts');
     if (scopeCountsEl) {
-      const items = ['all', ...visibleScopes].map((key) => {
-        const cls = key === current ? 'scope-active' : '';
-        return `<span class="${cls}">${labels[key]}(${shown[key]})</span>`;
-      });
+      const items = orderKeys
+        .filter((key) => key === 'all' || shownScopes.includes(key))
+        .map((key) => {
+          const cls = key === current ? 'scope-active' : '';
+          return `<span class="${cls}">${labels[key]}(${shown[key]})</span>`;
+        });
       scopeCountsEl.innerHTML = items.join('<span class="scope-sep">|</span>');
     }
   }
@@ -3043,8 +3048,13 @@ class VocabApp {
     if (repeatFrequencySelect) {
       repeatFrequencySelect.value = self.settings.repeatFrequency.toString();
       repeatFrequencySelect.addEventListener('change', async (e) => {
-        self.settings.repeatFrequency = parseInt(e.target.value, 10);
+        self.settings.repeatFrequency = self.normalizeRepeatFrequency(e.target.value);
         await self.db.setSetting('repeatFrequency', self.settings.repeatFrequency);
+        self._learnSessionSnapshot = null;
+        self.todayWords = [];
+        self.currentCardIndex = 0;
+        await self.db.setSetting('learnProgress', null);
+        await self.prepareLearnSession();
         self.showToast(`重复频率已设置为 ${self.settings.repeatFrequency} 天`);
       });
     }
@@ -3597,7 +3607,8 @@ class VocabApp {
         (snap.studyScope || 'all') === this.normalizeStudyScope(this.settings.studyScope) &&
         Array.isArray(snap.todayWords) &&
         snap.todayWords.length > 0 &&
-        snap.todayWords.every((w) => this.isWordInActiveScope(w))
+        snap.todayWords.every((w, index) => this.isWordInActiveScope(w) &&
+          (index < snap.currentCardIndex || this.isWordOutsideRepeatWindow(w)))
       );
       const shouldRestoreSnapshot = snap && snap.todayWords && snap.todayWords.length > 0 && 
                                    snap.todayWords.length === snapshotCapacity &&
@@ -3949,7 +3960,10 @@ class VocabApp {
     // 只取当前展示分类（全部/字/短语）的词条；另一分类的词条常驻词库，记录不会被清除
     const allWords = allStoredWords.filter((w) => this.isWordInActiveScope(w));
     // 当前 tab 的全部词条（全部 = 当前词典范围）
-    const studyScopePool = allWords.filter((w) => this.isWordInStudyScope(w, studyScope));
+    const repeatNow = this.nowMs();
+    const scopedWords = allWords.filter((w) => this.isWordInStudyScope(w, studyScope));
+    const studyScopePool = scopedWords.filter((w) => this.isWordOutsideRepeatWindow(w, repeatNow));
+    this._scopeCooldownExcludedCount = scopedWords.length - studyScopePool.length;
     // 缓存当前可抽词范围，供「跳过」同步补牌使用（见 pickSkipReplacement）
     this._scopePoolCache = studyScopePool;
 
@@ -3996,6 +4010,7 @@ class VocabApp {
       for (let i = 0; i < restoredTodayWords.length; i++) {
         const w = restoredTodayWords[i];
         if (!this.isWordInStudyScope(w, studyScope)) continue;
+        if (i >= savedIndex && !this.isWordOutsideRepeatWindow(w, repeatNow)) continue;
         if (i < savedIndex) restoredIndexBefore++;
         restoredWords.push(w);
       }
@@ -4220,7 +4235,9 @@ class VocabApp {
     const canContinue = Array.isArray(this._scopePoolCache) && this._scopePoolCache.length > 0;
     const text = document.getElementById('learnScopeCompleteText');
     if (text) {
-      text.textContent = canContinue
+      text.textContent = !canContinue && this._scopeCooldownExcludedCount > 0
+        ? `【${label}】中的单词尚在重复间隔内，请稍后学习或调整重复频率`
+        : canContinue
         ? `已学完【${label}】，是否继续？`
         : `已学完【${label}】，请切换范围`;
     }
@@ -4759,6 +4776,7 @@ class VocabApp {
     if (skippedWord) queuedIds.add(skippedWord.id);
 
     const candidates = pool.filter((w) => {
+      if (!this.isWordOutsideRepeatWindow(w)) return false;
       if (!w || queuedIds.has(w.id)) return false;
       // 本次会话已经跳过的词不再补进来：否则刚跳过的那张马上又会出现
       if (this._skippedWordIds.has(w.id)) return false;
@@ -6264,8 +6282,8 @@ class VocabApp {
           <div class="empty-icon">
             <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
           </div>
-          <h3 class="empty-title">词库为空</h3>
-          <p class="empty-desc">暂无单词数据</p>
+          <h3 class="empty-title">${sourceWords.length ? '无匹配结果' : '词库为空'}</h3>
+          <p class="empty-desc">${sourceWords.length ? '请调整搜索内容、分类或状态筛选' : '暂无单词数据'}</p>
         </div>
       `;
       document.getElementById('pagination')?.remove();

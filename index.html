@@ -14,7 +14,7 @@
   <meta name="msapplication-config" content="browserconfig.xml">
   <title>wordcards</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20261102-3">
   <link rel="stylesheet" href="cloud-sync.css">
   <!-- 性能：xlsx.full.min.js（约 900KB）与 supabase-js 已不在 <head> 同步加载——
        两者都不在首屏关键路径上（xlsx 只在解析 dict.xlsx 时用，supabase 只在云同步时用），
@@ -375,13 +375,13 @@
             <div class="setting-item">
               <div class="setting-info">
                 <h4>重复频率</h4>
-                <p>所选的时间内，单词不会再重复出现</p>
+                <p>距上次学习满所选天数后可重复出现</p>
               </div>
               <select id="repeatFrequencySelect" class="dict-select">
-                <option value="0" selected>0天</option>
+                <option value="0">0天</option>
                 <option value="1">1天</option>
                 <option value="2">2天</option>
-                <option value="3">3天</option>
+                <option value="3" selected>3天</option>
                 <option value="4">4天</option>
                 <option value="5">5天</option>
                 <option value="6">6天</option>
@@ -669,7 +669,7 @@
 
   <!-- 云同步：先读配置，再加载同步模块，最后才是应用主逻辑 -->
   <script src="supabase-config.js"></script>
-  <script src="cloud-sync.js"></script>
-  <script src="app.js"></script>
+  <script src="cloud-sync.js?v=20261102-2"></script>
+  <script src="app.js?v=20261102-2"></script>
 </body>
 </html>

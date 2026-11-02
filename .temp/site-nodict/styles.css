@@ -1,0 +1,2479 @@
+/* ============================================================
+ * WordCards 全局样式（护眼米黄纸感 · 精致化视觉层）
+ * ------------------------------------------------------------
+ * 注意：本文件里所有尺寸（卡片高度 clamp、--flashcard-pad、
+ * 正反面内边距、practice 输入框度量等）都被 app.js 或翻面
+ * 对齐逻辑依赖，改视觉时务必保留数值，只动颜色/阴影/圆角。
+ * ============================================================ */
+
+/* ==================== 设计令牌 ==================== */
+:root {
+  --primary: #4A90D9;
+  --primary-color: #4A90D9;
+  --primary-dark: #3A7BC8;
+  --secondary: #6C5CE7;
+  --success: #5A9E6F;
+  --warning: #E0A458;
+  --danger: #C96A50;
+  --border-color: #E6DFCE;
+  --divider: #E6DFCE;
+
+  /* 护眼基调：暖调米黄“纸感”，整体压低亮度差与蓝光 */
+  --bg-primary: #F1EEE7;
+  --bg-card: #FBFAF6;
+  /* 学习卡面：米黄纸感，比页面底色略亮以拉开层次 */
+  --card-bg: #F6F2E7;
+  /* 正文用偏暖的柔褐灰，不做纯黑、也不做高反差 */
+  --text-primary: #4A4438;
+  --text-secondary: #6B6355;
+  --text-light: #8F8878;
+
+  /* 阴影：多层「环境光 + 主光」组合，立体但不厚重 */
+  --shadow-sm: 0 1px 2px rgba(74, 60, 38, 0.05), 0 2px 6px -1px rgba(74, 60, 38, 0.08);
+  --shadow-md: 0 2px 4px -1px rgba(74, 60, 38, 0.06), 0 8px 18px -6px rgba(74, 60, 38, 0.14);
+  --shadow-lg: 0 4px 10px -4px rgba(74, 60, 38, 0.1), 0 20px 40px -16px rgba(74, 60, 38, 0.2);
+
+  /* 立体感辅助令牌：凸面顶部高光 / 凹槽内阴影 */
+  --edge-light: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  --edge-groove: inset 0 1px 3px rgba(74, 60, 38, 0.08);
+
+  /* 圆角：全部收敛为 8px（与早期版本一致，卡片/按钮/输入框同弧） */
+  --radius-sm: 8px;
+  --radius-md: 8px;
+  --radius-lg: 8px;
+  --radius-language-badge: 14px;
+
+  --font-size-xs: 12px;
+  --font-size-sm: 14px;
+  --font-size-md: 16px;
+  --font-size-lg: 20px;
+  --font-size-xl: 28px;
+  --font-size-xxl: 36px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  height: 100%;
+  height: 100dvh;
+  /* font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC','Hiragino Sans GB', 'Microsoft YaHei', Roboto, Oxygen, Ubuntu, sans-serif; */
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  overflow: hidden;
+}
+
+/* 表单控件默认不继承页面字体（UA 会给控件另赋字体），统一改成继承 */
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+
+::selection {
+  background: rgba(74, 144, 217, 0.22);
+}
+
+/* ==================== 页面容器 ==================== */
+.app-container {
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  max-width: 480px;
+  min-width: 320px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  /* 顶部暖光晕 + 对角两抹极淡的蓝/紫氛围光，背景不再是一片平色 */
+  background:
+    radial-gradient(120% 24% at 50% 0%, rgba(255, 253, 247, 0.9) 0%, rgba(255, 253, 247, 0) 100%),
+    radial-gradient(60% 32% at 100% 0%, rgba(108, 92, 231, 0.055) 0%, rgba(108, 92, 231, 0) 100%),
+    radial-gradient(60% 32% at 0% 100%, rgba(74, 144, 217, 0.055) 0%, rgba(74, 144, 217, 0) 100%),
+    var(--bg-primary);
+  overflow: hidden;
+  position: relative;
+}
+
+/* 纸张颗粒：极淡噪点叠加，增强「纸面」立体质感（不拦截任何交互） */
+.app-container::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.035;
+  mix-blend-mode: multiply;
+}
+
+/* ==================== 头部 ==================== */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  /* PWA 全屏时顶部留出刘海/状态栏安全区，避免标题被遮挡 */
+  padding-top: calc(12px + env(safe-area-inset-top, 0px));
+  /* 顶部微亮渐变 + 柔和投影：头部像一条浅浮雕条 */
+  background: linear-gradient(180deg, #FCFBF8 0%, var(--bg-card) 100%);
+  border-bottom: 1px solid rgba(230, 223, 206, 0.9);
+  box-shadow: 0 2px 10px -6px rgba(74, 60, 38, 0.16);
+  position: relative;
+  z-index: 100;
+}
+
+.header h1 {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--primary);
+  filter: drop-shadow(0 1px 1px rgba(74, 60, 38, 0.08));
+}
+
+.dict-update-time {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-light);
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==================== 底部导航 ==================== */
+.bottom-nav {
+  display: flex;
+  background: linear-gradient(0deg, #FCFBF8 0%, var(--bg-card) 100%);
+  padding: 6px 8px;
+  padding-bottom: max(6px, env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(230, 223, 206, 0.9);
+  box-shadow: 0 -8px 20px -14px rgba(74, 60, 38, 0.15);
+  position: relative;
+  z-index: 100;
+}
+
+.nav-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  border: none;
+  background: none;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.15s;
+}
+
+.nav-item svg {
+  width: 24px;
+  height: 24px;
+  fill: var(--text-light);
+  transition: fill 0.2s, transform 0.2s;
+}
+
+.nav-item span {
+  font-size: var(--font-size-xs);
+  color: var(--text-light);
+  transition: color 0.2s;
+}
+
+.nav-item:active {
+  transform: scale(0.92);
+}
+
+.nav-item.active {
+  /* 仅用图标与文字颜色表达选中态，不铺背景色块 */
+  background: none;
+}
+
+.nav-item.active svg {
+  fill: var(--primary);
+  transform: translateY(-1px);
+}
+
+.nav-item.active span {
+  color: var(--primary);
+  font-weight: 500;
+}
+
+/* ==================== 页面内容 ==================== */
+.page-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  background: var(--bg-card);
+}
+
+.page-content::-webkit-scrollbar {
+  width: 5px;
+}
+
+.page-content::-webkit-scrollbar-thumb {
+  background: rgba(74, 60, 38, 0.18);
+  border-radius: 999px;
+}
+
+.page-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.page {
+  display: none;
+  flex-direction: column;
+  height: 100%;
+}
+
+.page.active {
+  display: flex;
+  animation: fadeIn 0.3s ease;
+}
+
+/* 词库页内容可能超过一屏，需要让 .page 随内容变高，
+   才能让 .library-header 的 position: sticky 全程保持吸顶 */
+#libraryPage {
+  height: auto;
+  min-height: 100%;
+}
+
+/* 学习页：等待首次云同步时的遮罩以本页为定位基准 */
+#learnPage {
+  position: relative;
+}
+
+/* 切页入场动画：只做淡入，不做位移（位移会把内容顶出滚动容器、闪滚动条） */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ==================== 学习页面 ==================== */
+/* 首次云同步遮罩：盖住整页学习内容，避免先显示本机的 0/100 */
+.learn-sync-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.learn-sync-spinner {
+  width: 30px;
+  height: 30px;
+  border: 3px solid rgba(74, 144, 217, 0.18);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: learnSyncSpin 0.8s linear infinite;
+}
+
+@keyframes learnSyncSpin {
+  to { transform: rotate(360deg); }
+}
+
+.learn-container {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  /* min-height 代替固定 height：空间不足时由 .page-content 出滚动条 */
+  min-height: 100%;
+  padding: 8px 14px;
+  box-sizing: border-box;
+  /* 底色保持 --bg-card，仅叠加两角极淡的氛围光 */
+  background:
+    radial-gradient(50% 22% at 100% 0%, rgba(108, 92, 231, 0.04) 0%, rgba(108, 92, 231, 0) 100%),
+    radial-gradient(50% 22% at 0% 0%, rgba(74, 144, 217, 0.04) 0%, rgba(74, 144, 217, 0) 100%),
+    var(--bg-card);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.progress-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.progress-track {
+  flex: 1;
+  height: 6px;
+  background: linear-gradient(180deg, #EDE6D4 0%, var(--card-bg) 100%);
+  /* background: #E9E2D0; */
+  border-radius: 999px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 3px rgba(74, 60, 38, 0.12), inset 0 -1px 0 rgba(255, 255, 255, 0.6);
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary), var(--secondary));
+  border-radius: 999px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 0 8px rgba(108, 92, 231, 0.35);
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: var(--font-size-sm);
+  color: var(--text-light);
+  font-weight: 400;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.stat-card {
+  flex: 1;
+  background: linear-gradient(180deg, #FDFCF9 0%, var(--bg-card) 100%);
+  padding: 6px 6px 8px 6px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(230, 223, 206, 0.9);
+  box-shadow: var(--edge-light), var(--shadow-sm);
+  text-align: center;
+  cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.15s;
+}
+
+.stat-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--edge-light), var(--shadow-md);
+}
+
+.stat-card:active {
+  transform: scale(0.97);
+}
+
+/* 统计卡配色成对统一：今日两张卡=金色系、累计两张卡=绿色系，
+   避免与底部「跳过」按钮的蓝灰色顺色，数值颜色随卡片成对一致 */
+.stats-row .stat-card:nth-child(1),
+.stats-row .stat-card:nth-child(2) {
+  background: linear-gradient(180deg, rgba(224, 164, 88, 0.11), rgba(224, 164, 88, 0.015) 62%), linear-gradient(180deg, #FDFCF9, var(--bg-card));
+  border-color: rgba(224, 164, 88, 0.24);
+}
+
+.stats-row .stat-card:nth-child(3),
+.stats-row .stat-card:nth-child(4) {
+  background: linear-gradient(180deg, rgba(90, 158, 111, 0.1), rgba(90, 158, 111, 0.015) 62%), linear-gradient(180deg, #FDFCF9, var(--bg-card));
+  border-color: rgba(90, 158, 111, 0.22);
+}
+
+.stats-row .stat-card:nth-child(1) .stat-value,
+.stats-row .stat-card:nth-child(2) .stat-value { color: #C08A2E; }
+
+.stats-row .stat-card:nth-child(3) .stat-value,
+.stats-row .stat-card:nth-child(4) .stat-value { color: var(--success); }
+
+.notice {
+  font-size: var(--font-size-xs);
+  /* color: #5B87B8; */
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  /* background: rgba(74, 144, 217, 0.08); */
+  background: linear-gradient(180deg, #F9F0E4 0%, #F6EDE2 100%);
+  border: 1px solid rgba(224, 190, 140, 0.3);
+  box-shadow: var(--edge-light);
+  border-radius: 6px;
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.stat-value-sum {
+  color: #C08A2E;
+}
+
+.stat-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+/* ==================== 单词卡片 ==================== */
+.card-stack {
+  width: 100%;
+  height: auto;
+  /* flex: 1 让卡片区域吃掉进度条/统计/按钮之外的全部剩余高度 */
+  flex: 1;
+  /* 卡片(320 下限) + 按钮区(88) + 卡片区上下内边距(12) ≈ 420：
+     空间不足时由这里撑开、页面出滚动条，而不是把卡片压矮 */
+  min-height: 420px;
+  position: relative;
+  perspective: 1000px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 4px 0 8px;
+  overflow: visible;
+}
+
+.flashcard {
+  width: 100%;
+  /* 高度只在这里定义一次（短屏保底 320px，最多 460px：如果去掉了notice提示栏，则可跳转到480px）；
+     写进 max-width:400 断点对 412/430px 手机无效 */
+  /* height: clamp(320px, calc(100% - 96px), 460px);  */
+     height: clamp(320px, calc(100% - 96px), 480px); 
+  /* 不允许被 flex 压缩：空间不够时由 .card-stack 的 min-height 撑开 */
+  flex-shrink: 0;
+  /* 卡面：米黄纸感 + 淡描边 + 柔和投影 */
+  background: linear-gradient(160deg, #FAF6EC 0%, var(--card-bg) 100%);
+  border: 1px solid #EBE4D3;
+  border-radius: var(--radius-lg);
+  /* 立体感：顶部受光高光 + 底部环境投影 + 大范围柔和落影（卡面底色不变） */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    inset 0 -22px 36px -26px rgba(74, 60, 38, 0.13),
+    0 2px 4px -2px rgba(74, 60, 38, 0.08),
+    0 16px 32px -16px rgba(74, 60, 38, 0.10);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  /* 背面用负 inset 往外扩出这一圈内边距，保证两面卡面等大 */
+  --flashcard-pad: 16px;
+  padding: var(--flashcard-pad);
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: transform 0.3s, box-shadow 0.3s;
+  touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.flashcard:active {
+  cursor: grabbing;
+  box-shadow: var(--shadow-lg);
+}
+
+.flashcard-inner {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  /* 正反两面都以 inset:0 绝对定位铺满本层，flex 只服务于初始静态标记 */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  transform-style: preserve-3d;
+  -webkit-transform-style: preserve-3d;
+  transition: transform 0.45s cubic-bezier(.2,.8,.2,1);
+  -webkit-transition: -webkit-transform 0.45s cubic-bezier(.2,.8,.2,1);
+}
+
+/* 正反面共用的“卡片正文”盒子：靠上留固定内边距（两面数值一致），
+   行间距统一交给 gap，保证翻转前后文字落在同一水平位置 */
+.card-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 30px;
+  gap: 10px;
+  text-align: center;
+}
+
+.flashcard .word {
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.flashcard .phonetic {
+  font-size: 18px;
+  color: var(--text-primary);
+  /* 正面第一行 .word(28px) 比背面第一行 .meaning(20px) 行盒略高，
+     补 4px 把两面的第二行拉回同一水平位置 */
+  margin-top: 4px;
+}
+
+.flashcard .meaning {
+  font-size: var(--font-size-lg);
+  color: var(--text-secondary);
+  line-height: 1.6;
+  font-weight: 700;
+}
+
+/* 释义 / 音标只保留左右内边距（上下内边距会造成翻面后正文下移） */
+.meaning,
+.phonetic {
+  padding: 0 10px;
+}
+
+.flashcard .example {
+  font-size: 18px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  max-width: 100%;
+}
+
+/* 卡片正文允许长按/拖选复制：只放开文字节点，按钮与角标仍不可选 */
+.flashcard .word,
+.flashcard .phonetic,
+.flashcard .cantonese-word,
+.flashcard .meaning,
+.flashcard .example,
+.flashcard .cantonese-example {
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+  cursor: text;
+}
+
+/* 语言角标：顶部水平居中 */
+.flashcard-badge-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 0;
+  z-index: 2;
+  pointer-events: none;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+}
+
+.flashcard-badge-row .language-badge {
+  pointer-events: auto;
+}
+
+.favorite-btn {
+  position: absolute;
+  top: 0px;
+  left: 0px;
+  width: 44px;
+  height: 44px;
+  border: none;
+  background: rgba(233, 30, 99, 0.1);
+  border-radius: 50%;
+  box-shadow: inset 0 1px 2px rgba(74, 60, 38, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+/* 右侧收藏按钮：与左上角左右对称，状态由同一套逻辑同步 */
+.favorite-btn-right {
+  left: auto;
+  right: 0px;
+}
+
+.favorite-btn:active {
+  transform: scale(0.9);
+}
+
+.favorite-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: var(--text-light);
+  transition: all 0.2s;
+}
+
+.favorite-btn.active svg {
+  fill: #E91E63;
+}
+
+.favorite-btn.active {
+  background: rgba(233, 30, 99, 0.2);
+}
+
+.flashcard-back .favorite-btn svg {
+  fill: rgba(255, 255, 255, 0.7);
+}
+
+.flashcard-back .favorite-btn {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.flashcard-back .favorite-btn.active svg {
+  fill: #FFCDD2;
+}
+
+.flashcard-back .favorite-btn.active {
+  background: rgba(233, 30, 99, 0.3);
+}
+
+.flashcard .tap-hint {
+  position: absolute;
+  bottom: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--text-light);
+  opacity: 0.85;
+}
+
+.flashcard-back .tap-hint-back {
+  color: rgba(255, 255, 255, 0.78);
+  /* 背面底色外扩后，底部提示要补回同样内边距才与正面同高 */
+  bottom: calc(6px + var(--flashcard-pad));
+}
+
+.flashcard .language-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  background: linear-gradient(135deg, #5B9BE0 0%, var(--primary) 100%);
+  color: white;
+  font-size: 12px;
+  border-radius: var(--radius-language-badge);
+  white-space: nowrap;
+  line-height: 1.2;
+  box-shadow: 0 2px 6px -1px rgba(74, 144, 217, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.flashcard .category-badge {
+  background: linear-gradient(135deg, #67AE7E 0%, var(--success) 100%);
+  box-shadow: 0 2px 6px -1px rgba(90, 158, 111, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+/* 分类标签可点击：跳转词库并按该分类筛选 */
+.flashcard .category-badge.clickable-badge {
+  cursor: pointer;
+}
+
+/* 学习卡第一位标签：当前「学习范围」 */
+.flashcard .scope-badge {
+  background: linear-gradient(135deg, #D19A3F 0%, #C08A2E 100%);
+  box-shadow: 0 2px 6px -1px rgba(192, 138, 46, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.flashcard .cantonese-word {
+  font-size: var(--font-size-lg);
+  color: var(--text-secondary);
+  margin-top: 8px;
+}
+
+.flashcard .cantonese-example {
+  font-size: 18px;
+  color: var(--text-secondary);
+  margin-top: 12px;
+  font-style: italic;
+}
+
+.flashcard-front {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* 正文上移由内部 .card-content 的 padding-top 控制，两面数值一致 → 翻转不错位 */
+  justify-content: flex-start;
+  text-align: center;
+  /* 将padding 20px 改成了 14px，背面蓝色背景也要改成 14px  */
+  padding: 14px;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  border-radius: var(--radius-lg);
+}
+
+.flashcard-back {
+  position: absolute;
+  /* 向外扩出卡片的内边距：整块蓝紫底色正好铺满卡面，与正面等大。
+     不能再写 width/height:100%（会与负 inset 冲突导致尺寸错位） */
+  inset: calc(var(--flashcard-pad) * -1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: center;
+  /* 与正面同一套内边距（14px 内容边距 + 扩出去的一圈） */
+  padding: calc(14px + var(--flashcard-pad));
+  transform: rotateY(180deg);
+  -webkit-transform: rotateY(180deg);
+  /* 护眼：去饱和的柔和暖蓝紫；顶部受光、底部压暗，色面更有体积感 */
+  background:
+    radial-gradient(120% 70% at 50% 0%, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0) 55%),
+    linear-gradient(135deg, #5C86C4 0%, #7A72C8 100%);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  border-radius: var(--radius-lg);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    inset 0 -28px 44px -28px rgba(30, 28, 80, 0.32),
+    0 16px 36px -16px rgba(76, 88, 160, 0.4);
+}
+
+.flashcard-back .speak-btn,
+.flashcard-back .favorite-btn {
+  display: none;
+}
+
+.flashcard-back .meaning {
+  /* 米白而非纯白，配柔和蓝紫底降低强反差 */
+  color: #F4F6F1;
+  font-size: var(--font-size-xl);
+}
+
+.flashcard-back .example {
+  color: #E7ECE3;
+}
+
+.flashcard.flipped .flashcard-inner {
+  transform: rotateY(180deg);
+  -webkit-transform: rotateY(180deg);
+}
+
+/* 背朝自己的一面不接收指针事件、不参与原生文字选中：
+   Chrome 命中测试按元素“自身”变换做背面剔除，翻到背面后
+   看不见的正面反而会被命中（拖选会复制到看不见的文字） */
+.flashcard:not(.flipped) .flashcard-back,
+.flashcard.flipped .flashcard-front {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 翻面后彻底隐藏正面角标（避免透视合成叠层穿透或镜像残留） */
+.flashcard.flipped .flashcard-front .flashcard-badge-row {
+  display: none !important;
+}
+
+.card-actions {
+  display: flex;
+  justify-content: space-around;
+  gap: 12px;
+  padding: 12px 8px calc(8px + env(safe-area-inset-bottom));
+  margin: 0 -8px;
+  flex-shrink: 0;
+  /* 不铺底色：紧贴卡片下方会被不透明底色把卡片圆角投影切成直角硬边，
+     保持透明让卡片投射的柔和阴影自然过渡 */
+  background: transparent;
+}
+
+.action-btn {
+  flex: 1;
+  min-width: 80px;
+  height: 70px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: all 0.2s;
+  border-radius: var(--radius-md);
+  /* 键帽式立体：顶部高光 + 底部落影，按下时「沉入」面板 */
+  box-shadow:
+    var(--edge-light),
+    0 2px 3px -1px rgba(74, 60, 38, 0.1),
+    0 6px 14px -6px rgba(74, 60, 38, 0.1);
+}
+
+.action-btn:active {
+  transform: translateY(2px) scale(0.97);
+  box-shadow:
+    var(--edge-light),
+    inset 0 2px 6px rgba(74, 60, 38, 0.12),
+    0 1px 2px rgba(74, 60, 38, 0.08);
+}
+
+.action-btn svg {
+  width: 24px;
+  height: 24px;
+}
+
+.action-btn span {
+  font-size: 11px;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+}
+
+.action-btn.difficult {
+  background: linear-gradient(180deg, #F8EEE0 0%, #F3E6D6 100%);
+  border-color: #E8D5BE;
+}
+
+.action-btn.difficult svg {
+  fill: var(--danger);
+}
+
+.action-btn.skip {
+  background: linear-gradient(180deg, #EFF3F7 0%, #E9EEF2 100%);
+  border-color: #D9E2EA;
+}
+
+.action-btn.skip svg {
+  fill: #7E93A8;
+}
+
+.action-btn.mastered {
+  background: linear-gradient(180deg, #E9F0E3 0%, #E3EBDD 100%);
+  border-color: #D2E0C8;
+}
+
+.action-btn.mastered svg {
+  fill: var(--success);
+}
+
+/* 当前学习范围已学完：占满卡片区域引导用户切换范围，
+   三个操作按钮保持可见但置灰 */
+.scope-complete {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+}
+
+.scope-complete-title {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.scope-restart-btn {
+  min-width: 168px;
+  padding: 12px 40px;
+  margin-top: 4px;
+}
+
+.scope-complete-desc {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.card-actions.actions-disabled .action-btn,
+.card-actions .action-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.card-actions.actions-disabled .action-btn:active {
+  transform: none;
+}
+
+/* ==================== 完成页面 ==================== */
+.complete-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.complete-title {
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.complete-title::before {
+  content: '🎉';
+  display: block;
+  font-size: 52px;
+  line-height: 1;
+  margin-bottom: 14px;
+}
+
+.complete-subtitle {
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+  margin-bottom: 32px;
+}
+
+.complete-stats {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 40px;
+}
+
+.complete-stat {
+  text-align: center;
+}
+
+.complete-stat-value {
+  font-size: var(--font-size-xxl);
+  font-weight: 700;
+}
+
+.complete-stat-value.masters {
+  color: var(--success);
+}
+
+.complete-stat-value.reviews {
+  color: var(--warning);
+}
+
+.complete-stat-label {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.btn-primary {
+  padding: 16px 48px;
+  background: linear-gradient(135deg, #5B9BE0 0%, var(--primary) 45%, var(--secondary) 100%);
+  color: white;
+  border: none;
+  border-radius: var(--radius-lg);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 4px 10px -3px rgba(74, 144, 217, 0.5),
+    0 10px 24px -10px rgba(108, 92, 231, 0.45);
+}
+
+.btn-primary:active {
+  transform: translateY(1px) scale(0.98);
+  box-shadow:
+    inset 0 2px 6px rgba(30, 60, 110, 0.3),
+    0 2px 6px -2px rgba(74, 144, 217, 0.4);
+}
+
+/* ==================== 练习页面 ==================== */
+/* 练习页 = 学习页的精简版：去掉滑动提示/收藏/操作按钮，卡片下方换成音标输入框 */
+.practice-container {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding: 8px 14px;
+  box-sizing: border-box;
+  /* 底色保持 --bg-card，仅叠加两角极淡的氛围光 */
+  background:
+    radial-gradient(50% 22% at 100% 0%, rgba(108, 92, 231, 0.04) 0%, rgba(108, 92, 231, 0) 100%),
+    radial-gradient(50% 22% at 0% 0%, rgba(74, 144, 217, 0.04) 0%, rgba(74, 144, 217, 0) 100%),
+    var(--bg-card);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+/* 卡片高度直接取学习卡的实测高度（--learn-card-height，见 app.js），
+   量不到时回退成与学习卡相同的 clamp 公式 */
+.practice-card-stack {
+  flex: 1;
+  min-height: 0;
+  justify-content: flex-start;
+}
+
+.practice-card-stack .flashcard {
+  height: var(--learn-card-height, clamp(320px, calc(100% - 96px), 460px));
+  /* 只收缩、不放大：空间不够时按剩余高度收缩，卡片区不留空白 */
+  flex: 0 1 auto;
+  max-height: var(--learn-card-height, 460px);
+  min-height: 0;
+  cursor: pointer;
+}
+
+.practice-card-stack .flashcard:active {
+  cursor: pointer;
+}
+
+/* 背面的音标是本题答案：固定在卡片顶部居中，位置与正面标签一致 */
+.practice-card-stack .flashcard-back .practice-back-phonetic {
+  position: absolute;
+  /* 加回 .flashcard-back 外扩的一圈，屏幕上才与正面标签的 top:0 对齐 */
+  top: var(--flashcard-pad);
+  left: 0;
+  right: 0;
+  margin-top: 0;
+  padding: 0 calc(10px + var(--flashcard-pad));
+  text-align: center;
+  color: #FBF7E8;
+  font-weight: 700;
+  z-index: 2;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+}
+
+.practice-card-stack .flashcard-back .example {
+  margin-top: 4px;
+}
+
+/* ---------- 输入区域 ---------- */
+.practice-input-area {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  caret-color: transparent;
+  gap: 6px;
+  /* 顶部 12px = 学习页「卡片 → 操作按钮」的间距；左右与卡片对齐 */
+  padding: 12px 0 4px;
+  /* 与学习页 .card-actions 保持一致：不铺底色，
+     让卡片圆角投影自然过渡，避免被切成直角硬边 */
+  background: transparent;
+}
+
+/* 键盘开关：输入区下方的小手柄，居中且不占输入框宽度 */
+.practice-keyboard-toggle {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 64px;
+  height: 22px;
+  margin-top: 2px;
+  padding: 0;
+  border: 1px solid #E5DECC;
+  border-radius: 11px;
+  background: linear-gradient(180deg, #FFFDF8 0%, #F6F1E3 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 2px 4px -1px rgba(74, 60, 38, 0.16);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s;
+  touch-action: manipulation;
+}
+
+.practice-keyboard-toggle:active {
+  background: #E7E1D2;
+}
+
+.practice-keyboard-toggle svg {
+  width: 20px;
+  height: 20px;
+  fill: var(--text-secondary);
+  transition: transform 0.15s;
+}
+
+/* 键盘展开时箭头翻转向下 */
+.practice-keyboard-toggle.active svg {
+  transform: rotate(180deg);
+}
+
+/* 输入框与「着色显示层」叠在一起：input 存值/交互，显示层渲染可见文字。
+   两层的字体/内边距/边框度量必须完全一致，文字才不会错位 */
+.practice-input-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.practice-input {
+  width: 100%;
+  padding: 10px 16px;
+  font-size: 18px;
+  letter-spacing: 1px;
+  text-align: center;
+  color: transparent;
+  background: var(--bg-primary);
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  outline: none;
+  box-shadow: var(--edge-groove);
+  transition: border-color 0.18s, background 0.18s, box-shadow 0.18s;
+}
+
+.practice-input-display {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 16px;
+  border: 2px solid transparent;
+  font-size: 18px;
+  letter-spacing: 1px;
+  white-space: pre;
+  overflow: hidden;
+  color: var(--text-primary);
+  pointer-events: none;
+}
+
+/* 音节之间的空格占位（flex 容器里裸空白文本节点不会被渲染） */
+.practice-input-display .sep {
+  white-space: pre;
+}
+
+/* 输入正确的音节：绿色 */
+.practice-input-display .ok {
+  color: var(--success);
+  font-weight: 500;
+}
+
+/* 输入错误的音节：红色（前缀不着色，保持默认色） */
+.practice-input-display .bad {
+  color: var(--danger);
+}
+
+.practice-input::placeholder {
+  font-size: 14px;
+  letter-spacing: 0;
+  color: var(--text-light);
+}
+
+.practice-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.14);
+}
+
+/* 与目标音标不一致：红色提示 */
+.practice-input.error,
+.practice-input.error:focus {
+  border-color: var(--danger);
+  background: rgba(201, 106, 80, 0.14);
+  box-shadow: none;
+}
+
+/* 整条音标全部正确：绿色提示 */
+.practice-input.success,
+.practice-input.success:focus {
+  border-color: var(--success);
+  background: rgba(90, 158, 111, 0.16);
+  box-shadow: none;
+}
+
+.practice-hint {
+  min-height: 16px;
+  margin: 6px 0px;
+  font-size: var(--font-size-xs);
+  color: var(--text-light);
+  text-align: center;
+}
+
+.practice-hint.error {
+  color: var(--danger);
+}
+
+.practice-hint.success {
+  color: var(--success);
+  font-weight: 600;
+}
+
+/* ---------- 固定键盘（底部菜单栏上方） ---------- */
+.practice-keyboard {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 0 2px;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.practice-keyboard-row {
+  display: flex;
+  gap: 5px;
+}
+
+.practice-key {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0;
+  border: 1px solid #E5DECC;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #FFFEFB 0%, #FFFDF8 100%);
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 2px 0 #E7DFC9,
+    0 4px 6px -3px rgba(74, 60, 38, 0.16);
+  transition: background 0.12s, color 0.12s, transform 0.08s, box-shadow 0.12s;
+}
+
+.practice-key:active {
+  background: linear-gradient(180deg, #5B9BE0 0%, var(--primary) 100%);
+  border-color: var(--primary);
+  color: white;
+  transform: translateY(1px);
+  box-shadow:
+    inset 0 2px 4px rgba(30, 70, 120, 0.3),
+    0 1px 0 #E7DFC9;
+}
+
+/* 数字键（粤拼调值 1~6）用略深的底色区分 */
+.practice-key.is-digit {
+  /* background: #F2EDDF; */
+  border-color: #E3DBC6;
+  color: #B07C2A;
+  font-weight: 600;
+}
+
+.practice-key.is-wide {
+  flex: 1.6;
+}
+
+/* 矮屏把键盘压低一点，给卡片多留几个像素 */
+@media (max-height:640px) {
+  .practice-keyboard {
+    gap: 4px;
+    padding-top: 6px;
+  }
+
+  .practice-keyboard-row {
+    gap: 4px;
+  }
+
+  .practice-key {
+    height: 32px;
+    font-size: 15px;
+  }
+}
+
+/* ==================== 卡片横屏（学习页 · 右上角按钮手动切换） ====================
+   卡片右上角「横竖屏」按钮点击（body.learn-landscape 由 app.js 维护）：
+   学习页卡片区（统计数字 + 单词卡 + 顶部标签 + 操作按钮）作为一个整体顺时针
+   旋转 90° 横屏铺满，再点一次逆时针转回竖屏。整体旋转 = 只旋转内容文字/数值/
+   按钮/图标，不改变任何按钮的尺寸；顶部标签（全部 / 字·短语 / 分类）与收藏
+   按钮仍在卡片顶部，跳过/掌握/陌生仍在卡片下方；过长内容一律省略号截断。 */
+
+/* 旋转动画只在按钮切换瞬间启用（body.learn-anim 由 app.js 短暂添加、动画结束移除）：
+   切页恢复时不播动画、直接落位，卡片高度的测量也不会量到动画中间态 */
+body.learn-anim #learnPage .learn-container {
+  transition: transform 0.4s cubic-bezier(.2, .8, .2, 1);
+}
+
+body.learn-landscape #learnPage .learn-container {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  /* 旋转 90° 后视觉尺寸 = (height 宽 × width 高)：宽取视口高（转过来正好铺满竖向），
+     高取 min(视口宽, 480px)（应用单列上限，转过来不超过横向） */
+  width: 100vh;
+  width: 100dvh;
+  height: min(100vw, 480px);
+  min-height: 0;
+  border-radius: 0;
+  z-index: 200;
+  /* 横屏：顺时针旋转 90° */
+  transform: translate(-50%, -50%) rotate(90deg);
+  /* 横屏下溢出内容收在这一层内，绝不盖到屏幕外 */
+  overflow: hidden;
+  padding: 6px 12px;
+}
+
+/* 卡片右上角「横竖屏」按钮（替代原右上角收藏按钮）：与收藏按钮同规格的
+   44×44 圆形按钮，不改变按钮大小；圆圈里是横竖屏旋转小图标 */
+.rotate-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 44px;
+  height: 44px;
+  border: none;
+  background: rgba(74, 144, 217, 0.12);
+  border-radius: 50%;
+  box-shadow: inset 0 1px 2px rgba(74, 60, 38, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  z-index: 3;
+}
+
+.rotate-btn:active {
+  transform: scale(0.9);
+}
+
+/* 旋转图标：线条风格（fill:none + stroke），颜色随激活态变化 */
+.rotate-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: #7E93A8;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.rotate-btn.active {
+  background: rgba(74, 144, 217, 0.3);
+}
+
+.rotate-btn.active svg {
+  stroke: var(--primary);
+}
+
+/* ---- 旋转后过长内容统一省略号截断（不溢出、不覆盖） ---- */
+/* 单词 / 音标 / 粤字：单行，超出宽度显示「…」 */
+body.learn-landscape #learnPage .flashcard .word,
+body.learn-landscape #learnPage .flashcard .phonetic,
+body.learn-landscape #learnPage .flashcard .cantonese-word {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 释义 / 例句：多行，超出部分省略号截断，避免长文本盖住下方内容 */
+body.learn-landscape #learnPage .flashcard .meaning {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+
+body.learn-landscape #learnPage .flashcard .example,
+body.learn-landscape #learnPage .flashcard .cantonese-example {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+/* 统计卡：数值与标签单行，过长省略 */
+body.learn-landscape #learnPage .stat-value,
+body.learn-landscape #learnPage .stat-label {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 卡片顶部标签（全部 / 字/短语 / 分类）：每个标签限宽，过长省略；
+   左上收藏按钮与右上横竖屏按钮是绝对定位的固定尺寸，不受影响 */
+body.learn-landscape #learnPage .flashcard-badge-row {
+  padding: 0 48px;
+  overflow: hidden;
+}
+
+body.learn-landscape #learnPage .flashcard-badge-row .language-badge {
+  max-width: 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- 横屏内部空间有限：隐藏滑动提示（不在旋转元素清单内）、放开卡片区
+   最小高度，保证统计数字、卡片、操作按钮在任意机型都放得下且互不覆盖 ---- */
+body.learn-landscape #learnPage .notice {
+  display: none;
+}
+
+/* 横屏精简显示（竖屏不受影响）：隐藏顶部四个统计卡（今日/累计 已掌握/待复习），
+   空间让给单词卡本体；进度条保留 */
+body.learn-landscape #learnPage .stats-row {
+  display: none;
+}
+
+/* 横屏精简显示：卡片底部的操作提示行隐藏（正反两面的 tap-hint） */
+body.learn-landscape #learnPage .flashcard .tap-hint {
+  display: none;
+}
+
+body.learn-landscape #learnPage .card-stack {
+  min-height: 0;
+  justify-content: space-evenly;
+  padding: 0;
+  overflow: hidden;
+}
+
+body.learn-landscape #learnPage .flashcard {
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 100px;
+  max-height: 460px;
+  overflow: hidden;
+}
+
+body.learn-landscape #learnPage .card-content {
+  padding-top: 10px;
+  gap: 6px;
+}
+
+body.learn-landscape #learnPage .card-actions {
+  /* 横屏容器已自带 12px 内边距，负 margin 会把按钮挤出容器边缘 */
+  margin: 0;
+  /* 左右 padding 归零：三个按钮（含最左/最右）与上方卡片区域两侧完全对齐 */
+  padding: 6px 0;
+  gap: 10px;
+}
+
+/* 横屏精简显示：操作按钮去掉图标只留文字，高度按文字内容自适应；
+   文字稍大保证横屏可读性，颜色沿用各自按钮的语义色 */
+body.learn-landscape #learnPage .action-btn {
+  height: auto;
+  min-width: 0;
+  padding: 8px 6px;
+  gap: 0;
+}
+
+body.learn-landscape #learnPage .action-btn svg {
+  display: none;
+}
+
+body.learn-landscape #learnPage .action-btn span {
+  font-size: 14px;
+  letter-spacing: 0.5px;
+}
+
+body.learn-landscape #learnPage .action-btn.mastered span {
+  color: var(--success);
+  font-weight: 500;
+}
+
+body.learn-landscape #learnPage .action-btn.difficult span {
+  color: var(--danger);
+  font-weight: 500;
+}
+
+body.learn-landscape #learnPage .action-btn.skip span {
+  color: #6E8298;
+  font-weight: 500;
+}
+
+/* ==================== 词库页面 ==================== */
+.library-header {
+  padding: 14px 14px;
+  background: linear-gradient(180deg, #FCFBF8 0%, var(--bg-card) 100%);
+  box-shadow: 0 6px 16px -10px rgba(74, 60, 38, 0.16);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* 词库范围统计行 */
+.dict-scope-counts {
+  font-size: 12px;
+  color: var(--text-light);
+  margin-bottom: 10px;
+  margin-left: 4px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+.dict-scope-counts .scope-active {
+  color: var(--primary, #4A90D9);
+  font-weight: 600;
+}
+
+.dict-scope-counts .scope-sep {
+  margin: 0 6px;
+  color: #D8D2C2;
+}
+
+/* 筛选行 */
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+/* 分类下拉多选 */
+.category-dropdown {
+  position: relative;
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.dropdown-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: var(--bg-primary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: var(--edge-groove);
+  transition: all 0.2s;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.dropdown-trigger:hover {
+  border-color: var(--border-color);
+}
+
+.dropdown-trigger svg {
+  width: 16px;
+  height: 16px;
+  fill: var(--text-secondary);
+  transition: transform 0.2s;
+}
+
+.category-dropdown.active .dropdown-trigger {
+  border-color: var(--primary);
+}
+
+/* 下拉内已有筛选条件（未全选分类）时：收起状态也保持蓝色描边，便于一眼看出「有条件已被筛选」 */
+.category-dropdown.has-filter .dropdown-trigger {
+  border: 1px solid var(--primary);
+  box-shadow: var(--edge-light), var(--shadow-sm);
+}
+
+.category-dropdown.active .dropdown-trigger svg {
+  transform: rotate(180deg);
+  fill: var(--primary);
+}
+
+.dropdown-content {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 8px;
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 200;
+}
+
+/* 搜索框固定在下拉顶部，选项列表独立滚动 */
+.dropdown-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.dropdown-search svg {
+  width: 16px;
+  height: 16px;
+  fill: var(--text-light);
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+.dropdown-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}
+
+.dropdown-search input::placeholder {
+  color: var(--text-light);
+}
+
+.dropdown-list {
+  max-height: 204px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#categoryOptions {
+  display: contents;
+}
+
+.category-empty {
+  padding: 10px 12px;
+  text-align: center;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.category-dropdown.active .dropdown-content {
+  display: flex;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background 0.2s;
+}
+
+.dropdown-item:hover {
+  background: var(--bg-primary);
+}
+
+.dropdown-item input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: var(--primary);
+}
+
+.dropdown-item span {
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  background: var(--bg-primary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  padding: 10px 16px;
+  margin-bottom: 10px;
+  box-shadow: var(--edge-groove);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.search-box:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.12);
+  background: var(--bg-card);
+}
+
+.search-box svg {
+  width: 20px;
+  height: 20px;
+  fill: var(--text-light);
+  margin-right: 12px;
+}
+
+.search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 14px;
+  color: var(--text-primary); 
+}
+
+.search-input::placeholder {
+  color: var(--text-light);
+}
+
+.search-clear {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: var(--text-light);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s, background 0.15s;
+}
+
+.search-clear:active {
+  transform: scale(0.9);
+  background: var(--danger);
+}
+
+.search-clear svg {
+  width: 14px;
+  height: 14px;
+  fill: white;
+  margin-right: 0;
+}
+
+/* 状态筛选：分段控件样式（圆角与上方搜索框/下拉框保持一致） */
+.filter-tabs {
+  display: flex;
+  justify-content: space-between;
+  flex: 1;
+  padding: 4px;
+  background: var(--bg-primary);
+  border: 1px solid rgba(230, 223, 206, 0.6);
+  border-radius: var(--radius-md);
+  box-shadow: var(--edge-groove);
+}
+
+.filter-tab {
+  flex: 1;
+  margin: 0 1px;
+  padding: 8px 4px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.filter-tab.active {
+  background: linear-gradient(135deg, #5B9BE0 0%, var(--primary) 45%, var(--secondary) 100%);
+  color: white;
+  font-weight: 500;
+  box-shadow: 0 3px 8px -2px rgba(74, 144, 217, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.library-container {
+  padding: 20px 14px;
+  padding-bottom: calc(80px + env(safe-area-inset-bottom));
+  background: var(--bg-card);
+}
+
+.word-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.word-item {
+  background: linear-gradient(180deg, #FDFCF9 0%, var(--bg-card) 100%);
+  padding: 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(230, 223, 206, 0.85);
+  box-shadow: var(--edge-light), var(--shadow-sm);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.15s, border-color 0.2s;
+  gap: 12px;
+}
+
+.word-item:hover {
+  border-color: rgba(74, 144, 217, 0.35);
+  transform: translateY(-2px);
+  box-shadow: var(--edge-light), var(--shadow-md);
+}
+
+.word-item:active {
+  transform: scale(0.98);
+}
+
+.word-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.word-info h3 {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.word-info p {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.word-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.status-badge {
+  padding: 4px 10px;
+  border-radius: var(--radius-language-badge);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.status-badge.mastered {
+  background: #E3EBDD;
+  color: var(--success);
+}
+
+.status-badge.review {
+  background: #F3E6D6;
+  color: var(--danger);
+}
+
+.status-badge.new {
+  background: #E4E9F0;
+  color: var(--primary);
+}
+
+/* 状态转换标签 */
+.status-switch {
+  padding: 4px 10px;
+  border-radius: var(--radius-language-badge);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  transition: background 0.2s, transform 0.15s;
+}
+
+.status-switch:active {
+  transform: scale(0.94);
+}
+
+.status-switch.to-review {
+  background: #F3E6D6;
+  color: var(--danger);
+}
+
+.status-switch.to-review:hover {
+  background: #EBD8C2;
+}
+
+.status-switch.to-mastered {
+  background: #E3EBDD;
+  color: var(--success);
+}
+
+.status-switch.to-mastered:hover {
+  background: #D3E0C9;
+}
+
+/* 「➔收藏」标签：与「➔陌生 / ➔掌握」同形态，用收藏色区分 */
+.status-switch.favorite-switch {
+  background: #F7EEDA;
+  color: #C08A2E;
+}
+
+.status-switch.favorite-switch:hover {
+  background: #F0E1C4;
+}
+
+.word-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.word-action-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: var(--bg-primary);
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: var(--edge-groove);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s, background 0.15s;
+}
+
+.word-action-btn:active {
+  transform: scale(0.9);
+}
+
+.word-action-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: var(--text-secondary);
+}
+
+/* 词库列表的「查看」小眼睛：灰色、无底色 */
+.word-action-btn.library-view-btn {
+  width: 28px;
+  height: 28px;
+  background: transparent;
+}
+
+.word-action-btn.library-view-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: #9AA3AD;
+}
+
+.word-action-btn.unfavorite-btn {
+  background: rgba(233, 30, 99, 0.1);
+}
+
+.word-action-btn.unfavorite-btn svg {
+  fill: #E91E63;
+}
+
+.favorite-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  background: #F7EEDA;
+  color: #C08A2E;
+  white-space: nowrap;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+/* ==================== 空状态 ==================== */
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.empty-icon {
+  width: 100px;
+  height: 100px;
+  background: linear-gradient(160deg, rgba(74, 144, 217, 0.12) 0%, rgba(108, 92, 231, 0.06) 45%, var(--bg-primary) 100%);
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+  box-shadow: var(--edge-light), var(--shadow-md);
+}
+
+.empty-icon svg {
+  width: 50px;
+  height: 50px;
+  fill: #A9B4C2;
+}
+
+.empty-title {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.empty-desc {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  margin-bottom: 24px;
+  max-width: 280px;
+}
+
+/* ==================== 模态框 ==================== */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(45, 38, 24, 0.36);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.modal-overlay.active {
+  display: flex;
+}
+
+.modal {
+  width: 100%;
+  max-width: 480px;
+  max-height: 85vh;
+  background: var(--bg-card);
+  border: 1px solid rgba(230, 223, 206, 0.9);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  animation: fadeScaleIn 0.3s ease;
+  box-shadow:
+    var(--edge-light),
+    0 12px 28px -14px rgba(45, 38, 24, 0.22),
+    0 30px 70px -20px rgba(45, 38, 24, 0.38);
+}
+
+@keyframes fadeScaleIn {
+  from { transform: scale(0.9); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border-bottom: 1px solid var(--bg-primary);
+}
+
+.modal-title {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+}
+
+.modal-close {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: var(--bg-primary);
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, transform 0.15s;
+}
+
+.modal-close:active {
+  transform: scale(0.9);
+  background: #E7E1D2;
+}
+
+.modal-close svg {
+  width: 18px;
+  height: 18px;
+  fill: var(--text-secondary);
+}
+
+.modal-body {
+  padding: 20px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.modal-footer {
+  padding: 16px 20px;
+  border-top: 1px solid var(--bg-primary);
+  display: flex;
+  gap: 12px;
+}
+
+.modal-footer .btn-primary,
+.modal-footer .btn-secondary {
+  flex: 1;
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-secondary {
+  background: linear-gradient(180deg, #F7F4EB 0%, var(--bg-primary) 100%);
+  color: var(--text-primary);
+  border: 1px solid rgba(230, 223, 206, 0.8);
+  border-radius: 8px;
+  text-align: center;
+  box-shadow: var(--edge-light), 0 1px 3px rgba(74, 60, 38, 0.08);
+}
+
+.attention {
+  background: var(--danger);
+  color: white;
+  border-radius: var(--radius-sm);
+}
+
+/* ==================== 表单 ==================== */
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-label {
+  display: block;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+/* 「词汇」标签与它后面的语种标签排在同一行 */
+.form-label-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.form-label-row .form-label {
+  margin-bottom: 0;
+}
+
+/* 语种标签：与状态标签同形，配色淡紫 */
+.word-language-tag {
+  padding: 4px 10px;
+  border-radius: var(--radius-language-badge);
+  font-size: var(--font-size-xs);
+  /* font-weight: 500; */
+  background: #E8E3F5;
+  color: #5B4BC4;
+}
+
+.word-language-tag[hidden] {
+  display: none;
+}
+
+.form-input,
+.form-textarea,
+.form-select {
+  width: 100%;
+  padding: 8px 16px;
+  background: var(--bg-primary);
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  box-shadow: var(--edge-groove);
+  transition: all 0.2s;
+}
+
+.form-input:focus,
+.form-textarea:focus,
+.form-select:focus {
+  outline: none;
+  border-color: var(--primary);
+  background: var(--bg-card);
+  box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.12);
+}
+
+/* 查看模式（只读）下的输入框：文字保持深色，避免“淡到看不清” */
+.form-input:disabled,
+.form-textarea:disabled {
+  opacity: 1;
+  color: var(--text-primary);
+  -webkit-text-fill-color: var(--text-primary);
+  /* font-weight: 500; */
+  background: var(--bg-primary);
+  cursor: default;
+}
+
+.form-textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+/* ==================== 设置页面 ==================== */
+.settings-container {
+  padding: 20px 14px;
+  padding-bottom: calc(80px + env(safe-area-inset-bottom));
+  background: var(--bg-card);
+  min-height: calc(100%);
+}
+
+.settings-section {
+  background: linear-gradient(180deg, #FCFBF8 0%, var(--bg-card) 28px);
+  border: 1px solid rgba(230, 223, 206, 0.85);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--edge-light), var(--shadow-sm);
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.settings-section:last-child {
+  margin-bottom: 0;
+}
+
+.settings-section-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  padding: 14px 20px 12px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  /* 标题行背景色（取左侧图标的蓝紫色系，浅调不刺眼） */
+  background: rgba(74, 68, 56, 0.035);
+  /* 标题底部下划线 */
+  border-bottom: 1px solid var(--divider)
+}
+
+/* 标题前的彩色小竖条，区块更有节奏感（.cloud-title 自带双列布局） */
+/* .settings-section-title:not(.cloud-title)::before {
+  content: '';
+  width: 3px;
+  height: 13px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--primary), var(--secondary));
+  flex: 0 0 auto;
+} */
+
+.setting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--bg-primary);
+}
+
+.setting-item:last-child {
+  border-bottom: none;
+}
+
+.setting-item > .dict-select,
+.setting-item select.dict-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 70px;
+  font-size: 13px;
+  padding: 10px 28px 10px 14px;
+  box-sizing: border-box;
+}
+
+/* 「学习范围」选项最多 3 个字，需要比其它下拉框略宽 */
+.setting-item > select.study-scope-select,
+.setting-item select.study-scope-select {
+  max-width: 70px;
+  min-width: 0px;
+}
+
+.setting-info h4 {
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.setting-info p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  opacity: 0.65;
+}
+
+/* Toggle 开关 */
+.toggle {
+  width: 52px;
+  height: 32px;
+  background: #C9C2B0;
+  border-radius: 16px;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.3s;
+  flex: 0 0 auto;
+  box-shadow: inset 0 2px 4px rgba(74, 60, 38, 0.16), inset 0 -1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.toggle.active {
+  background: linear-gradient(135deg, #5B9BE0 0%, var(--primary) 45%, var(--secondary) 100%);
+  box-shadow: inset 0 2px 5px rgba(40, 62, 128, 0.3), inset 0 -1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.toggle::after {
+  content: '';
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(180deg, #FFFFFF 0%, #F4F1E9 100%);
+  border-radius: 50%;
+  top: 2px;
+  left: 2px;
+  transition: left 0.3s cubic-bezier(.34,1.3,.5,1);
+  box-shadow: 0 3px 6px rgba(74, 60, 38, 0.3), 0 1px 2px rgba(74, 60, 38, 0.2);
+}
+
+.toggle.active::after {
+  left: 22px;
+}
+
+/* 词典管理下拉 */
+.dict-select {
+  padding: 10px 28px 10px 14px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-md);
+  color: var(--text-primary);
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238F8878' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 16px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.dict-select:hover {
+  border-color: var(--primary-color);
+}
+
+.dict-select:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.14);
+}
+
+/* 学习模式选项 */
+.mode-options {
+  display: flex;
+  gap: 8px;
+}
+
+.mode-option {
+  /* 尺寸与设置页「清除」按钮一致：padding 8px 21px + 13px 字号 */
+  padding: 8px 21px;
+  background: var(--bg-primary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mode-option.active {
+  background: linear-gradient(135deg, #5B9BE0 0%, var(--primary) 45%, var(--secondary) 100%);
+  color: white;
+  box-shadow: 0 3px 8px -2px rgba(74, 144, 217, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+/* 滑块 */
+.slider-container {
+  display: flex;
+  align-items: center;
+}
+
+.slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  background: linear-gradient(180deg, #E9E2D0 0%, var(--bg-primary) 100%);
+  border-radius: 999px;
+  box-shadow: inset 0 1px 3px rgba(74, 60, 38, 0.14);
+  outline: none;
+  width: 112px;
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 24px;
+  height: 24px;
+  background: linear-gradient(160deg, #5B9BE0 0%, var(--primary) 40%, var(--primary-dark) 100%);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(74, 144, 217, 0.45), 0 0 0 4px rgba(74, 144, 217, 0.12);
+  border: 2px solid #fff;
+}
+
+.slider:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.slider:disabled::-webkit-slider-thumb {
+  cursor: not-allowed;
+}
+
+.slider-value {
+  min-width: 30px;
+  text-align: right;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==================== Toast 提示 ==================== */
+.toast {
+  position: fixed;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%) translateY(100px);
+  background: linear-gradient(180deg, rgba(66, 59, 46, 0.95) 0%, rgba(56, 50, 38, 0.94) 100%);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: #FBFAF6;
+  padding: 12px 22px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  opacity: 0;
+  transition: all 0.3s ease;
+  z-index: 2000;
+  white-space: nowrap;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 32px -8px rgba(45, 38, 24, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+
+.toast.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
+
+/* ==================== 响应式 ==================== */
+@media (max-width:400px) {
+  .flashcard {
+    /* 高度统一由主样式的 clamp 决定，这里只调整窄屏的卡面内边距 */
+    --flashcard-pad: 24px;
+  }
+
+  .flashcard .word {
+    font-size: var(--font-size-xl);
+  }
+}
+
+/* 横屏 / 矮屏：可用高度很紧时退回更矮的卡片，
+   避免卡片过高导致必须滚动才能点到下方三个操作按钮 */
+@media (max-height:520px) {
+  .flashcard {
+    height: clamp(250px, calc(100% - 96px), 360px);
+  }
+
+  .card-stack {
+    min-height: 358px;
+  }
+}
+
+/* ==================== 手机端软键盘 ==================== */
+/* 键盘弹出时（body.keyboard-open 由 initKeyboardViewport 维护）：
+   把应用整体固定在 visualViewport 的「键盘上方可视区域」内 */
+body.keyboard-open .app-container {
+  position: fixed;
+  top: var(--visual-viewport-top, 0px);
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  height: var(--visual-viewport-height, 100vh);
+}
+
+/* 键盘占掉大半屏：卡片吃掉输入区之外的剩余空间，
+   保证输入框贴在键盘上方 */
+body.keyboard-open .practice-card-stack {
+  min-height: 0;
+}
+
+body.keyboard-open .practice-card-stack .flashcard {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 90px;
+  max-height: 460px;
+}
+
+body.keyboard-open .practice-input-area {
+  padding-top: 8px;
+}
+
+/* 键盘弹出时菜单栏不再为 home indicator 留白，紧贴键盘上沿 */
+body.keyboard-open .bottom-nav {
+  padding-bottom: 8px;
+}

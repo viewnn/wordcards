@@ -1625,6 +1625,7 @@
         if (this.app.settings[key] === settings[key]) continue;
         this.app.settings[key] = settings[key];
         if (key === 'dictImportType') rangeChanged = true;
+        if (key === 'repeatFrequency') rangeChanged = true;
         if (key === 'practiceScope') practiceScopeChanged = true;
         if (key === 'dailyGoal') goalChanged = true;
         if (key === 'studyScope') studyScopeChanged = true;
@@ -1674,12 +1675,14 @@
       }
 
       // 云端改过练习范围（practiceScope，独立于词典导入）：练习队列按新范围重建，
-      // 单词数量与进度条分母随之变化（下次进入练习页时重算，见 app.js 的 preparePracticePool）
+      // 正在练习时立即重建，避免旧题卡仍可输入、分母却已归零。
       if (practiceScopeChanged) {
         this.app._practicePoolKey = null;
         this.app.practiceWords = [];
         this.app._practiceScopeTotal = 0;
-        if (typeof this.app.refreshPracticeProgressUI === 'function') {
+        if (this.app.currentPage === 'practice' && this.app._appReady !== false) {
+          await this.app.enterPracticePage();
+        } else if (typeof this.app.refreshPracticeProgressUI === 'function') {
           this.app.refreshPracticeProgressUI();
         }
       }

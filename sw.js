@@ -68,14 +68,23 @@ self.addEventListener('fetch', event => {
     return;
   }
 
+  // 延长事件生命周期以完成写缓存；配额不足等错误不影响网络响应。
+  const cacheResponse = (cacheName, response) => {
+    const copy = response.clone();
+    event.waitUntil(
+      caches.open(cacheName)
+        .then(cache => cache.put(request, copy))
+        .catch(error => console.warn('Failed to update cache:', error))
+    );
+  };
+
   /** 网络优先：成功后用最新响应覆盖缓存，离线时回退到缓存。 */
   const networkFirst = (cacheName, fallbackUrl) => {
     event.respondWith(
       fetch(request, { cache: 'no-cache' })
         .then(networkResponse => {
           if (networkResponse && networkResponse.status === 200) {
-            const responseToCache = networkResponse.clone();
-            caches.open(cacheName).then(cache => cache.put(request, responseToCache));
+            cacheResponse(cacheName, networkResponse);
           }
           return networkResponse;
         })
@@ -98,7 +107,7 @@ self.addEventListener('fetch', event => {
   }
 
   // HTML/CSS/JS 与词典：网络优先，普通刷新即可拿到最新版本
-  const isCodeAsset = /\.(?:html|css|js)(?:$|\?)/.test(url.pathname);
+  const isCodeAsset = /\.(?:html|css|js)$/i.test(url.pathname);
   const isDictionary = /\/dict\.xlsx$/i.test(url.pathname);
   if (isCodeAsset || isDictionary) {
     networkFirst(isDictionary ? DATA_CACHE_NAME : CACHE_NAME);
@@ -116,15 +125,16 @@ self.addEventListener('fetch', event => {
           if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
             return networkResponse;
           }
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(request, responseToCache));
+          cacheResponse(CACHE_NAME, networkResponse);
           return networkResponse;
         });
       })
-      .catch(() => {
-        if (request.headers.get('accept') && request.headers.get('accept').includes('text/html')) {
-          return caches.match('./index.html');
+      .catch(async () => {
+        if ((request.headers.get('accept') || '').includes('text/html')) {
+          const fallback = await caches.match('./index.html');
+          if (fallback) return fallback;
         }
+        return Response.error();
       })
   );
 });

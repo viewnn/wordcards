@@ -3,7 +3,7 @@
  * ------------------------------------------------------------
  * 注意：本文件里所有尺寸（卡片高度 clamp、--flashcard-pad、
  * 正反面内边距、practice 输入框度量等）都被 app.js 或翻面
- * 对齐逻辑依赖，改视觉时务必保留数值，只动颜色/阴影/圆角。
+ * 对齐逻辑依赖，调整布局时需同时验证正反面、横屏和练习页。
  * ============================================================ */
 
 /* ==================== 设计令牌 ==================== */
@@ -449,7 +449,7 @@ select {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  /* 背面用负 inset 往外扩出这一圈内边距，保证两面卡面等大 */
+  /* 背面用负定位偏移扩出这一圈内边距，保证两面卡面等大 */
   --flashcard-pad: 16px;
   padding: var(--flashcard-pad);
   cursor: grab;
@@ -680,6 +680,10 @@ select {
 
 .flashcard-front {
   position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   inset: 0;
   width: 100%;
   height: 100%;
@@ -700,7 +704,16 @@ select {
   position: absolute;
   /* 向外扩出卡片的内边距：整块蓝紫底色正好铺满卡面，与正面等大。
      不能再写 width/height:100%（会与负 inset 冲突导致尺寸错位） */
-  inset: calc(var(--flashcard-pad) * -1);
+  /* Android 旧 WebView 不支持 inset：四向定位必须显式保留。
+     先给出不依赖 CSS 变量的兜底，再按实际卡片内边距覆盖。 */
+  top: -16px;
+  right: -16px;
+  bottom: -16px;
+  left: -16px;
+  top: calc(0px - var(--flashcard-pad));
+  right: calc(0px - var(--flashcard-pad));
+  bottom: calc(0px - var(--flashcard-pad));
+  left: calc(0px - var(--flashcard-pad));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -717,10 +730,8 @@ select {
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   border-radius: var(--radius-lg);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.3),
-    inset 0 -28px 44px -28px rgba(30, 28, 80, 0.32),
-    0 16px 36px -16px rgba(76, 88, 160, 0.4);
+  /* 外部投影由 .flashcard 统一承担，避免背面叠加一层深色阴影。 */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
 .flashcard-back .speak-btn,
@@ -1451,6 +1462,8 @@ body.learn-landscape #learnPage .action-btn.skip span {
 
 /* ==================== 词库页面 ==================== */
 .library-header {
+  /* 三行控件共用筛选 tab 栏的高度，输入和展开时保持布局稳定。 */
+  --library-control-height: 46px;
   padding: 14px 14px;
   background: linear-gradient(180deg, #FCFBF8 0%, var(--bg-card) 100%);
   box-shadow: 0 6px 16px -10px rgba(74, 60, 38, 0.16);
@@ -1500,7 +1513,9 @@ body.learn-landscape #learnPage .action-btn.skip span {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
+  height: var(--library-control-height, 46px);
+  min-height: var(--library-control-height, 46px);
+  padding: 0 16px;
   background: var(--bg-primary);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
@@ -1641,11 +1656,16 @@ body.learn-landscape #learnPage .action-btn.skip span {
 
 .search-box {
   display: flex;
+  /* 保留清除按钮空间，并与分类下拉框、tab 栏等高。 */
+  height: var(--library-control-height, 46px);
+  min-height: var(--library-control-height, 46px);
+  box-sizing: border-box;
+  flex-shrink: 0;
   align-items: center;
   background: var(--bg-primary);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
-  padding: 10px 16px;
+  padding: 0 16px;
   margin-bottom: 10px;
   box-shadow: var(--edge-groove);
   transition: border-color 0.2s, box-shadow 0.2s;
@@ -1658,6 +1678,7 @@ body.learn-landscape #learnPage .action-btn.skip span {
 }
 
 .search-box svg {
+  flex-shrink: 0;
   width: 20px;
   height: 20px;
   fill: var(--text-light);
@@ -1666,6 +1687,10 @@ body.learn-landscape #learnPage .action-btn.skip span {
 
 .search-input {
   flex: 1;
+  min-width: 0;
+  height: 28px;
+  line-height: 28px;
+  padding: 0;
   background: transparent;
   border: none;
   outline: none;
@@ -1678,6 +1703,7 @@ body.learn-landscape #learnPage .action-btn.skip span {
 }
 
 .search-clear {
+  flex-shrink: 0;
   width: 28px;
   height: 28px;
   border: none;
@@ -1704,6 +1730,9 @@ body.learn-landscape #learnPage .action-btn.skip span {
 
 /* 状态筛选：分段控件样式（圆角与上方搜索框/下拉框保持一致） */
 .filter-tabs {
+  height: var(--library-control-height, 46px);
+  min-height: var(--library-control-height, 46px);
+  box-sizing: border-box;
   display: flex;
   justify-content: space-between;
   flex: 1;
