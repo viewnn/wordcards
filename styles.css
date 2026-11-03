@@ -1765,6 +1765,40 @@ body.learn-landscape #learnPage .action-btn.skip span {
   box-shadow: 0 3px 8px -2px rgba(74, 144, 217, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
+/* 排序按钮：筛选行末尾的小矩形图标按钮（点击切换排序，再点恢复默认顺序） */
+.sort-toggle-btn {
+  flex: 0 0 auto;
+  width: 46px;
+  height: var(--library-control-height, 46px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 4px;
+  background: var(--bg-primary);
+  border: 1px solid rgba(230, 223, 206, 0.6);
+  border-radius: var(--radius-md);
+  box-shadow: var(--edge-groove);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.sort-toggle-btn svg {
+  width: 20px;
+  height: 20px;
+  fill: var(--text-secondary);
+  transition: fill 0.2s;
+}
+
+.sort-toggle-btn.active {
+  background: linear-gradient(135deg, #5B9BE0 0%, var(--primary) 45%, var(--secondary) 100%);
+  border-color: transparent;
+  box-shadow: 0 3px 8px -2px rgba(74, 144, 217, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.sort-toggle-btn.active svg {
+  fill: white;
+}
+
 .library-container {
   padding: 20px 14px;
   padding-bottom: calc(80px + env(safe-area-inset-bottom));
@@ -1778,7 +1812,9 @@ body.learn-landscape #learnPage .action-btn.skip span {
 }
 
 .word-item {
-  background: linear-gradient(180deg, #FDFCF9 0%, var(--bg-card) 100%);
+  /* background: linear-gradient(180deg, #FDFCF9 0%, var(--bg-card) 100%); */
+  /* 背景颜色：跟「学习」菜单中的卡片前背景色一致（护眼） */
+  background: linear-gradient(160deg, #FAF6EC 0%, var(--card-bg) 100%);
   padding: 16px;
   border-radius: var(--radius-md);
   border: 1px solid rgba(230, 223, 206, 0.85);
@@ -2031,7 +2067,9 @@ body.learn-landscape #learnPage .action-btn.skip span {
   width: 100%;
   max-width: 480px;
   max-height: 85vh;
-  background: var(--bg-card);
+  /* background: var(--bg-card); */
+  /* 背景颜色：跟「学习」菜单中的卡片前背景色一致（护眼） */
+  background: linear-gradient(160deg, #FAF6EC 0%, var(--card-bg) 100%);
   border: 1px solid rgba(230, 223, 206, 0.9);
   border-radius: var(--radius-lg);
   overflow: hidden;

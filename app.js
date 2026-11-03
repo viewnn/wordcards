@@ -521,6 +521,8 @@ class VocabApp {
     };
     this.searchQuery = '';            // 词库页搜索框内容（已转小写）
     this.filterStatus = 'all';        // 词库页状态筛选：all/new/review/mastered/favorite
+    /** 词库页「排序」按钮是否激活（页面加载 / 切换 tab 时复位为 false，见 setLibrarySortActive） */
+    this._librarySortActive = false;
     /**
      * 词典范围 → dict.xlsx 里实际 sheet 名的映射（如 { word:'Can字', phrase:'Can短语', eng5k:'Eng5k' }）。
      * 从词典文件解析时记下、存在本地（不上云）；
@@ -2262,12 +2264,23 @@ class VocabApp {
         document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
         this.filterStatus = tab.dataset.filter;
+        // 切换 tab：排序按钮恢复未点击状态，按该 tab 的默认顺序展示
+        this.setLibrarySortActive(false);
         // 手动切换选项卡 = 看累计口径，清除“今日已掌握/今日待复习”带过来的今日筛选
         this.resetLibraryTodayFilter();
         this.resetPageNum();
         this.renderLibrary();
       });
     });
+
+    // 排序按钮：点击切换排序，再次点击恢复默认顺序（各 tab 的规则见 renderLibrary 的顺序覆盖）
+    const librarySortBtn = document.getElementById('librarySortBtn');
+    if (librarySortBtn) {
+      librarySortBtn.addEventListener('click', () => {
+        this.setLibrarySortActive(!this._librarySortActive);
+        this.renderLibrary();
+      });
+    }
     
     // 分类下拉多选
     const dropdown = document.getElementById('categoryDropdown');
@@ -4679,6 +4692,8 @@ class VocabApp {
     // 清掉「今日已掌握/今日待复习」带过来的今日筛选，保证是从「全部」口径进入
     this.resetLibraryTodayFilter();
     this.filterStatus = 'all';
+    // 跳转进词库等同于切换 tab：排序按钮复位为未点击状态
+    this.setLibrarySortActive(false);
     this.resetPageNum();
     this.selectedCategories = [cat];
     if (isOneCharClass) {
@@ -5177,6 +5192,8 @@ class VocabApp {
     const count = filter === 'mastered' ? this.todayStats.mastered : this.todayStats.review;
     if (count >= 1) {
       this.filterStatus = filter;
+      // 跳转进词库等同于切换 tab：排序按钮复位为未点击状态
+      this.setLibrarySortActive(false);
       this._libraryTodayOnly = true;
       this._libraryTodayKind = filter;
       this._libraryNeedsRender = true;
@@ -5191,6 +5208,8 @@ class VocabApp {
       : this._cachedStatusCounts.review;
     if (count >= 1) {
       this.filterStatus = filter;
+      // 跳转进词库等同于切换 tab：排序按钮复位为未点击状态
+      this.setLibrarySortActive(false);
       this._libraryTodayOnly = false;
       this._libraryTodayKind = null;
       this._libraryNeedsRender = true;
@@ -6275,10 +6294,61 @@ class VocabApp {
   }
 
   /**
+   * 设置词库「排序」按钮的激活状态，并同步按钮高亮。
+   * 页面加载 / 切换 tab（含从学习页统计卡、分类标签跳转进词库）时复位为 false。
+   */
+  setLibrarySortActive(active) {
+    this._librarySortActive = !!active;
+    const btn = document.getElementById('librarySortBtn');
+    if (btn) btn.classList.toggle('active', this._librarySortActive);
+  }
+
+  /**
+   * 词库排序用的「字母 a-z / 数字 0-9」排序键。
+   *
+   * 中文词条按**音标（粤拼）**排：词典「音标」列形如 "aa3，好啊 hou2 aa3"
+   * （音节后面跟着例词说明），取「，」前的纯音节；短语的音标本身就是纯粤拼
+   * （如 "jat1"）。粤语字的汉字拼音与读音无关（如「揞 am2」的拼音是 an），
+   * 生僻字（㶶、㭴 等）很多浏览器没有拼音数据会乱序飘走，所以不能按汉字排。
+   * 英文/数字词条（people、I…）直接用单词本身；没有音标的词条回退用单词。
+   */
+  librarySortKeyOf(word) {
+    const w = String(word && word.word || '').trim();
+    // 纯 ASCII 词条（英文字母/数字）：按单词本身排序
+    if (/^[\x00-\x7f]+$/.test(w)) return w;
+    const ph = String(word && word.phonetic || '').trim();
+    if (ph) {
+      // 音标列格式为「音节，例词说明」：只取第一个逗号（全角/半角）前的纯音节
+      const pure = ph.split(/[，,]/)[0].trim();
+      if (pure) return pure;
+    }
+    return w;
+  }
+
+  /**
+   * 按排序键（音标/英文单词）的自然顺序排列：字母 a-z、数字 0-9
+   * （如 aa1 < aa3 < aa10，同音节按声调 1<2<3…），descending=true 时整体倒序。
+   * 「全部/新词」tab 的默认顺序与「排序」按钮激活后的顺序都走这里。
+   */
+  sortLibraryWordsNatural(words, descending) {
+    return words.slice().sort((a, b) => {
+      const ka = this.librarySortKeyOf(a);
+      const kb = this.librarySortKeyOf(b);
+      // numeric: true —— 数字按数值比较（避免 aa10 排在 aa2 前面）；
+      // sensitivity: 'base' —— 忽略大小写差异，只按字母本身排序
+      const byKey = ka.localeCompare(kb, 'zh-Hans-CN', { numeric: true, sensitivity: 'base' });
+      if (byKey !== 0) return descending ? -byKey : byKey;
+      // 排序键相同（同音多义项）时按 id 稳定排序
+      return (Number(a.id) || 0) - (Number(b.id) || 0);
+    });
+  }
+
+  /**
    * 词库列表的排序。
    *
    * 「待复习 / 已掌握 / 收藏」按时间倒序（最近的在最上面）；
-   * 「全部 / 新词」保持原来「同分类的词连续排列」的顺序，不改变用户熟悉的样子。
+   * 「全部 / 新词」按 a-z、数字 0-9 的正序排列（中文词条按音标/粤拼，如 aa1 < aa3 < aa10），
+   * 「排序」按钮点击后在 renderLibrary 里覆盖成倒序。
    *
    * 收藏用的是**收藏时间**（favoriteAt）：刚在学习页点了收藏的词要立刻出现在收藏列表顶端。
    * 若沿用学习时间排序，刚收藏但很久没学过（甚至从没学过，时间为 0）的词会沉到列表最末尾，
@@ -6287,15 +6357,8 @@ class VocabApp {
   orderLibraryWords(words, effectiveStatus) {
     const TIME_SORTED_TABS = ['review', 'mastered', 'favorite'];
     if (!TIME_SORTED_TABS.includes(effectiveStatus)) {
-      const grouped = new Map();
-      words.forEach((word) => {
-        const cat = word.category || '未分类';
-        if (!grouped.has(cat)) grouped.set(cat, []);
-        grouped.get(cat).push(word);
-      });
-      const ordered = [];
-      grouped.forEach((list) => { ordered.push(...list); });
-      return ordered;
+      // 全部 / 新词：按 a-z、0-9 的正序（中文词条按音标/粤拼，同音多义项按 id 稳定排序）
+      return this.sortLibraryWordsNatural(words, false);
     }
 
     const timeOf = (w) => effectiveStatus === 'favorite'
@@ -6358,7 +6421,16 @@ class VocabApp {
       ? (this._libraryTodayKind || this.filterStatus)
       : this.filterStatus;
 
-    const orderedWords = this.orderLibraryWords(words, effectiveStatus);
+    let orderedWords = this.orderLibraryWords(words, effectiveStatus);
+
+    // 排序按钮激活时的顺序覆盖（不改变各 tab 的默认顺序）：
+    //   - 全部 / 新词 tab：按 a-z、0-9 倒序（默认展示的是正序），再点恢复；
+    //   - 陌生 / 掌握 / 收藏 tab：按 a-z、0-9 正序（默认按最近学习时间），再点恢复时间顺序。
+    // 中文词条的排序键是音标（粤拼），见 librarySortKeyOf。
+    if (this._librarySortActive) {
+      const descending = !['review', 'mastered', 'favorite'].includes(effectiveStatus);
+      orderedWords = this.sortLibraryWordsNatural(orderedWords, descending);
+    }
     
     // 每个分类的小标题（原来的「aa (12)」）已取消，数量改到分类下拉选项里显示
     // 「显示释义」关闭时，卡片上只保留单词本身（单词下方那行释义不渲染）；

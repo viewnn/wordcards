@@ -184,10 +184,14 @@
             <div class="filter-tabs">
               <button class="filter-tab active" data-filter="all">全部</button>
               <button class="filter-tab" data-filter="new">新词</button>
-              <button class="filter-tab" data-filter="review">待复习</button>
-              <button class="filter-tab" data-filter="mastered">已掌握</button>
+              <button class="filter-tab" data-filter="review">陌生</button>
+              <button class="filter-tab" data-filter="mastered">掌握</button>
               <button class="filter-tab" data-filter="favorite">收藏</button>
             </div>
+            <!-- 排序按钮：全部/新词 tab 点击后按单词倒序；陌生/掌握/收藏 tab 点击后按单词正序，再点恢复最近学习时间顺序 -->
+            <button class="sort-toggle-btn" id="librarySortBtn" type="button" title="切换排序" aria-label="切换排序">
+              <svg viewBox="0 0 24 24"><path d="M16 17.01V10h-2v7.01h-3L15 21l4-3.99h-3zM9 3L5 6.99h3V14h2V6.99h3L9 3z"/></svg>
+            </button>
           </div>
         </div>
         <div class="library-container" id="libraryWords">
