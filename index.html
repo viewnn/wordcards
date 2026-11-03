@@ -338,12 +338,12 @@
             <div class="setting-item">
               <div class="setting-info">
                 <h4>单词顺序</h4>
-                <p>学习页与练习页共用</p>
+                <p>学习页与练习页共用，默认随机模式</p>
               </div>
-              <div class="mode-options">
-                <button class="mode-option active" data-mode="sequential">顺序</button>
-                <button class="mode-option" data-mode="random">随机</button>
-              </div>
+              <select id="learnModeSelect" class="dict-select">
+                <option value="random" selected>随机</option>
+                <option value="sequential">顺序</option>
+              </select>
             </div>
             <div class="setting-item">
               <div class="setting-info">
@@ -409,10 +409,18 @@
 
             <div class="setting-item">
               <div class="setting-info">
-                <h4>分类显示</h4>
+                <h4>显示分类</h4>
                 <p>关闭后，卡片上方将不会再显示分类</p>
               </div>
               <div class="toggle active" id="categoryDisplayToggle"></div>
+            </div>
+
+            <div class="setting-item">
+              <div class="setting-info">
+                <h4>分类渐显</h4>
+                <p>分类渐显的时间和音标渐显时间一致</p>
+              </div>
+              <div class="toggle active" id="categoryFadeInToggle"></div>
             </div>
 
             <div class="setting-item">

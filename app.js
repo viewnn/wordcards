@@ -491,6 +491,9 @@ class VocabApp {
       /** 学习范围：all / new / review / mastered / favorite（决定学习页卡片抽词范围） */
       studyScope: 'all',
       categoryDisplay: true,          // 卡片上方是否显示分类徽标（默认开启；loadSettings 会从库中读取用户选择）
+      /** 分类渐显：开启后学习卡上的分类标签与音标同一时刻显示（时长取「音标渐显」设置）。
+       *  默认跟随「分类显示」：分类显示开启时默认开启，关闭时联动关闭并置灰（见设置页绑定） */
+      categoryFadeIn: true,
       /** 词库列表卡片中，单词下方是否显示释义（默认开启；只影响词库卡片，查看单词弹窗不受影响） */
       meaningDisplay: true,
       /** 练习页：练习范围 all / word / phrase / eng5k。
@@ -538,6 +541,7 @@ class VocabApp {
      * 只有「首次进入词库」以及「筛选条件被显式更新」时才置 true：
      *   - 学习卡片的分类标签跳转（handleCategoryBadgeClick）
      *   - 设置页更改「词典导入」范围 / 导入词库
+     *   - 设置页切换「显示释义」开关（影响列表卡片上的释义显示）
      *   - 从学习卡的今日/累计统计卡跳转
      * 普通切页（学习/练习/设置 ←→ 词库）不置位，因此切回来时保持原有筛选条件与列表，不刷新。
      */
@@ -1356,6 +1360,8 @@ class VocabApp {
     this.settings.dailyGoal = await this.db.getSetting('dailyGoal', 100);
     this.settings.cardDefinitionFirst = await this.db.getSetting('cardDefinitionFirst', false);
     this.settings.categoryDisplay = await this.db.getSetting('categoryDisplay', true);
+    // 分类渐显：用户没设置过时跟随「分类显示」的当前值（分类显示开→渐显开；关→关）
+    this.settings.categoryFadeIn = await this.db.getSetting('categoryFadeIn', this.settings.categoryDisplay !== false);
     this.settings.meaningDisplay = await this.db.getSetting('meaningDisplay', true);
     this.settings.learnMode = await this.db.getSetting('learnMode', 'random');
     this.settings.phoneticDelay = await this.db.getSetting('phoneticDelay', 2);
@@ -2948,19 +2954,18 @@ class VocabApp {
       });
     }
 
-    // 学习模式
-    document.querySelectorAll('.mode-option').forEach(option => this._bindTap(option, handleModeClick));
-    
-    async function handleModeClick(e) {
-      e.preventDefault();
-      const option = e.currentTarget;
-      document.querySelectorAll('.mode-option').forEach(o => o.classList.remove('active'));
-      option.classList.add('active');
-      self.settings.learnMode = option.dataset.mode;
-      await self.db.setSetting('learnMode', self.settings.learnMode);
-      // 立即按当前模式重建当日队列（含随机打散），不依赖进度是否为 0
-      await self.prepareLearnSession();
-      self.showToast(self.settings.learnMode === 'random' ? '已切换为随机模式' : '已切换为顺序模式');
+    // 单词顺序（随机 / 顺序）：下拉选择，切换后立即按新模式重建当日队列
+    const learnModeSelect = document.getElementById('learnModeSelect');
+    if (learnModeSelect) {
+      learnModeSelect.addEventListener('change', async () => {
+        // 只接受两个合法值，其余异常值按「随机」兜底（与 loadSettings 的默认值一致）
+        const next = learnModeSelect.value === 'sequential' ? 'sequential' : 'random';
+        self.settings.learnMode = next;
+        await self.db.setSetting('learnMode', next);
+        // 立即按当前模式重建当日队列（含随机打散），不依赖进度是否为 0
+        await self.prepareLearnSession();
+        self.showToast(next === 'random' ? '已切换为随机模式' : '已切换为顺序模式');
+      });
     }
 
     // 三个同构开关：卡片翻转 / 分类显示 / 显示释义（「显示调值」逻辑特殊，单独在下面绑定）
@@ -2985,9 +2990,49 @@ class VocabApp {
       }
     };
     bindSettingToggle('cardDefinitionFirstToggle', 'cardDefinitionFirst', refreshLearnCard);
-    bindSettingToggle('categoryDisplayToggle', 'categoryDisplay', refreshLearnCard);
+
+    // 「分类显示」开关联动「分类渐显」：开启分类显示时渐显默认也开启；
+    // 关闭分类显示时渐显一并关闭并置灰（置灰后点它只给轻提示，见下面的分类渐显绑定）
+    const syncCategoryFadeInWithDisplay = async () => {
+      const displayOn = self.settings.categoryDisplay !== false;
+      self.settings.categoryFadeIn = displayOn;
+      await self.db.setSetting('categoryFadeIn', displayOn);
+      const fadeToggle = document.getElementById('categoryFadeInToggle');
+      if (fadeToggle) {
+        fadeToggle.classList.toggle('active', displayOn);
+        fadeToggle.classList.toggle('disabled', !displayOn);
+      }
+    };
+    bindSettingToggle('categoryDisplayToggle', 'categoryDisplay', async () => {
+      await syncCategoryFadeInWithDisplay();
+      refreshLearnCard();
+    });
+
+    // 分类渐显：独立开关（只控制学习卡上第三个分类标签是否跟着音标一起渐显）。
+    // 分类显示关闭时整体置灰、不可开启，点击只给一条轻提示
+    const categoryFadeInToggle = document.getElementById('categoryFadeInToggle');
+    if (categoryFadeInToggle) {
+      const handler = async (e) => {
+        e.preventDefault();
+        if (self.settings.categoryDisplay === false) {
+          self.showToast('请先开启「分类显示」');
+          return;
+        }
+        categoryFadeInToggle.classList.toggle('active');
+        const value = categoryFadeInToggle.classList.contains('active');
+        self.settings.categoryFadeIn = value;
+        await self.db.setSetting('categoryFadeIn', value);
+        refreshLearnCard();
+      };
+      categoryFadeInToggle.addEventListener('click', handler);
+      categoryFadeInToggle.addEventListener('touchstart', handler);
+    }
+
     // 显示释义（只控制词库列表卡片，查看单词弹窗始终显示释义）
     bindSettingToggle('meaningDisplayToggle', 'meaningDisplay', async () => {
+      // 词库页平时切页不重渲染（保持筛选条件与列表状态）；「显示释义」变了必须标记
+      // 下次进入词库时重渲染，否则切过去看到的还是旧列表，要点一下顶部 tab 才生效
+      self._libraryNeedsRender = true;
       if (self.currentPage === 'library') await self.renderLibrary();
     });
 
@@ -4358,16 +4403,34 @@ class VocabApp {
         clearTimeout(this._phoneticDelayTimer);
         this._phoneticDelayTimer = null;
       }
-      
+
+      // 分类渐显：第三个顶部标签（category-badge）与音标在同一时刻显示，
+      // 时长同样是「音标渐显」下拉里选的秒数。以下情况不参与渐显、保持常态显示：
+      //   - 「分类显示」关闭（此时徽标根本不会渲染）；
+      //   - 「分类渐显」关闭；
+      //   - 音标渐显为 0 秒（本来就是立即显示）。
+      const categoryBadge = cardInner.querySelector('.flashcard-badge-row .category-badge');
+      const fadeCategoryBadge = !!(categoryBadge &&
+        this.settings.categoryDisplay !== false &&
+        this.settings.categoryFadeIn);
+
       const delay = this.settings.phoneticDelay * 1000;
       if (delay > 0) {
         // 隐藏音标
         phoneticText.style.opacity = '0';
         phoneticText.style.visibility = 'hidden';
-        // 延迟显示
+        if (fadeCategoryBadge) {
+          categoryBadge.style.opacity = '0';
+          categoryBadge.style.visibility = 'hidden';
+        }
+        // 延迟显示（分类标签与音标共用同一个定时器，保证同一时刻出现）
         this._phoneticDelayTimer = setTimeout(() => {
           phoneticText.style.opacity = '1';
           phoneticText.style.visibility = 'visible';
+          if (fadeCategoryBadge) {
+            categoryBadge.style.opacity = '1';
+            categoryBadge.style.visibility = 'visible';
+          }
           this._phoneticDelayTimer = null;
         }, delay);
       } else {
@@ -6420,10 +6483,9 @@ class VocabApp {
     document.getElementById('goalSlider').value = this.settings.dailyGoal;
     document.getElementById('goalValue').textContent = this.settings.dailyGoal;
     
-    // 学习模式
-    document.querySelectorAll('.mode-option').forEach(opt => {
-      opt.classList.toggle('active', opt.dataset.mode === this.settings.learnMode);
-    });
+    // 单词顺序：下拉框显示当前学习模式（随机 / 顺序）
+    const learnModeSelect = document.getElementById('learnModeSelect');
+    if (learnModeSelect) learnModeSelect.value = this.settings.learnMode || 'random';
     
     const cardDefinitionFirstToggle = document.getElementById('cardDefinitionFirstToggle');
     if (cardDefinitionFirstToggle) {
@@ -6433,6 +6495,14 @@ class VocabApp {
     const categoryDisplayToggle = document.getElementById('categoryDisplayToggle');
     if (categoryDisplayToggle) {
       categoryDisplayToggle.classList.toggle('active', this.settings.categoryDisplay);
+    }
+
+    // 分类渐显：分类显示关闭时强制显示为关闭并置灰（不可开启；点击的轻提示见 bindSettingsEvents）
+    const categoryFadeInToggle = document.getElementById('categoryFadeInToggle');
+    if (categoryFadeInToggle) {
+      const displayOn = this.settings.categoryDisplay !== false;
+      categoryFadeInToggle.classList.toggle('active', displayOn && !!this.settings.categoryFadeIn);
+      categoryFadeInToggle.classList.toggle('disabled', !displayOn);
     }
 
     // 显示释义：默认开启，未设置过时按 true 处理

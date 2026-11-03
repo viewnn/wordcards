@@ -2324,6 +2324,13 @@ body.learn-landscape #learnPage .action-btn.skip span {
   left: 22px;
 }
 
+/* 被上级开关禁用（如「分类显示」关闭时的「分类渐显」）：
+   置灰但仍可点击（点击只弹轻提示，不改变状态） */
+.toggle.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* 词典管理下拉 */
 .dict-select {
   padding: 10px 28px 10px 14px;
@@ -2349,31 +2356,6 @@ body.learn-landscape #learnPage .action-btn.skip span {
 .dict-select:focus {
   border-color: var(--primary-color);
   box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.14);
-}
-
-/* 学习模式选项 */
-.mode-options {
-  display: flex;
-  gap: 8px;
-}
-
-.mode-option {
-  /* 尺寸与设置页「清除」按钮一致：padding 8px 21px + 13px 字号 */
-  padding: 8px 21px;
-  background: var(--bg-primary);
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  font-weight: 400;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.mode-option.active {
-  background: linear-gradient(135deg, #5B9BE0 0%, var(--primary) 45%, var(--secondary) 100%);
-  color: white;
-  box-shadow: 0 3px 8px -2px rgba(74, 144, 217, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
 /* 滑块 */

@@ -111,6 +111,8 @@
     'phoneticDelay',
     'cardDefinitionFirst',
     'categoryDisplay',
+    // 分类渐显：与音标渐显、分类显示同属外观偏好，两端保持一致
+    'categoryFadeIn',
     'meaningDisplay',
     // 练习页的范围与调值开关：范围决定练习的数量与进度条口径、调值决定题目难度。
     // practiceScope 独立于 dictImportType（只作用于练习页），两端不一致时用户会
