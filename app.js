@@ -133,8 +133,8 @@ const STUDY_SCOPE_LABELS = {
 // ==================== 词典范围（设置页 → 词典管理 → 词典导入） ====================
 /**
  * 词典范围：词条的词典归属（dictScope），与 dict.xlsx 里的 sheet 一一对应：
- *   word   字（sheet「Can字」等不含 短/phrase/eng 的表）
- *   phrase 短语（sheet 名含「短」或 phrase，如「Can短语」）
+ *   word   字（sheet「字」等不含 短/phrase/eng 的表）
+ *   phrase 短语（sheet 名含「短」或 phrase，如「短语」）
  *   eng5k  英语 5000 词（sheet 名以 eng/英语 开头，如「Eng5k」）
  * 三类词条始终全量常驻词库并各自保留学习记录；
  * settings.dictImportType（all/word/phrase/eng5k）只决定当前学习/展示/统计的范围。
@@ -524,7 +524,7 @@ class VocabApp {
     /** 词库页「排序」按钮是否激活（页面加载 / 切换 tab 时复位为 false，见 setLibrarySortActive） */
     this._librarySortActive = false;
     /**
-     * 词典范围 → dict.xlsx 里实际 sheet 名的映射（如 { word:'Can字', phrase:'Can短语', eng5k:'Eng5k' }）。
+     * 词典范围 → dict.xlsx 里实际 sheet 名的映射（如 { word:'字', phrase:'短语', eng5k:'Eng5k' }）。
      * 从词典文件解析时记下、存在本地（不上云）；
      * 设置页「词典导入」下拉选项与词库顶部统计行的显示文字都以它为准，
      * 这样更改 sheet 名后界面文字自动跟随。未导入/缺失时退回 DICT_SCOPE_LABELS 的通用名。
@@ -625,7 +625,7 @@ class VocabApp {
       if (dictTypeSelectInit) {
         dictTypeSelectInit.value = this.settings.dictImportType || 'word';
       }
-      // 「词典导入」下拉的选项文字按上次解析词典记下的 sheet 名显示（如 Can字 / Can短语 / Eng5k）；
+      // 「词典导入」下拉的选项文字按上次解析词典记下的 sheet 名显示（如 字 / 短语 / Eng5k）；
       // 词典未变的常规启动走指纹短路、不重新解析，映射从库里读（loadSettings）后在此处应用
       this.applyDictScopeLabelsToUI();
       this.initServiceWorker();
@@ -705,7 +705,7 @@ class VocabApp {
     }
   }
 
-  /** 依据 sheet 名判断词条分类：短/phrase → 短语；eng/英语 → Eng5k；其余（如 Can字）→ 字 */
+  /** 依据 sheet 名判断词条分类：短/phrase → 短语；eng/英语 → Eng5k；其余（如 字）→ 字 */
   sheetDictScope(sheetName) {
     const n = String(sheetName || '').toLowerCase();
     if (/phrase|短/.test(n)) return 'phrase';
@@ -810,7 +810,7 @@ class VocabApp {
   }
 
   // 自动加载 dict.xlsx 文件
-  // 字（word sheet，如「Can字」）、短语（phrase sheet，如「Can短语」）与
+  // 字（word sheet，如「字」）、短语（phrase sheet，如「短语」）与
   // 英语词（eng5k sheet，如「Eng5k」）始终全量导入并常驻词库，每个词条标注
   // dictScope（'word'|'phrase'|'eng5k'），同一文本若同时出现在多个字库（如「一」「钱」），
   // 会保留多条各自独立的记录，绝不跨分类覆盖。
@@ -1480,8 +1480,10 @@ class VocabApp {
   countPendingScopeWords(pool, scope = this.settings.studyScope) {
     const list = Array.isArray(pool) ? pool : [];
     const done = this._scopePassDone[this.normalizeStudyScope(scope)];
+    // 待复习/已掌握/收藏是复习成员型范围：不参与重复频率静默期（见 doesRepeatWindowApplyToScope）
+    const repeatApplies = this.doesRepeatWindowApplyToScope(scope);
     return list.filter((w) => {
-      if (!this.isWordOutsideRepeatWindow(w)) return false;
+      if (repeatApplies && !this.isWordOutsideRepeatWindow(w)) return false;
       const key = this.dictKeyOf(w);
       return !key || !done?.has(key);
     }).length;
@@ -1502,6 +1504,23 @@ class VocabApp {
   }
 
   /**
+   * 「重复频率」静默期是否作用于该学习范围：只对「全部 / 新词」生效。
+   *
+   * 全部/新词里的词条学过一次后（状态变成 已掌握/待复习）就离开了范围，静默期的作用
+   * 是避免同一个词在当天反复回炉；跳过等补牌逻辑也按同样口径挑选。
+   *
+   * 「待复习 / 已掌握 / 收藏」是复习成员型范围：词条答过掌握/陌生后**仍然留在范围内**
+   * （新词→离开、待复习→留在待复习）。这类范围里静默期一旦生效，学过一遍后整池词条
+   * 都在冷却中，表现为「答了陌生想再复习，却红字提示尚在重复间隔内」「已掌握/收藏的
+   * 继续学习点了没词出」——待复习的学习数据看起来就完全不随掌握/陌生操作动态更新。
+   * 因此这三类范围不参与静默期：学过的词在下一轮复习里照常入队。
+   */
+  doesRepeatWindowApplyToScope(scope) {
+    const s = this.normalizeStudyScope(scope);
+    return s === 'all' || s === 'new';
+  }
+
+  /**
    * 一次学习动作完成后，把该词条记入「全部」和“当前正在学习的 tab”。
    *
    * 不能顺手记到这张卡学完后的状态 tab / 收藏 tab：
@@ -1516,7 +1535,15 @@ class VocabApp {
     // 当前正在学习的 tab：例如「新词」里点掌握后词条会离开新词 tab，
     // 但它确实是在这一轮里学过的，记下来可以避免状态写库延迟导致 tab 又被判成“没学完”。
     const currentScope = this.normalizeStudyScope(this.settings.studyScope);
-    if (currentScope) scopes.add(currentScope);
+    if (currentScope) {
+      // 「待复习」是复习闭环，不是“学过一遍就完”的队列：答「陌生」的词条
+      // 仍然是待复习成员，不能记入该 tab 的完成集合 —— 否则一轮学完就红字
+      // 「已学完」，还想复习的词只能靠手动点继续学习，学习数据也不随陌生/掌握
+      // 操作动态刷新。答「掌握」的词条（status 已变 mastered，不满足下面的
+      // 条件）照常记录，且它会因为状态离开范围而不再入队。
+      const staysInReviewLoop = currentScope === 'review' && word.status === 'review';
+      if (!staysInReviewLoop) scopes.add(currentScope);
+    }
     for (const scope of scopes) {
       if (this._scopePassDone[scope]) this._scopePassDone[scope].add(key);
     }
@@ -1870,7 +1897,7 @@ class VocabApp {
 
   /**
    * 更新词库页顶部的范围统计行，显示各分类的词条总数：
-   *   全部（5772） | Can短语（2005） | Can字（3767） —— 顺序与设置页「词典导入」
+   *   全部（5772） | 短语（2005） | 字（3767） —— 顺序与设置页「词典导入」
    *   下拉的选项顺序完全一致，当前词典范围高亮；
    *   数量为 0 的范围不显示标签，词库为空时整行只显示「全部(0)」。
    * 词库数据变化时（导入、删除、编辑、词典范围切换、进入词库页）调用。
@@ -1910,14 +1937,14 @@ class VocabApp {
     // 顶部「全部」也不会把它算进去，与标签列表口径保持一致
     const visibleTotal = shownScopes.reduce((n, s) => n + counts[s], 0);
 
-    // 各范围显示文字跟随 dict.xlsx 的 sheet 名（如 Can字 / Can短语 / Eng5k），
+    // 各范围显示文字跟随 dict.xlsx 的 sheet 名（如 字 / 短语 / Eng5k），
     // 与设置页「词典导入」下拉选项保持同一份来源（dictScopeLabelOf）
     const labels = { all: '全部' };
     for (const s of DICT_SCOPES) labels[s] = this.dictScopeLabelOf(s);
     const shown = { all: visibleTotal, ...counts };
     const current = this.settings.dictImportType || 'all';
 
-    // 更新词库页顶部统计行：全部 · Can短语 · Can字（当前词典范围高亮）。
+    // 更新词库页顶部统计行：全部 · 短语 · 字（当前词典范围高亮）。
     // 顺序取自下拉、只为仍有词条的范围显示标签（见上方 orderKeys / shownScopes 的说明）；
     // 设置页下拉框的选项文案与隐藏见 applyDictScopeLabelsToUI
     const scopeCountsEl = document.getElementById('dictScopeCounts');
@@ -1926,7 +1953,9 @@ class VocabApp {
         .filter((key) => key === 'all' || shownScopes.includes(key))
         .map((key) => {
           const cls = key === current ? 'scope-active' : '';
-          return `<span class="${cls}">${labels[key]}(${shown[key]})</span>`;
+          // 显示文字来自词典 sheet 名（见 dictScopeLabelOf），先用 escapeHtml 转义再拼进 HTML，
+          // 与设置页下拉 / 学习卡 / 词库列表的渲染规范保持一致
+          return `<span class="${cls}">${this.escapeHtml(labels[key])}(${shown[key]})</span>`;
         });
       scopeCountsEl.innerHTML = items.join('<span class="scope-sep">|</span>');
     }
@@ -2545,7 +2574,7 @@ class VocabApp {
   }
 
   /**
-   * 某个词典范围的显示文字：优先用 dict.xlsx 里的实际 sheet 名（如「Can字」「Can短语」「Eng5k」），
+   * 某个词典范围的显示文字：优先用 dict.xlsx 里的实际 sheet 名（如「字」「短语」「Eng5k」），
    * 让设置页下拉选项、词库顶部统计行、清除确认弹窗的文案与词典文件保持一致；
    * 词典未导入过或映射缺失时，退回 DICT_SCOPE_LABELS 的通用名（字/短语/Eng5k）。
    */
@@ -2639,7 +2668,7 @@ class VocabApp {
     }
   }
 
-  /** 设置页「词典导入」对应的展示文字：全部 / 各 sheet 名（如 Can字 / Can短语 / Eng5k） */
+  /** 设置页「词典导入」对应的展示文字：全部 / 各 sheet 名（如 字 / 短语 / Eng5k） */
   getDictScopeLabel() {
     const t = this.settings.dictImportType || 'all';
     if (t === 'all') return '全部';
@@ -2858,18 +2887,18 @@ class VocabApp {
     return false;
   }
 
-  /** 按 isDailyGoalSliderLocked() 的结果启用/禁用每日目标滑块，并同步显示数值 */
+  /** 按 isDailyGoalSliderLocked() 的结果启用/禁用「每日目标」输入框，并同步显示数值 */
   refreshGoalSliderLockedState() {
-    const goalSlider = document.getElementById('goalSlider');
-    const goalValue = document.getElementById('goalValue');
-    if (!goalSlider || !goalValue) return;
+    const goalInput = document.getElementById('goalInput');
+    if (!goalInput) return;
     const locked = this.isDailyGoalSliderLocked();
-    goalSlider.disabled = locked;
-    goalSlider.style.opacity = locked ? '0.5' : '1';
-    goalSlider.style.cursor = locked ? 'not-allowed' : 'pointer';
-    goalSlider.style.pointerEvents = locked ? 'none' : '';
-    goalSlider.value = String(this.settings.dailyGoal);
-    goalValue.textContent = String(this.settings.dailyGoal);
+    goalInput.disabled = locked;
+    goalInput.style.opacity = locked ? '0.5' : '1';
+    goalInput.style.cursor = locked ? 'not-allowed' : 'pointer';
+    // 用户正在输入时不要抢内容（提交时才校验归一），只在非聚焦时回写当前设置值
+    if (document.activeElement !== goalInput) {
+      goalInput.value = String(this.settings.dailyGoal);
+    }
   }
 
   /** 词典导入/范围切换后：分类下拉勾选当前展示分类下的全部真实分类（等同于「全部」）
@@ -2902,41 +2931,74 @@ class VocabApp {
   bindSettingsEvents() {
     const self = this;
     
-    // 每日目标滑块
-    const goalSlider = document.getElementById('goalSlider');
-    const goalValue = document.getElementById('goalValue');
-    
-    const updateGoalSliderState = () => self.refreshGoalSliderLockedState();
-    
-    goalSlider.addEventListener('input', () => {
-      if (self.isDailyGoalSliderLocked()) return;
-      goalValue.textContent = goalSlider.value;
-    });
-    goalSlider.addEventListener('change', async () => {
-      const nextGoal = Math.max(1, parseInt(goalSlider.value) || 100);
-      if (nextGoal === self.settings.dailyGoal) {
-        self.refreshGoalSliderLockedState();
-        return;
-      }
+    // 每日目标：数字输入框（回车 / 手机键盘“完成” / 失去焦点时提交）
+    const goalInput = document.getElementById('goalInput');
+    if (goalInput) {
+      /**
+       * 读取输入框内容并按规则归一：
+       *   - 合法范围 5~200（含）的正整数原样采用；
+       *   - 小于 5 归 5；大于 200 归 200；
+       *   - 空、非数字、小数点/负号/其它字符一律按默认 100。
+       * 返回归一后的数值；输入框同步显示归一结果（如输 999 会显示 200）。
+       */
+      const normalizeGoalInput = () => {
+        const raw = String(goalInput.value || '').trim();
+        let nextGoal = 100;
+        if (/^[0-9]+$/.test(raw)) {
+          const n = parseInt(raw, 10);
+          if (n < 5) nextGoal = 5;
+          else if (n > 200) nextGoal = 200;
+          else nextGoal = n;
+        }
+        goalInput.value = String(nextGoal);
+        return nextGoal;
+      };
 
-      self.settings.dailyGoal = nextGoal;
-      await self.db.setSetting('dailyGoal', nextGoal);
+      let goalCommitting = false;
+      const commitGoalInput = async () => {
+        if (goalCommitting) return;
+        if (self.isDailyGoalSliderLocked()) return;
+        goalCommitting = true;
+        try {
+          const nextGoal = normalizeGoalInput();
+          if (nextGoal === self.settings.dailyGoal) return;
 
-      // 目标换了，「今天已完成过目标」的判定要按新目标重来
-      self._todayGoalReachedDate = '';
-      self._todayGoalReachedGoal = 0;
-      await self.db.setSetting('todayGoalReached', null);
+          self.settings.dailyGoal = nextGoal;
+          await self.db.setSetting('dailyGoal', nextGoal);
 
-      // 队列长度跟着新目标变：丢掉旧进度与切页快照，按新目标重建队列。
-      // 本轮起点保持不变 —— 已经学过的进度不丢，只是分母变大/变小，
-      // 学习页上方的目标数字立即变成设置页里的新值。
-      self._learnSessionSnapshot = null;
-      await self.db.setSetting('learnProgress', null);
-      await self.prepareLearnSession();
-      self.updateProgress();
-      self.refreshGoalSliderLockedState();
-      self.showToast('每日目标已更新为 ' + nextGoal);
-    });
+          // 目标换了，「今天已完成过目标」的判定要按新目标重来
+          self._todayGoalReachedDate = '';
+          self._todayGoalReachedGoal = 0;
+          await self.db.setSetting('todayGoalReached', null);
+
+          // 队列长度跟着新目标变：丢掉旧进度与切页快照，按新目标重建队列。
+          // 本轮起点保持不变 —— 已经学过的进度不丢，只是分母变大/变小，
+          // 学习页上方的目标数字立即变成设置页里的新值。
+          self._learnSessionSnapshot = null;
+          await self.db.setSetting('learnProgress', null);
+          await self.prepareLearnSession();
+          self.updateProgress();
+          self.showToast('每日目标已更新为 ' + nextGoal);
+        } finally {
+          goalCommitting = false;
+        }
+      };
+
+      // 三种“录入完成”的出口：回车、手机键盘的“完成”键都会让输入框失焦，
+      // blur 是统一兜底；keydown 里先 blur 一次，避免个别键盘不触发 change
+      goalInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          goalInput.blur();
+        }
+      });
+      goalInput.addEventListener('blur', () => {
+        commitGoalInput().catch((error) => {
+          console.error('[settings] 提交每日目标失败:', error);
+          self.showToast('每日目标保存失败，请重试');
+        });
+      });
+    }
     
     // ---------- 学习范围 ----------
     // 只重建学习队列，不重置「本轮起点」：切换范围后今日进度继续连续（如 20/100 → 21/100）
@@ -3128,7 +3190,8 @@ class VocabApp {
       });
     }
 
-    updateGoalSliderState();
+    // 每日目标输入框初始状态同步（禁用态与显示值）
+    self.refreshGoalSliderLockedState();
   }
 
   /** 把当前设置应用到界面：练习设置控件、练习进度、字号等 */
@@ -3147,7 +3210,7 @@ class VocabApp {
    * - 短按（<500ms 且未移动）：翻转卡片（onFlip）；
    * - 长按（≥450ms 且未移动）：让位给系统取词复制，松手不翻面；
    * - 向左滑超过 80px：标记“已掌握”；
-   * - 向右滑超过 80px：跳过当前词（移到队尾）；
+   * - 向右滑超过 80px：标记“陌生”（待复习）；
    * - 其余情况：卡片回弹原位。
    * 滑动过程中让卡片跟手平移并轻微旋转。
    *
@@ -3278,17 +3341,18 @@ class VocabApp {
         self._suppressNextCardClickFlip = true;
         if (typeof onFlip === 'function') onFlip();
       } else if (allowSwipe && currentX > CARD_SWIPE_THRESHOLD) {
-        // 向右滑动（从左往右）- 跳过、下一个单词
+        // 向右滑动（从左往右）- 陌生：标记为待复习并切到下一张。
         // 卡片位置继续沿用拖动时写入的 transform，由 _sequenceCard 接管滑出动画，
-        // 避免插入一个“瞬间跳到画外”的关键帧造成卡顿/空白
+        // 避免插入一个“瞬间跳到画外”的关键帧造成卡顿/空白；
+        // markDifficult 内部会同步推进动画并把落库放到后台，与左滑「掌握」手感一致。
         setTimeout(() => {
-          self.skipCard(releaseRatio);
+          self.markDifficult(releaseRatio);
         }, 0);
       } else if (allowSwipe && currentX < -CARD_SWIPE_THRESHOLD) {
         // 向左滑动（从右往左）- 掌握
         // 注意：markMastered 内部只同步推进卡片动画，写库/刷新统计放到后台执行。
         // 切勿改成「await 落库完成后再切卡」，否则卡片会在滑出后的画外位置等待 IO，
-        // 产生左滑特有的卡顿闪烁（右滑「跳过」为纯内存操作，故此前无此问题）。
+        // 产生特有的卡顿闪烁（右滑「陌生」同样把落库放后台，与这里同一手法）。
         setTimeout(() => {
           self.markMastered(releaseRatio);
         }, 0);
@@ -3659,6 +3723,9 @@ class VocabApp {
       // （容量 = min(每日目标, 范围内词条数)，词条数少于目标时队列天生短一截）
       const snapshotCapacity = Number(this._queueCapacity) || this.settings.dailyGoal;
       // 快照还必须属于当前词典范围，否则切范围后回到学习页会继续显示上一个范围（如「字」）的卡片
+      // 重复频率静默期只拦「全部/新词」：待复习/已掌握/收藏的复习轮里，队列前方
+      // 有刚学过的词属正常现象，不能据此判快照失效（见 doesRepeatWindowApplyToScope）
+      const snapshotRepeatApplies = this.doesRepeatWindowApplyToScope(snap ? snap.studyScope : 'all');
       const snapshotMatchesScope = Boolean(
         snap &&
         (snap.scope || 'all') === (this.settings.dictImportType || 'all') &&
@@ -3666,7 +3733,7 @@ class VocabApp {
         Array.isArray(snap.todayWords) &&
         snap.todayWords.length > 0 &&
         snap.todayWords.every((w, index) => this.isWordInActiveScope(w) &&
-          (index < snap.currentCardIndex || this.isWordOutsideRepeatWindow(w)))
+          (index < snap.currentCardIndex || !snapshotRepeatApplies || this.isWordOutsideRepeatWindow(w)))
       );
       const shouldRestoreSnapshot = snap && snap.todayWords && snap.todayWords.length > 0 && 
                                    snap.todayWords.length === snapshotCapacity &&
@@ -3989,6 +4056,11 @@ class VocabApp {
    * 这个 tab，它的 key 不在完成集合里，会自动取消“已学完”并继续出卡，
    * 学过之后才再次提示。
    *
+   * 「待复习」是复习闭环，不走上面的“一遍”逻辑：答「陌生」的词条不记入完成集合，
+   * 一轮学完只要范围内还有词，立刻自动组下一轮继续复习（队列随掌握/陌生操作
+   * 动态变化：掌握的词离开范围不再出现，陌生的词留到下一轮），直到全部掌握
+   * 才真正显示「已学完【待复习】，请切换范围」。
+   *
    * 队列仍然受每日目标限制：达到今日目标时先显示完成页与【继续学习】；
    * 点【继续学习】后进度归零，但学习范围的完成集合继续保留，接着学没学过的词。
    */
@@ -4020,7 +4092,11 @@ class VocabApp {
     // 当前 tab 的全部词条（全部 = 当前词典范围）
     const repeatNow = this.nowMs();
     const scopedWords = allWords.filter((w) => this.isWordInStudyScope(w, studyScope));
-    const studyScopePool = scopedWords.filter((w) => this.isWordOutsideRepeatWindow(w, repeatNow));
+    // 抽词池：待复习/已掌握/收藏不受重复频率静默期限制（见 doesRepeatWindowApplyToScope），
+    // 否则这些范围学过一遍就整池冷却，学习数据不再随掌握/陌生操作动态变化
+    const studyScopePool = this.doesRepeatWindowApplyToScope(studyScope)
+      ? scopedWords.filter((w) => this.isWordOutsideRepeatWindow(w, repeatNow))
+      : scopedWords;
     this._scopeCooldownExcludedCount = scopedWords.length - studyScopePool.length;
     // 缓存当前可抽词范围，供「跳过」同步补牌使用（见 pickSkipReplacement）
     this._scopePoolCache = studyScopePool;
@@ -4065,10 +4141,12 @@ class VocabApp {
       ));
       const restoredWords = [];
       let restoredIndexBefore = 0;
+      // 重复频率静默期只拦「全部/新词」：复习成员型范围内学过的词照常留在恢复队列里
+      const repeatAppliesToRestore = this.doesRepeatWindowApplyToScope(studyScope);
       for (let i = 0; i < restoredTodayWords.length; i++) {
         const w = restoredTodayWords[i];
         if (!this.isWordInStudyScope(w, studyScope)) continue;
-        if (i >= savedIndex && !this.isWordOutsideRepeatWindow(w, repeatNow)) continue;
+        if (i >= savedIndex && repeatAppliesToRestore && !this.isWordOutsideRepeatWindow(w, repeatNow)) continue;
         if (i < savedIndex) restoredIndexBefore++;
         restoredWords.push(w);
       }
@@ -4371,20 +4449,20 @@ class VocabApp {
         <button class="rotate-btn ${this._cardLandscapeOn ? 'active' : ''}" id="cardRotateBtn" type="button"
                 title="${this._cardLandscapeOn ? '转回竖屏' : '卡片横屏'}" aria-label="横竖屏切换">${this._cardLandscapeOn ? ROTATE_PORTRAIT_ICON_SVG : ROTATE_LANDSCAPE_ICON_SVG}</button>
         <div class="card-content">
-          <div class="word">${word.word}</div>
-          <div class="phonetic" id="phoneticText">${cantonesePhoneticFirst ? (word.jyutping || word.phonetic || '') : (word.phonetic || word.jyutping || '')}</div>
-          ${isCantonese && word.cantonese ? `<div class="cantonese-word">${word.cantonese}</div>` : ''}
+          <div class="word">${this.escapeHtml(word.word)}</div>
+          <div class="phonetic" id="phoneticText">${this.escapeHtml(cantonesePhoneticFirst ? (word.jyutping || word.phonetic || '') : (word.phonetic || word.jyutping || ''))}</div>
+          ${isCantonese && word.cantonese ? `<div class="cantonese-word">${this.escapeHtml(word.cantonese)}</div>` : ''}
         </div>
-        <div class="tap-hint"><< 掌握 · 点击查看释义 Shift · 跳过 >></div>
+        <div class="tap-hint"><< 掌握 · 点击查看释义 Shift · 陌生 >></div>
       </div>
       <div class="flashcard-back">
         <button class="favorite-btn ${word.favorite ? 'active' : ''}" id="favoriteBtnBack">${HEART_ICON_SVG}</button>
         <div class="card-content">
-          <div class="meaning">${word.definition || word.meaning}</div>
-          <div class="example">${word.example ? `"${word.example}"` : ''}</div>
-          ${isCantonese && word.cantoneseExample ? `<div class="cantonese-example">"${word.cantoneseExample}"</div>` : ''}
+          <div class="meaning">${this.escapeHtml(word.definition || word.meaning || '')}</div>
+          <div class="example">${word.example ? `"${this.escapeHtml(word.example)}"` : ''}</div>
+          ${isCantonese && word.cantoneseExample ? `<div class="cantonese-example">"${this.escapeHtml(word.cantoneseExample)}"</div>` : ''}
         </div>
-        <div class="tap-hint tap-hint-back"><< 掌握 · 点击查看词汇 Shift · 跳过 >></div>
+        <div class="tap-hint tap-hint-back"><< 掌握 · 点击查看词汇 Shift · 陌生 >></div>
       </div>
     `;
 
@@ -4658,14 +4736,12 @@ class VocabApp {
   }
 
   /**
-   * 第二个顶部标签（category-badge）的显示文字：
-   * 优先取词典「类型」列的值（typeLabel，如「字 · 常用一音」「短语」「人称称呼」），
-   * 词典没有类型列的旧词条回退用「分类」列（category，如「数字」「aa」）。
+   * 第三个顶部标签（category-badge）的显示文字：取词典「分类」列的值
+   * （category，如「数字」「」「aa」）。
+   * 第二个标签（language-badge）显示的是词典「类型」列（typeLabel，见 getLanguageBadgeLabel）。
    * 与筛选无关 —— 点击标签跳词库时按词条真实 category 筛选（见 handleCategoryBadgeClick）。
    */
   getCardTypeBadgeText(word) {
-    const category = String(word && word.category || '').trim();
-    if (category) return category;
     return String(word && word.category || '').trim();
   }
 
@@ -4675,19 +4751,20 @@ class VocabApp {
    * - 筛选按词条的 category（分类列的真实值），而不是标签上显示的「类型」文字 ——
    *   类型（如「字 · 常用一音」「人称称呼」）不参与词库分类下拉的筛选，
    *   显示的只是词典里的分组名，跳词库必须按分类列筛才能得到正确结果；
-   * - 一字类分类（标签里含 一字多音 / 一字一音 / 常用一音）：除了按该分类筛选，
-   *   还进一步按学习卡当前的 word 字精确筛选，词库只展示该字（word）的全部记录，
-   *   而不是该分类下的所有字（按显示文字判断：新版类型值为「字 · 常用一音」这一格式，
-   *   旧数据直接是「常用一音」，统一用包含匹配兼容两者）。
+   * - 一字类分类（匹配 一字多意/一字多义/一字多音/一字一音/常用一音）：除了按该分类筛选，
+   *   还进一步按学习卡当前的 word 字精确筛选，词库只展示该字（word）的全部义项，
+   *   而不是该分类下的所有字（见函数内的包含匹配）。
    */
   handleCategoryBadgeClick(word) {
     if (!word) return;
     // 实际筛选用的分类值（词库下拉的选项按它划分）
     const cat = String(word.category || '').trim();
     if (!cat) return;
-    // 一字类判断用标签显示文字（类型列的值），与用户看到的分组对应
+    // 一字类判断用标签显示文字（当前是分类列的值）：分类名里包含这些关键字的，
+    // 词库进一步按该字精确筛选。「一字多意/一字多义」是词典里实际在用的分类名，
+    // 「一字多音/一字一音/常用一音」是旧版类型值，统一用包含匹配兼容。
     const label = this.getCardTypeBadgeText(word);
-    const ONE_CHAR_CLASSES = ['一字多音', '一字一音', '常用一音'];
+    const ONE_CHAR_CLASSES = ['一字多意', '一字多义', '一字多音', '一字一音', '常用一音'];
     const isOneCharClass = ONE_CHAR_CLASSES.some((k) => label.includes(k));
     // 清掉「今日已掌握/今日待复习」带过来的今日筛选，保证是从「全部」口径进入
     this.resetLibraryTodayFilter();
@@ -4755,9 +4832,9 @@ class VocabApp {
     let word;
 
     if (wordId) {
-      // 根据id查找单词
-      const words = await this.db.getAllWords();
-      word = words.find(w => w.id === wordId);
+      // 按主键直读（原来读全库再 find，几千条词条的反序列化是词库里
+      // 点收藏/取消收藏最大的开销；viewWord、状态切换标签已是直读）
+      word = await this.db.getWord(wordId);
       if (!word) return;
     } else {
       // 使用当前学习的单词
@@ -4786,6 +4863,13 @@ class VocabApp {
 
     // 同步到内存中的所有副本（今日队列 / 会话快照 / 跳过补牌缓存 / 同词分组）
     this.syncWordCopies(word);
+
+    // 收藏成员变了（词库页「收藏」tab 的数量与列表要跟库一致）：从学习卡收藏/取消收藏时
+    // 标记词库页待重渲染。词库页内部（➔收藏/取消收藏）不标记 —— 它们各自已经
+    // 直接 renderLibrary() 刷新过了，再标记会造成下次进页多做一次无谓的全量重渲染
+    if (this.currentPage !== 'library') {
+      this._libraryNeedsRender = true;
+    }
 
     const shouldRefreshFavoriteUi =
       !wordId ||
@@ -4821,6 +4905,17 @@ class VocabApp {
     word.lastStudied = this.nowMs(); // 记录学习时间（同步可用时用服务端基准，避免两端时钟偏差）
     // 记入学习范围的“学过一遍”集合（待复习/全部/收藏等）
     this.markScopePassDone(word);
+    // 词条因这次答题新加入「待复习」范围（如在学习范围=全部/新词里点陌生）：
+    // 清掉待复习范围可能残留的“学过一遍”标记，让它在待复习范围里可被学习 ——
+    // 与词库里手动改成陌生的逻辑保持同一口径。当前就在待复习范围学习时不动：
+    // 复习闭环里答陌生的词条本来就不记入该范围的完成集合（见 markScopePassDone）。
+    if (this.normalizeStudyScope(this.settings.studyScope) !== 'review') {
+      this.markScopePassPending(word, ['review']);
+    }
+    // 学习动作改了词库里的词条状态：词库页顶部的数字（分类下拉标签如 字(218)、
+    // 范围统计行）与列表都依赖 renderLibrary 现算，普通切页默认不刷新 ——
+    // 标记下次进入词库时重渲染，数字一到页面就是最新的，不用再点一下 tab
+    this._libraryNeedsRender = true;
 
     // 乐观更新今日统计：写库是异步的，等它回来之前上方数字也要立刻 += 1，
     // 否则完成页会短暂显示 99/100（与进度条同源，所以两者一起改，始终一致）
@@ -4853,8 +4948,11 @@ class VocabApp {
     const queuedIds = new Set(this.todayWords.map((w) => w.id));
     if (skippedWord) queuedIds.add(skippedWord.id);
 
+    // 重复频率静默期只拦「全部/新词」：复习成员型范围（待复习/已掌握/收藏）里
+    // 刚学过的词也可以作为补牌候选
+    const repeatApplies = this.doesRepeatWindowApplyToScope(scope);
     const candidates = pool.filter((w) => {
-      if (!this.isWordOutsideRepeatWindow(w)) return false;
+      if (repeatApplies && !this.isWordOutsideRepeatWindow(w)) return false;
       if (!w || queuedIds.has(w.id)) return false;
       // 本次会话已经跳过的词不再补进来：否则刚跳过的那张马上又会出现
       if (this._skippedWordIds.has(w.id)) return false;
@@ -4929,18 +5027,27 @@ class VocabApp {
     const word = this.todayWords[this.currentCardIndex];
     // 同 markDifficult：撤销“词库外部加入范围”的强制入队标记
     this.clearExternalScopeInclude(word.id);
-    // 同 markDifficult：今天已计入统计的词条不再重复推进度，保证进度条与今日统计同口径
+    // 同 markDifficult：今天已计入统计的词条不再推进度，保证进度条与今日统计同口径
     const countsTowardProgress = !this.isWordCountedToday(word);
     word.status = 'mastered';
     word.lastStudied = this.nowMs(); // 记录学习时间（同步可用时用服务端基准）
     // 记入学习范围的“学过一遍”集合（已掌握/全部/收藏等）
     this.markScopePassDone(word);
+    // 词条因这次答题新加入「已掌握」范围（如在学习范围=全部时点掌握）：
+    // 清掉该范围可能残留的“学过一遍”标记，让它在已掌握范围里可被学习 ——
+    // 与词库里手动改状态的逻辑（refreshScopedStudySessionAfterExternalChange）
+    // 保持同一口径。当前就在已掌握范围学习时不动：本次已由 markScopePassDone 记录。
+    if (this.normalizeStudyScope(this.settings.studyScope) !== 'mastered') {
+      this.markScopePassPending(word, ['mastered']);
+    }
+    // 同 markDifficult：词条状态变了，词库页顶部的数字与列表要在下次进入时立即刷新
+    this._libraryNeedsRender = true;
 
     // 乐观更新今日统计（理由见 markDifficult）
     if (countsTowardProgress) this.bumpTodayStatsOptimistically('mastered');
 
     // 同 markDifficult：先同步切卡，落库在后台进行。
-    // 这样左滑（已掌握）与右滑（跳过）的动画时序完全一致，不再出现中途闪烁。
+    // 这样左滑（掌握）与右滑（陌生）的动画时序完全一致，不再出现中途闪烁。
     this._sequenceCard('left', releaseOffset, countsTowardProgress);
     this._persistStudyAction(word).catch((err) => {
       console.error('保存「已掌握」状态失败:', err);
@@ -5006,7 +5113,7 @@ class VocabApp {
 
   /**
    * 方向一致的“旧卡滑出 → 新卡滑入”过场：fromDirection 指示滑出方向
-   * （left 左滑=已掌握 / right 右滑=跳过）。
+   * （left 左滑=已掌握 / right 右滑=陌生）。
    *
    * 时序设计（目的是既快又不出现空白）：
    *   1. 滑出阶段只把卡片带到“刚好整张离屏”的位置，不空跑；
@@ -6326,21 +6433,50 @@ class VocabApp {
   }
 
   /**
+   * 词库排序专用比较器：与「localeCompare(kb, 'zh-Hans-CN', { numeric:true, sensitivity:'base' })」
+   * 语义完全一致（规范规定两者等价），但 Intl.Collator 实例只构造一次、比较方法可复用，
+   * 几千条词条的排序明显快于每次比较都重新解析 locale 的 localeCompare 调用。
+   * 极老浏览器没有 Intl.Collator 时回退 localeCompare（行为不变，只是慢一点）。
+   */
+  _getLibraryCollator() {
+    if (this._libraryCollator !== undefined) return this._libraryCollator;
+    let cmp = null;
+    try {
+      if (typeof Intl !== 'undefined' && Intl.Collator) {
+        cmp = new Intl.Collator('zh-Hans-CN', { numeric: true, sensitivity: 'base' }).compare;
+      }
+    } catch (e) {
+      cmp = null;
+    }
+    this._libraryCollator = cmp;
+    return cmp;
+  }
+
+  /**
    * 按排序键（音标/英文单词）的自然顺序排列：字母 a-z、数字 0-9
    * （如 aa1 < aa3 < aa10，同音节按声调 1<2<3…），descending=true 时整体倒序。
    * 「全部/新词」tab 的默认顺序与「排序」按钮激活后的顺序都走这里。
+   *
+   * 性能：先用 Schwartzian transform 预计算每条词条的排序键（每条只算一次），
+   * 比较器里只做比较 —— 原实现在比较器里每次反复计算 librarySortKeyOf，
+   * 5772 条词条的排序要做 ~14 万次 key 计算（split/正则），是切词库 tab 的主要耗时之一。
    */
   sortLibraryWordsNatural(words, descending) {
-    return words.slice().sort((a, b) => {
-      const ka = this.librarySortKeyOf(a);
-      const kb = this.librarySortKeyOf(b);
+    const cmp = this._getLibraryCollator();
+    const decorate = words.map((w) => ({ w, key: this.librarySortKeyOf(w) }));
+    const keyCompare = (ka, kb) => {
       // numeric: true —— 数字按数值比较（避免 aa10 排在 aa2 前面）；
       // sensitivity: 'base' —— 忽略大小写差异，只按字母本身排序
-      const byKey = ka.localeCompare(kb, 'zh-Hans-CN', { numeric: true, sensitivity: 'base' });
+      if (cmp) return cmp(ka, kb);
+      return ka.localeCompare(kb, 'zh-Hans-CN', { numeric: true, sensitivity: 'base' });
+    };
+    decorate.sort((a, b) => {
+      const byKey = keyCompare(a.key, b.key);
       if (byKey !== 0) return descending ? -byKey : byKey;
       // 排序键相同（同音多义项）时按 id 稳定排序
-      return (Number(a.id) || 0) - (Number(b.id) || 0);
+      return (Number(a.w.id) || 0) - (Number(b.w.id) || 0);
     });
+    return decorate.map((item) => item.w);
   }
 
   /**
@@ -6438,12 +6574,14 @@ class VocabApp {
     const showMeaningInCard = this.settings.meaningDisplay !== false;
     // 词库列表右侧的「查看」小眼睛（灰色）
     const viewIconSvg = '<svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>';
-    // 逐条词条的 HTML（模板与原来完全一致，只是一条一个元素、不再拼成一整段）
+    // 逐条词条的 HTML（模板与原来完全一致，只是一条一个元素、不再拼成一整段）。
+    // 单词与释义都先过 escapeHtml —— 与学习卡、顶部标签等渲染路径同一规范，
+    // 词典单元格里的 < > & 引号等字符不会破坏列表结构
     const itemHtmls = orderedWords.map(word => `
                 <div class="word-item" data-id="${word.id}">
                   <div class="word-info">
-                    <h3>${word.word}</h3>
-                    ${showMeaningInCard ? `<p>${word.definition || word.meaning}</p>` : ''}
+                    <h3>${this.escapeHtml(word.word)}</h3>
+                    ${showMeaningInCard ? `<p>${this.escapeHtml(word.definition || word.meaning || '')}</p>` : ''}
                   </div>
                   <div class="word-status">
                     ${effectiveStatus === 'favorite' ? `
@@ -6552,8 +6690,11 @@ class VocabApp {
 
   // ==================== 设置页面 ====================
   renderSettings() {
-    document.getElementById('goalSlider').value = this.settings.dailyGoal;
-    document.getElementById('goalValue').textContent = this.settings.dailyGoal;
+    // 每日目标输入框：显示当前设置值（正在输入时不抢占）
+    const goalInput = document.getElementById('goalInput');
+    if (goalInput && document.activeElement !== goalInput) {
+      goalInput.value = String(this.settings.dailyGoal);
+    }
     
     // 单词顺序：下拉框显示当前学习模式（随机 / 顺序）
     const learnModeSelect = document.getElementById('learnModeSelect');

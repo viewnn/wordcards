@@ -184,8 +184,8 @@
             <div class="filter-tabs">
               <button class="filter-tab active" data-filter="all">全部</button>
               <button class="filter-tab" data-filter="new">新词</button>
-              <button class="filter-tab" data-filter="review">陌生</button>
-              <button class="filter-tab" data-filter="mastered">掌握</button>
+              <button class="filter-tab" data-filter="review">待复习</button>
+              <button class="filter-tab" data-filter="mastered">已掌握</button>
               <button class="filter-tab" data-filter="favorite">收藏</button>
             </div>
             <!-- 排序按钮：全部/新词 tab 点击后按单词倒序；陌生/掌握/收藏 tab 点击后按单词正序，再点恢复最近学习时间顺序 -->
@@ -332,12 +332,13 @@
             <div class="setting-item">
               <div class="setting-info">
                 <h4>每日目标</h4>
-                <p>每日学习的单词数量</p>
+                <p>仅支持输入「5，200」之间的正整数</p>
               </div>
-              <div class="slider-container">
-                <input type="range" class="slider" id="goalSlider" min="5" max="200" value="100">
-                <span class="slider-value" id="goalValue">50</span>
-              </div>
+              <!-- 数字输入框：外观与设置页下拉框一致；inputmode/enterkeyhint 让手机弹数字键盘
+                   （“完成”键即回车），提交逻辑见 bindSettingsEvents 的 goalInput 绑定 -->
+              <input type="text" inputmode="numeric" pattern="[0-9]*" enterkeyhint="done"
+                     class="dict-select goal-input" id="goalInput" value="100"
+                     autocomplete="off" placeholder="100" aria-label="每日目标">
             </div>
             <div class="setting-item">
               <div class="setting-info">
@@ -379,7 +380,7 @@
             <div class="setting-item">
               <div class="setting-info">
                 <h4>重复频率</h4>
-                <p>距上次学习满所选天数后可重复出现</p>
+                <p>仅对「全部」和「新词」的范围生效</p>
               </div>
               <select id="repeatFrequencySelect" class="dict-select">
                 <option value="0">0天</option>

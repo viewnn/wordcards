@@ -2396,50 +2396,31 @@ body.learn-landscape #learnPage .action-btn.skip span {
   box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.14);
 }
 
-/* 滑块 */
-.slider-container {
-  display: flex;
-  align-items: center;
-}
-
-.slider {
-  flex: 1;
-  -webkit-appearance: none;
-  appearance: none;
-  height: 6px;
-  background: linear-gradient(180deg, #E9E2D0 0%, var(--bg-primary) 100%);
-  border-radius: 999px;
-  box-shadow: inset 0 1px 3px rgba(74, 60, 38, 0.14);
-  outline: none;
-  width: 112px;
-}
-
-.slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 24px;
-  height: 24px;
-  background: linear-gradient(160deg, #5B9BE0 0%, var(--primary) 40%, var(--primary-dark) 100%);
-  border-radius: 50%;
-  cursor: pointer;
-  box-shadow: 0 2px 6px rgba(74, 144, 217, 0.45), 0 0 0 4px rgba(74, 144, 217, 0.12);
-  border: 2px solid #fff;
-}
-
-.slider:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.slider:disabled::-webkit-slider-thumb {
-  cursor: not-allowed;
-}
-
-.slider-value {
-  min-width: 30px;
-  text-align: right;
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
+/* 每日目标输入框：外观与设置页下拉框（.dict-select）一致，只是允许直接输入数字。
+   聚焦样式（蓝边 + 柔光 + 镂空阴影）与词库页搜索框 .search-box:focus-within 保持一致 */
+.goal-input {
+  width: 96px;
+  flex: 0 0 auto;
+  text-align: center;
   font-variant-numeric: tabular-nums;
+  /* 输入框不是下拉：去掉 .dict-select 继承来的右侧下拉箭头，
+     只保留纯色背景；左右内边距对称、文字居中 */
+  background-image: none;
+  padding-left: 14px;
+  padding-right: 14px;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.goal-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.12);
+  background: var(--bg-card);
+  outline: none;
+}
+
+.goal-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ==================== Toast 提示 ==================== */
