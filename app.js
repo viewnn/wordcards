@@ -428,6 +428,17 @@ class VocabApp {
      */
     this._statsMayBeStale = false;
     /**
+     * 云端会话「本轮起点」的保护窗截止时刻（Date.now()，0 = 无保护）。
+     *
+     * 云同步应用另一台设备的会话时，那个「本轮起点」以**对方设备当天的统计**为基准；
+     * 而对方当天学过的词条记录是分好几批拉到本机的，拉齐之前本机统计天然偏小
+     * （手机学了一上午 100 张、电脑刚打开时可能只拉到十几条）。
+     * 保护窗内 syncTodayDoneFromStats() 不把「起点 > 今日统计」判成起点失效（归零），
+     * 也不让偏小的统计把进度往回压；记录拉齐后统计自己会追上来，窗后一切照旧。
+     * 窗口随 todayRoundStart 一起落库，中途刷新页面也不失效。
+     */
+    this._roundStartProtectUntil = 0;
+    /**
      * 当前队列里是否还有「今天还没计入统计」的词条。
      * 为 false 时这一轮是纯复习：进度条与今日统计都不会再增长，界面会给出提示。
      */
@@ -3875,6 +3886,10 @@ class VocabApp {
     this._todayRoundStart = (saved && saved.date === today)
       ? Math.max(0, Math.floor(Number(saved.count) || 0))
       : 0;
+    // 云端会话起点的保护窗（用途见 syncTodayDoneFromStats）：
+    // 刷新后仍在窗内就继续生效，过期或换了天则为 0
+    this._roundStartProtectUntil = (saved && saved.date === today &&
+      Number(saved.protectUntil) > Date.now()) ? Number(saved.protectUntil) : 0;
 
     // 「今天已完成过目标」的标记（跨天自动失效；同时记录达成时的目标值，
     // 目标改过之后旧完成态不再生效，避免把 10/15 补成 15/15）
@@ -3909,7 +3924,10 @@ class VocabApp {
     if (!this._roundStartReady) return;
     await this.db.setSetting('todayRoundStart', {
       date: this._todayRoundDate || this.todayKey(),
-      count: Math.max(0, Math.floor(Number(this._todayRoundStart) || 0))
+      count: Math.max(0, Math.floor(Number(this._todayRoundStart) || 0)),
+      // 云端起点保护窗的截止时刻一起落库：刷新页面后保护窗继续有效，
+      // 否则分批同步还在进行时一刷新，起点保护就丢了
+      protectUntil: Math.max(0, Math.floor(Number(this._roundStartProtectUntil) || 0))
     });
   }
 
@@ -3955,12 +3973,29 @@ class VocabApp {
     if (!this._roundStartReady) return this.todayDoneCount;
 
     const counted = this.currentTodayStudyCount();
+    // 统计还可能上涨的两种情形（这期间的统计只是过渡值，不能作为定论）：
+    //   1) 本地还有学习动作在落库：统计快照比乐观值少 1~2 张「在途卡片」；
+    //   2) 云端会话起点的保护窗内：另一台设备当天的词条记录还在分批拉到本机，
+    //      拉齐之前统计比「本轮起点」小几十条都正常（手机学了一上午、电脑刚打开）。
+    // 这段时间里既不能下「起点失效」的结论，也不能让统计把进度往回压；
+    // 两种情形结束（全部落库 / 保护窗到时）后会再跑一次统计，届时再下结论。
+    const countsMayGrow = this._pendingPersistCount > 0 ||
+      (this._roundStartProtectUntil || 0) > Date.now();
+
     // 起点不可能大于「今天总共学过的词条数」：起点是某一轮开始时已经学过的数量，
     // 而今天学过的词条数只会越积越多（清除记录 / 切范围都会同时重设起点）。
     // 一旦出现「起点 > 今日词条数」，说明这个起点已经失效 —— 最常见的来源是
     // 误点【继续学习】时把当时的统计当成了起点，之后统计变小（或本就没那么多），
     // 于是进度被永久压在 0/100。这里直接把它归零，让进度回到真实值。
     if (this._statsReady && this._todayRoundStart > counted) {
+      if (countsMayGrow) {
+        // 统计还在追平的过渡期：起点「暂时」比统计大，并不代表起点失效
+        //（上一轮还有卡在途落库，或云端记录分批到达）。此刻归零会让进度
+        // 虚回全天总量，统计追上来后又提前触发完成页 ——
+        // 进度超到 101/100、完成页复发就是这条路径。
+        this._statsMayBeStale = true;   // 追平之后（落库收尾 / 保护窗到时）再校准一次
+        return this.todayDoneCount;
+      }
       console.info('[learn] 检测到本轮起点（' + this._todayRoundStart +
         '）大于今日已学词条数（' + counted + '），已重置为 0');
       this._todayRoundStart = 0;
@@ -3969,9 +4004,10 @@ class VocabApp {
 
     const computed = Math.max(0, counted - this._todayRoundStart);
 
-    // 还有学习动作没落库完成时，统计快照可能还「少一张」：
-    // 不许用它把进度改小，否则学完最后一张会停在 99/100（要点一次【继续学习】才变 100）
-    if (this._pendingPersistCount > 0 && computed < this.todayDoneCount) {
+    // 统计还是过渡值（有动作在途 / 云保护窗内）时不许把进度改小：
+    // 否则学完最后一张会停在 99/100（要点一次【继续学习】才变 100），
+    // 或者云端记录陆续到达时进度倒着跳。等追平后再校准。
+    if (countsMayGrow && computed < this.todayDoneCount) {
       this._statsMayBeStale = true;   // 记下来：等全部落库后要校准一次
       return this.todayDoneCount;
     }
@@ -4005,23 +4041,51 @@ class VocabApp {
   /**
    * 设置本轮起点（云端同步今日会话时调用）。
    * 另一台设备可能已经开始过新一轮（起点不为 0），跟着它才能让两端进度条数字一致。
+   * 采用的瞬间进度按「今日统计 − 新起点」重算（旧一轮的完成数不再沿用）。
+   *
+   * opts.protectMs：起点保护窗（毫秒）。云端会话的起点以**对方设备当天的统计**为基准，
+   * 对方当天新学的词条记录还要分批拉到本机；拉齐之前本机统计比这个起点小是正常的，
+   * 不能立即判「起点失效」归零（归零后进度会虚回全天总量，记录陆续到位时又提前
+   * 触发完成页）。保护窗内统计不压进度、不下失效结论，窗后按老规则判。
    */
-  async setTodayRoundStart(value) {
+  async setTodayRoundStart(value, opts) {
     this._todayRoundDate = this.todayKey();
     this._todayRoundStart = Math.max(0, Math.floor(Number(value) || 0));
     this._roundStartReady = true;
-    this.syncTodayDoneFromStats();
+    const protectMs = Math.max(0, Math.floor(Number(opts && opts.protectMs) || 0));
+    this._roundStartProtectUntil = protectMs > 0 ? (Date.now() + protectMs) : 0;
+    // 采用远端起点的瞬间，按「今日统计 − 新起点」直接重算进度，而不是交给
+    // syncTodayDoneFromStats() 的「不回退」保护处理：换了基准之后，上一轮
+    // 显示了多少已经没有意义 —— 若沿用旧值（例如本机刚完成 100/100），换成
+    // 对方的 0 进度时界面上会残留 100/100，直到保护窗结束才回落。
+    this.todayDoneCount = Math.max(0, this.currentTodayStudyCount() - this._todayRoundStart);
     await this.saveTodayDoneCount();
     this.updateProgress();
     this.refreshGoalSliderLockedState();
   }
 
-  /** 今日累计进度归零（改每日目标、切换词典范围、清除记录、达标后开新一轮时调用） */
-  async resetTodayDoneCount() {
-    // 起点前移到「此刻今日已计入统计的词条数」：之后新学的词条才计入本轮进度
+  /**
+   * 今日累计进度归零（切换词典范围、清除记录、达标后开新一轮时调用）。
+   *
+   * opts.carryDone 为 true（【继续学习】开新一轮用）时，起点取「旧起点 + 本轮完成数」，
+   * 而不是「此刻的今日统计」：两者在统计落定后恒等，但学完最后一张立刻点
+   * 【继续学习】时统计可能还有 1~2 张在途落库，「此刻统计」要么偏小（起点被低估，
+   * 在途的旧卡一落库就被算进新一轮，几张卡就把新一轮顶成已完成），要么是乐观值
+   * 而库里还差在途那几张。「旧起点 + 本轮完成数」与点击时的乐观口径完全同源
+   * （同样由 countsTowardProgress 决定每一张算不算），天然包含在途动作，
+   * 不受落库快慢与统计刷新时序影响。
+   */
+  async resetTodayDoneCount(opts) {
+    // 起点前移到新一轮开始前的真实水位：之前学过的进度归零，之后再学才计入本轮
     this._todayRoundDate = this.todayKey();
-    this._todayRoundStart = this.currentTodayStudyCount();
+    this._todayRoundStart = (opts && opts.carryDone)
+      ? Math.max(0, Math.floor(Number(this._todayRoundStart) || 0)) +
+        Math.max(0, Math.floor(Number(this.todayDoneCount) || 0))
+      : this.currentTodayStudyCount();
     this._roundStartReady = true;
+    // 本地主动开新一轮：云端起点的保护窗一并作废
+    //（保护窗对应的是远端起点，现在起点已换成上述本机口径）
+    this._roundStartProtectUntil = 0;
     this.todayDoneCount = 0;
     // 开始新一轮：清掉「今日已完成」标记，之后要重新学满目标才算完成
     if (this._todayGoalReachedDate) {
@@ -5406,7 +5470,9 @@ class VocabApp {
   async restartLearn() {
     if (this.isDailyGoalReached()) {
       // 目标已达成：起点前移，进度归零，开始新的一轮（分母仍是设置页里的每日目标）
-      await this.resetTodayDoneCount();
+      // carryDone=true：新起点用「旧起点 + 本轮完成数」，避开在途落库造成的统计时差
+      // （详见 resetTodayDoneCount 注释）
+      await this.resetTodayDoneCount({ carryDone: true });
     }
     // 重置当前卡片索引为0
     this.currentCardIndex = 0;

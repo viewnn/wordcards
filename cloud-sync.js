@@ -94,6 +94,17 @@
   var AUTH_TIMEOUT_MS = 20000;
   /** 普通数据同步请求的超时（毫秒） */
   var REQUEST_TIMEOUT_MS = 30000;
+  /**
+   * 云端会话「本轮起点」的保护窗时长（毫秒）。
+   *
+   * 另一台设备的今日会话（含它的本轮起点）可能先于/晚于它当天的学习记录到达：
+   * 本机刚应用完会话时，当天的词条记录往往还没拉齐，统计比会话起点小几十条
+   * 都正常（手机学了一上午 100 张、电脑刚打开时只拉到十几条）。
+   * 保护窗内不把这类起点判失效（归零后进度会虚回全天总量，
+   * 记录陆续到位时又提前触发完成页，表现为 101/100）；
+   * 窗口时长覆盖后台轮询的几轮分批拉取，窗后仍未追上则仍按老规则归零兜底。
+   */
+  var ROUND_START_PROTECT_MS = 15 * 60 * 1000;
 
   /**
    * 参与云同步的用户设置项。
@@ -1844,8 +1855,12 @@
     //
     // 既然已经决定恢复云端的队列，就必须连它的本轮起点一起采用：
     // 本机可能之前点过【继续学习】，本地起点很高；继续用本机起点套云端统计，
-    // 会出现「电脑端 6/10，手机端 0/10」。setTodayRoundStart() 内部对
-    // 「起点 > 今日已学词条数」的失效值会自动归零，不会再把 100/100 压成 99。
+    // 会出现「电脑端 6/10，手机端 0/10」。
+    //
+    // 注意：会话可能比它对应的学习记录先到（对方当天的词条分批拉取中），
+    // 此时「起点 > 本机今日统计」是过渡态而不是起点失效，
+    // 因此这里带上保护窗（ROUND_START_PROTECT_MS）：窗内 syncTodayDoneFromStats()
+    // 不把它归零、也不让偏小的统计压进度；窗口过了统计仍未追上，才会自动归零兜底。
     if (session.roundStart !== undefined && session.roundStart !== null &&
         typeof this.app.setTodayRoundStart === 'function') {
       try {
@@ -1853,7 +1868,8 @@
         // 否则 setTodayRoundStart() 会拿同步前的旧统计做「起点是否失效」判断，
         // 可能把合法的远端起点误判成过大而清零。
         await this.app.refreshStatusCounts();
-        await this.app.setTodayRoundStart(session.roundStart);
+        await this.app.setTodayRoundStart(session.roundStart,
+          { protectMs: ROUND_START_PROTECT_MS });
       } catch (error) {
         console.warn('[cloud-sync] 对齐今日进度起点失败:', error);
       }
@@ -2537,7 +2553,10 @@
         if (!booting && doneAfter > doneBefore && this.app.currentCardIndex > 0 &&
             typeof this.app.showToast === 'function') {
           var goal = toNumber(this.app.settings && this.app.settings.dailyGoal, 0);
-          this.app.showToast('已同步云端进度：今日 ' + doneAfter + (goal > 0 ? '/' + goal : ''));
+          // 与进度条同一口径：done 封顶到目标再显示（updateProgress 里同样的 Math.min），
+          // 避免出现「已同步云端进度：今日 101/100」这种看不懂的数字
+          var shown = goal > 0 ? Math.min(doneAfter, goal) : doneAfter;
+          this.app.showToast('已同步云端进度：今日 ' + shown + (goal > 0 ? '/' + goal : ''));
         }
       }
     } catch (error) {
