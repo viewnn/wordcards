@@ -742,7 +742,8 @@ select {
 .flashcard-back .meaning {
   /* 米白而非纯白，配柔和蓝紫底降低强反差 */
   color: #F4F6F1;
-  font-size: var(--font-size-xl);
+  /*font-size: var(--font-size-xl);*/
+  font-size: 22px;
 }
 
 .flashcard-back .example {
