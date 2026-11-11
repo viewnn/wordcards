@@ -1,0 +1,4 @@
+job_id	pid	log_file	purpose
+job-20261110-015337-0556606b	33184	.temp\background-registry-20261110-095322-32712-300a3ca8.-job-20261110-015337-0556606b.log	词库计数bug排查: 8899端口恢复用户服务器
+job-20261110-022005-67b9fd84	34700	.temp\background-registry-20261110-095322-32712-300a3ca8.-job-20261110-022005-67b9fd84.log	词典重复键分析: 8901端口临时服务
+job-20261110-034509-a48458d2	28492	E:\repository\WordCards4.3\.temp\background-registry-20261110-095322-32712-300a3ca8.-job-20261110-034509-a48458d2.log	8901 isolated dict_key test server

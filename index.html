@@ -168,7 +168,7 @@
             <div class="dropdown-content">
               <div class="dropdown-search">
                 <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
-                <input type="text" id="categorySearchInput" placeholder="输入内容前 先取消全部分类...">
+                <input type="text" id="categorySearchInput" placeholder="搜索分类...">
               </div>
               <div class="dropdown-list">
                 <label class="dropdown-item">
@@ -472,10 +472,10 @@
             </div>
           </div>
 
-          <!-- 账号与同步 -->
+          <!-- 账号同步 -->
           <div class="settings-section" id="cloudSection">
             <h3 class="settings-section-title cloud-title">
-              <span>账号与同步</span>
+              <span>账号同步</span>
               <span class="cloud-state-tag" id="cloudStateTag">未启用</span>
             </h3>
 
@@ -539,7 +539,7 @@
                 <h4>重置记录</h4>
                 <p>重置学习记录，并不会删除单词数据</p>
               </div>
-              <!-- 尺寸与「账号与同步」里的按钮、以及「单词顺序」的顺序/随机按钮保持一致 -->
+              <!-- 尺寸与「账号同步」里的按钮、以及「单词顺序」的顺序/随机按钮保持一致 -->
               <button class="btn-secondary attention" id="clearProgressBtn" style="padding: 8px 21px; font-size: 13px">清除</button>
             </div>
           </div>
@@ -682,7 +682,7 @@
 
   <!-- 云同步：先读配置，再加载同步模块，最后才是应用主逻辑 -->
   <script src="supabase-config.js"></script>
-  <script src="cloud-sync.js?v=20261105-2"></script>
-  <script src="app.js?v=20261105-2"></script>
+  <script src="cloud-sync.js?v=20261110-1"></script>
+  <script src="app.js?v=20261111-4"></script>
 </body>
 </html>

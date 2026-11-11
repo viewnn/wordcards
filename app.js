@@ -310,7 +310,9 @@ class VocabDB {
     await this._transaction('words', 'readwrite', store => {
       for (const word of words) {
         word.createdAt = createdAt;
-        word.status = 'new';
+        // 词典合并时新增的行可能继承了同组（同范围/词汇/音标/分类）已有的学习状态，
+        // 不能一律重置为「新词」；普通新增（无 status 字段）仍然初始化为 new
+        word.status = word.status || 'new';
         store.add(word);
       }
     });
@@ -515,7 +517,7 @@ class VocabApp {
       practiceToneMode: 'with',
       /**
        * 练习进度：按「字 / 短语 / Eng5k」分别记录已经答对过的词条标识（进度条口径）。
-       * 标识用 practiceDictKey()（分类|词汇|音标）而不是词条 id：id 是 IndexedDB 自增主键，
+       * 标识用 practiceDictKey()（范围|词汇|音标|分类）而不是词条 id：id 是 IndexedDB 自增主键，
        * 换设备后会错位，同步过去会贴到别的词条上。
        * 与学习记录完全无关（练习不改 status/收藏），但会随云同步在多设备间合并。
        */
@@ -646,6 +648,9 @@ class VocabApp {
       // 先导入词典（字+短语全量常驻并标注分类），再加载按分类归档的统计，
       // 保证首次升级时迁移能按现有词条分类拆分历史累计记录
       await this.autoLoadDict();
+      // dict_key 升级为「范围|词汇|音标|分类」后，把历史练习进度 / 学习范围进度里的
+      // 旧 3 段 key 迁移到新格式；必须在首次云同步之前完成，推上行的就是迁移后的数据
+      await this.migrateLegacyDictKeys();
       // 词典里的 sheet 可能有增删：若当前「词典导入 / 练习范围」选中的范围
       // 在词典里已没有对应 sheet（如删掉了 Eng5k），自动切回「全部」
       await this.reconcileScopeSelectionsWithDict();
@@ -744,8 +749,8 @@ class VocabApp {
   }
 
   /** 同分类内的两个词条内容列是否一致（一致则无需重写）。
-   *  typeLabel 也参与比较：新增「类型」列的词典更新后，已在库里的旧词条
-   *  会因此被判为不一致、走一次重写把 typeLabel 补写进去（学习记录原样保留） */
+   *  typeLabel / dupCount 也参与比较：新增「类型」「重复字词数」列的词典更新后，
+   *  已在库里的旧词条会因此被判为不一致、走一次重写把新字段补写进去（学习记录原样保留） */
   _sameScopeContentEqual(row, existing) {
     const eq = (a, b) => String(a ?? '').trim() === String(b ?? '').trim();
     const rowMeaning = String(row.meaning ?? row.definition ?? '').trim();
@@ -754,6 +759,7 @@ class VocabApp {
       eq(rowMeaning, oldMeaning) &&
       eq(row.category, existing.category) &&
       eq(row.typeLabel, existing.typeLabel) &&
+      eq(row.dupCount, existing.dupCount) &&
       eq(row.phonetic, existing.phonetic) &&
       eq(row.example, existing.example) &&
       eq(row.language, existing.language) &&
@@ -862,7 +868,11 @@ class VocabApp {
       // 完整解析重写（_sameScopeContentEqual 会发现差异并把 typeLabel 补上），
       // 之后此标记为 true，恢复指纹短路的快速启动
       const typeLabelKnown = Boolean(await this.db.getSetting('dictTypeLabelImported', false));
-      if (stampUsable && sheetNamesKnown && typeLabelKnown) {
+      // 词条的「重复字词数」字段（dupCount）同理：升级到「点击类型标签按字词跳转词库」
+      // 版本后的第一次加载，库里的旧词条还没有该字段，需要补一次完整解析重写
+      // （_sameScopeContentEqual 会发现差异并把 dupCount 补上），之后恢复指纹短路
+      const dupCountKnown = Boolean(await this.db.getSetting('dictDupCountImported', false));
+      if (stampUsable && sheetNamesKnown && typeLabelKnown && dupCountKnown) {
         const savedStamp = await this.db.getSetting('dictStamp', null);
         if (savedStamp === tagStamp) {
           console.log('dict.xlsx 未变化（指纹一致），跳过解析与合并');
@@ -1077,6 +1087,32 @@ class VocabApp {
         }
       }
 
+      // 新增词条如果与库里某条「范围+词汇+音标+分类」完全相同（同词同音同分类的另一个义项），
+      // 继承该组的学习状态：云端一行 dict_key 代表整组，组内一条待复习、一条新词会让
+      // 学习队列与统计互相矛盾（同一条记录既是“新词”又是“待复习”）。
+      // 从库里同 key 的记录中取学习痕迹最新的一条作为来源。
+      if (newWords.length > 0) {
+        const existingByKey = new Map();
+        const stampOf = (item) => Math.max(Number(item.lastStudied) || 0, Number(item.syncUpdatedAt) || 0);
+        for (const e of existingWords) {
+          const key = this.dictKeyOf(e);
+          if (!key) continue;
+          const prev = existingByKey.get(key);
+          if (!prev || stampOf(e) >= stampOf(prev)) existingByKey.set(key, e);
+        }
+        for (const w of newWords) {
+          const source = existingByKey.get(this.dictKeyOf(w));
+          if (!source) continue;
+          w.status = source.status;
+          w.favorite = source.favorite;
+          w.favoriteAt = source.favoriteAt;
+          w.lastStudied = source.lastStudied;
+          w.reviewCount = source.reviewCount;
+          w.lastReview = source.lastReview;
+          w.nextReview = source.nextReview;
+        }
+      }
+
       // 以 dict.xlsx 为最终来源：新词典中不存在的旧词条需要删除。
       // 已匹配词条仍保留原 id 与学习记录，仅删除本次没有对应行的残留数据。
       const staleWords = existingWords.filter((word) => !matchedExistingIds.has(word.id));
@@ -1119,12 +1155,13 @@ class VocabApp {
 
       // 全流程跑完且没有抛错：记下本次响应的指纹，
       // 下次启动若指纹一致即可跳过「加载 XLSX → 解析 → 全库匹配」。
-      // 同时记下「类型字段已导入」：所有词条本轮已带上 typeLabel（新增的写入、
-      // 旧的按 _sameScopeContentEqual 差异重写补齐），之后指纹一致即可安心跳过
+      // 同时记下「类型字段已导入」「重复字词数已导入」：所有词条本轮已带上 typeLabel 与
+      // dupCount（新增的写入、旧的按 _sameScopeContentEqual 差异重写补齐），之后指纹一致即可安心跳过
       if (stampUsable) {
         await this.db.setSetting('dictStamp', tagStamp);
       }
       await this.db.setSetting('dictTypeLabelImported', true);
+      await this.db.setSetting('dictDupCountImported', true);
 
       await this.refreshLibraryFiltersAfterDictChange();
 
@@ -2562,6 +2599,14 @@ class VocabApp {
     const checkedBoxes = document.querySelectorAll('#categoryOptions input[type="checkbox"]:checked');
     this.selectedCategories = Array.from(checkedBoxes).map(cb => cb.dataset.category);
 
+    // 用户手动勾选/取消分类 = 主动调整筛选条件：解除学习卡「一字多意」类标签跳转
+    // 写入的按字精确筛选（_libraryWordExactFilter，见 handleCategoryBadgeClick /
+    // applyLibraryFilters）。不解除的话列表仍被钉在跳转时那个字的几行上
+    //（如「房」永远只剩两行），勾选分类看不出任何变化；
+    // 必须放在 updateCategoryLabel 之前：标签上的数量经 applyLibraryFilters 现算，
+    // 清晚了会把旧数字写进下拉按钮
+    this._libraryWordExactFilter = null;
+
     this.updateCategoryLabel();
     this.updateCategoryFilterIndicator();
 
@@ -2580,7 +2625,8 @@ class VocabApp {
     const boxes = document.querySelectorAll('#categoryOptions input[type="checkbox"]');
     let checked = 0;
     boxes.forEach((box) => { if (box.checked) checked++; });
-    const hasFilter = boxes.length > 0 && checked < boxes.length;
+    // 有勾选但并非全部勾选时才视为「有筛选条件」；未筛选（全部不勾选）不算，避免无谓的蓝色描边
+    const hasFilter = boxes.length > 0 && checked > 0 && checked < boxes.length;
     target.classList.toggle('has-filter', hasFilter);
   }
 
@@ -2810,13 +2856,14 @@ class VocabApp {
     // 勾选状态在生成 HTML 时直接写好：
     // 原实现先生成未勾选列表，再用两轮全量 querySelectorAll 回填勾选并统计全选框，
     // 500+ 项时这几轮 DOM 查询与遍历是下拉渲染变慢的主要原因
-    const hasSelection = Array.isArray(this.selectedCategories) && this.selectedCategories.length > 0;
+const hasSelection = Array.isArray(this.selectedCategories) && this.selectedCategories.length > 0;
     const selection = hasSelection ? new Set(this.selectedCategories) : null;
     let checkedCount = 0;
     container.innerHTML = categories
       .map(
         (cat) => {
-          const on = selection ? selection.has(cat) : true;
+          // 未筛选（空选择）= 不勾选任何分类，但列表仍展示全部；用户勾选后才按勾选过滤
+          const on = selection ? selection.has(cat) : false;
           if (on) checkedCount++;
           return `
       <label class="dropdown-item">
@@ -2829,13 +2876,13 @@ class VocabApp {
       .join('');
 
     const allTotal = categories.length;
-    if (selection) {
+if (selection) {
       // 显式筛选：全选框是否勾选取决于「是否全部命中」（与原回填+统计的判定一致）
       document.getElementById('category-all').checked = checkedCount === allTotal && allTotal > 0;
     } else {
-      // 没有筛选：全部勾选，并补全 selectedCategories（与原回填逻辑一致）
-      document.getElementById('category-all').checked = allTotal > 0;
-      this.selectedCategories = [...categories];
+      // 没有筛选：不勾选任何分类（selectedCategories 保持空 = 未筛选 = 列表展示全部），全选框同步不勾选
+      document.getElementById('category-all').checked = false;
+      this.selectedCategories = [];
     }
 
     // 选项列表已重建：下拉搜索过滤器缓存的元素引用全部作废，置空待下次重建
@@ -2915,9 +2962,8 @@ class VocabApp {
   /** 词典导入/范围切换后：分类下拉勾选当前展示分类下的全部真实分类（等同于「全部」）
    *  preloadedWords：调用方已读好的全量词条，传入可省一次重复读库 */
   async syncLibraryCategoryFilterToDictType(preloadedWords = null) {
-    const words = (preloadedWords || await this.db.getAllWords()).filter((w) => this.isWordInActiveScope(w));
-    const userCats = [...new Set(words.map((w) => w.category || '未分类'))];
-    this.selectedCategories = [...userCats];
+    // 词典范围切换后回到「未筛选」：空选择 = 展示全部，不默认勾选任何分类
+    this.selectedCategories = [];
   }
 
   /** language 列标明粤语时，卡片音标优先展示粤拼 */
@@ -4531,13 +4577,27 @@ class VocabApp {
     `;
 
     // 顶部「类型/分类」标签可点击：跳转词库并按该词条的真实分类筛选
-    //（语言标签、收藏按钮等仍不跳转；显示的是类型文字，筛选逻辑见 handleCategoryBadgeClick）
+    // （显示的是类型文字，筛选逻辑见 handleCategoryBadgeClick；收藏按钮等仍不跳转。
+    //  语言标签（词典「类型」列文字）在词典导入=字且重复字词数>1 时也可点击，按字词跳转，见下方）
     const catBadge = cardInner.querySelector('.category-badge');
     if (catBadge) {
       catBadge.classList.add('clickable-badge');
       catBadge.addEventListener('click', (e) => {
         e.stopPropagation();
         this.handleCategoryBadgeClick(word);
+      });
+    }
+
+    // 顶部「类型」标签（显示词典「类型」列文字的 language-badge）可点击：
+    // 词条在当前词典范围 且「重复字词数」>1（如 表=2）时绑定点击 —— 跳词库并按当前
+    // 字词精确筛选，展示该词的全部义项（表、表）；学习范围永远在当前词典范围内，
+    // 这里不会出现「范围外轻提示」分支（那条分支见 typeBadgeAction，练习页会用到）
+    const typeBadge = cardInner.querySelector('.flashcard-badge-row .language-badge:not(.scope-badge):not(.category-badge)');
+    if (typeBadge && this.typeBadgeAction(word) !== 'none') {
+      typeBadge.classList.add('clickable-badge');
+      typeBadge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.handleTypeBadgeClick(word);
       });
     }
     
@@ -4652,6 +4712,9 @@ class VocabApp {
       // 「类型」列：词表内的分组名（如「字 · 常用一音」「短语」「人称称呼」），
       // 单独存为 typeLabel，不用 language —— language 参与语种推断（粤语/英语/中文），两者语义不同
       ['typeLabel', ['类型']],
+      // 「重复字词数」列（字 sheet）：该字/词在词典里的重复行数（如 房=2 表示有两行），
+      // 单独存为 dupCount，供学习卡「类型」标签点击跳词库的判断（>1 才可跳）
+      ['dupCount', ['重复字词数']],
       ['language', ['language', '语言']],
       ['jyutping', ['jyutping', '粤拼', 'jytping']],
       ['cantonese', ['cantonese', '粤语字', 'cantonese_word']],
@@ -4696,6 +4759,8 @@ class VocabApp {
     const meaning = String(raw.meaning ?? raw.definition ?? '').trim();
     const wordText = String(raw.word ?? '').trim();
     let language = String(raw.language ?? '').trim();
+    // 重复字词数（字 sheet 的「重复字词数」列）：数值化；缺失/为空/非数字时记 0
+    const dupCountNum = Number(String(raw.dupCount ?? '').trim());
     if (!language) {
       const jp = String(raw.jyutping ?? '').trim();
       if (jp && /[\u4e00-\u9fff]/.test(wordText)) language = '粤语';
@@ -4712,6 +4777,9 @@ class VocabApp {
       // 类型列原文（如「字 · 常用一音」「短语」「人称称呼」）：卡片第二个顶部标签的显示文字。
       // 词典里没有该列时为空串，显示层会回退到 category
       typeLabel: String(raw.typeLabel ?? '').trim(),
+      // 重复字词数：该字/词在词典里的行数（房=2 表示有两行）。学习卡「类型」标签
+      // 点击跳词库按它判断（>1 才可跳，见 typeBadgeAction）；字 sheet 以外没有该列，记 0
+      dupCount: Number.isFinite(dupCountNum) ? dupCountNum : 0,
       language,
       jyutping: String(raw.jyutping ?? '').trim(),
       cantonese: String(raw.cantonese ?? '').trim(),
@@ -4817,13 +4885,21 @@ class VocabApp {
    *   显示的只是词典里的分组名，跳词库必须按分类列筛才能得到正确结果；
    * - 一字类分类（匹配 一字多意/一字多义/一字多音/一字一音/常用一音）：除了按该分类筛选，
    *   还进一步按学习卡当前的 word 字精确筛选，词库只展示该字（word）的全部义项，
-   *   而不是该分类下的所有字（见函数内的包含匹配）。
+   *   而不是该分类下的所有字（见函数内的包含匹配）；
+   * - 词条不在当前词典范围时不跳转（仅练习页可能出现：练习范围与词典导入互不联动，
+   *   学习卡永远在当前范围内），提示先切换「词典导入」，避免跳过去被范围过滤器排除成空列表
    */
   handleCategoryBadgeClick(word) {
     if (!word) return;
     // 实际筛选用的分类值（词库下拉的选项按它划分）
     const cat = String(word.category || '').trim();
     if (!cat) return;
+    // 范围外词条（判断口径与词库范围过滤器完全一致 isWordInActiveScope）：跳过去列表必然为空
+    //（如顶部显示「字(0)」），不跳，轻提示先切换「词典导入」
+    if (!this.isWordInActiveScope(word)) {
+      this.showToast('请切换「词典导入」范围');
+      return;
+    }
     // 一字类判断用标签显示文字（当前是分类列的值）：分类名里包含这些关键字的，
     // 词库进一步按该字精确筛选。「一字多意/一字多义」是词典里实际在用的分类名，
     // 「一字多音/一字一音/常用一音」是旧版类型值，统一用包含匹配兼容。
@@ -4851,6 +4927,64 @@ class VocabApp {
     } else {
       this._libraryWordExactFilter = null;
     }
+    // 标签跳转：显式更新了筛选条件，标记词库页需要重新渲染
+    this._libraryNeedsRender = true;
+    this.switchPage('library');
+  }
+
+  /**
+   * 学习/练习卡「类型」标签（显示词典「类型」列文字的 language-badge）的点击行为：
+   * - 'jump'：词条在当前词典范围内 且 词典「重复字词数」列值 >1（如 表=2）—— 跳词库
+   *   按该字词精确筛选，展示它的全部义项（表、表）；
+   * - 'toast'：词条不在当前词典范围内（仅练习页可能出现：练习范围与词典导入互不联动，
+   *   练习卡可能跑到词库范围之外，如词典导入=字、练习范围=短语）—— 不跳，轻提示先切换「词典导入」；
+   * - 'none'：不处理（无标签文字；或在范围内但重复字词数≤1：只有一行，跳过去没意义）。
+   * 注意判断依据是词典「重复字词数」列的值（dupCount），而不是按词条数统计 —— 以列值为准。
+   */
+  typeBadgeAction(word) {
+    if (!word) return 'none';
+    if (!String(word.typeLabel || '').trim()) return 'none';
+    if (!this.isWordInActiveScope(word)) return 'toast';
+    return Number(word.dupCount) > 1 ? 'jump' : 'none';
+  }
+
+  /**
+   * 学习/练习卡「类型」标签点击（词条在当前词典范围内 且 重复字词数>1）时：跳词库并按当前字词
+   * （如：表）精确筛选，展示该词的全部义项（表、表）；词条不在当前词典范围（仅练习页可能出现：
+   * 练习范围与词典导入互不联动）时轻提示先切换「词典导入」，不跳转（判断见 typeBadgeAction）。
+   * 与「分类」标签跳转（handleCategoryBadgeClick，按分类列筛选）不同：
+   * - 分类勾选清空（[] = 不按分类过滤，显示全部），只按字词精确筛选，
+   *   保证该字的多个义项跨分类时也能全部展示；
+   * - 其余落地操作与分类标签跳转保持一致（清今日筛选、状态切「全部」、
+   *   排序复位、回第一页、清搜索词）。
+   * 跳转后用户手动勾选分类会解除按字钉住（见 updateSelectedCategories），与分类标签行为一致。
+   */
+  handleTypeBadgeClick(word) {
+    if (!word) return;
+    const action = this.typeBadgeAction(word);
+    if (action === 'none') return;
+    // 范围外：跳过去会被词库范围过滤器排除成空列表，不跳，轻提示先切换「词典导入」
+    if (action === 'toast') {
+      this.showToast('请切换「词典导入」范围');
+      return;
+    }
+    const wordText = String(word.word || '').trim();
+    if (!wordText) return;
+    // 清掉「今日已掌握/今日待复习」带过来的今日筛选，保证是从「全部」口径进入
+    this.resetLibraryTodayFilter();
+    this.filterStatus = 'all';
+    // 跳转进词库等同于切换 tab：排序按钮复位为未点击状态
+    this.setLibrarySortActive(false);
+    this.resetPageNum();
+    // 分类勾选清空（不勾选 = 显示全部分类），只按该字词精确筛选
+    this.selectedCategories = [];
+    this._libraryWordExactFilter = wordText;
+    // 清掉搜索词，避免它与「按字精确筛选」叠加出错误结果
+    this.searchQuery = '';
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) searchInput.value = '';
+    const clearBtn = document.getElementById('searchClearBtn');
+    if (clearBtn) clearBtn.style.display = 'none';
     // 标签跳转：显式更新了筛选条件，标记词库页需要重新渲染
     this._libraryNeedsRender = true;
     this.switchPage('library');
@@ -5762,7 +5896,15 @@ class VocabApp {
   }
 
   /**
-   * 练习进度用的跨设备稳定标识：分类 | 词汇 | 音标（与 cloud-sync.js 的 makeDictKey 同一套规则）。
+   * 练习进度用的跨设备稳定标识：范围 | 词汇 | 音标 | 分类（与 cloud-sync.js 的 makeDictKey 同一套规则）。
+   *
+   * 为什么要带上「分类」：词典里有同词同音标、但属于不同分类的义项
+   * （如「万(数字)」「万(常见百家姓)」「张(量词-物量词)」「张(常见百家姓)」……）。
+   * 旧标识不含分类，这些义项在云端只能共用一行记录：任意一条被学习/同步，
+   * 另一条也会跟着变成同样的状态，词库顶部的待复习条数因此虚增
+   * —— 用户看到的就是「点掉 3 张卡，刷新后待复习反而多了 3 条」。
+   * 加上分类后，不同分类的同词义项各自独立学习、独立同步；
+   * 同分类的同词多义项仍视为同一条（云端一行对应整组，组内状态保持一致）。
    *
    * 不能用词条的 id —— 它是 IndexedDB 的自增主键，同一份词典在手机和电脑上导入顺序不同，
    * 同一个词完全可能拿到不同的 id。用 id 当练习进度，同步到另一台设备就会贴到别的词条上，
@@ -5773,7 +5915,29 @@ class VocabApp {
     const norm = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().toLowerCase().replace(/\|/g, '/');
     const text = norm(word.word);
     if (!text) return '';
+    // 分类为空时统一记作「未分类」，与 normalizeImportedWord() 的缺省值保持一致：
+    // 否则老词条（空串）和新词典（未分类）会拼出两个 key，同一词条永远对不上
+    const category = norm(word.category) || '未分类';
+    return `${this.practiceScopeKeyOf(word)}|${text}|${norm(word.phonetic)}|${category}`;
+  }
+
+  /**
+   * 旧版 dict_key（范围 | 词汇 | 音标，不含分类）。
+   * 仅用于把历史练习进度 / 学习范围进度 / 云端旧记录映射到新 key，不参与新数据写入。
+   */
+  legacyDictKeyOf(word) {
+    if (!word) return '';
+    const norm = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().toLowerCase().replace(/\|/g, '/');
+    const text = norm(word.word);
+    if (!text) return '';
     return `${this.practiceScopeKeyOf(word)}|${text}|${norm(word.phonetic)}`;
+  }
+
+  /** 是否是旧版 3 段 dict_key（新版固定 4 段：范围|词汇|音标|分类；数字 id 不算） */
+  isLegacyDictKey(key) {
+    if (typeof key !== 'string' || !key) return false;
+    if (this.isLegacyPracticeId(key)) return false;
+    return key.split('|').length === 3;
   }
 
   /** 词条的跨设备标识（与云同步的 dict_key、练习进度用的是同一套规则） */
@@ -5784,7 +5948,7 @@ class VocabApp {
   /**
    * 重建「dict_key → 同一个词的全部词条」索引。
    *
-   * 词典里可能存在「分类 + 词汇 + 音标」完全相同的多条词条（同音同字的义项）。
+   * 词典里可能存在「范围 + 词汇 + 音标 + 分类」完全相同的多条词条（同音同字的义项）。
    * 云端一行 dict_key 代表整组，所以组内的学习状态必须保持一致，否则：
    *   本机组内一条 mastered、一条 review → 上行只会推其中一条 →
    *   另一条永远同步不出去 → 两端的累计统计差出几个。
@@ -5808,7 +5972,8 @@ class VocabApp {
   }
 
   /**
-   * 把一次学习动作同步到「同一个词」的其它词条上（分类+词汇+音标都相同）。
+   * 把一次学习动作同步到「同一个词」的其它词条上（范围+词汇+音标+分类都相同）。
+   * 跨分类的同词义项已经是独立 identity，不会被这里连带修改。
    * 只有组内确实有多条、且状态/学习时间不同时才写库。
    */
   async applyStatusToWordGroup(sourceWord, status, studiedAt) {
@@ -5949,6 +6114,128 @@ class VocabApp {
       console.info(`[practice] 练习进度已迁移为跨设备标识（${migrated} 条）`);
       await this.savePracticeProgress();
       this.refreshPracticeProgressUI();
+    }
+    return migrated;
+  }
+
+  /**
+   * 一次性迁移：dict_key 升级为「范围 | 词汇 | 音标 | 分类」后，
+   * 把练习进度（practiceProgress）与学习范围进度（studyScopePass）里的旧 3 段 key 重映射到新 key。
+   *
+   * 旧 key 不含分类：对「万(数字) / 万(百家姓)」这类同词同音标、不同分类的义项，
+   * 一条旧记录同时对应多条新词条。新格式下它们必须各自独立，旧记录无法判断原本属于
+   * 哪一条 —— 只有能唯一对应到一条新词条时才迁移，否则丢弃（宁可重练，不错配）。
+   *
+   * 幂等：只处理旧 3 段 key；新格式 key 原样保留，重复启动不会再次改写。
+   */
+  async migrateLegacyDictKeys() {
+    const hasLegacy = (list) =>
+      Array.isArray(list) && list.some((item) => this.isLegacyDictKey(String(item ?? '')));
+
+    const progress = this.settings.practiceProgress || {};
+    const progressLegacy = ['word', 'phrase', 'eng5k'].some((scope) => hasLegacy(progress[scope]));
+    const scopePassLegacy = STUDY_SCOPE_VALUES.some((scope) =>
+      hasLegacy(Array.from(this._scopePassDone[scope] || []))
+    );
+    if (!progressLegacy && !scopePassLegacy) return 0;
+
+    let allWords = [];
+    try {
+      allWords = await this.db.getAllWords();
+    } catch (error) {
+      return 0;
+    }
+
+    // 旧 key → 它能对应到的所有新 key。同词同音标跨分类会得到多个，迁移时放弃。
+    const legacyToNew = new Map();
+    for (const word of allWords) {
+      const oldKey = this.legacyDictKeyOf(word);
+      const newKey = this.dictKeyOf(word);
+      if (!oldKey || !newKey) continue;
+      let set = legacyToNew.get(oldKey);
+      if (!set) {
+        set = new Set();
+        legacyToNew.set(oldKey, set);
+      }
+      set.add(newKey);
+    }
+
+    const remap = (key) => {
+      if (!this.isLegacyDictKey(key)) return key;
+      const set = legacyToNew.get(key);
+      return set && set.size === 1 ? Array.from(set)[0] : '';
+    };
+
+    let migrated = 0;
+    let dropped = 0;
+    let progressChanged = false;
+
+    if (progressLegacy) {
+      for (const scope of ['word', 'phrase', 'eng5k']) {
+        const raw = Array.isArray(progress[scope]) ? progress[scope] : [];
+        const next = new Set();
+        for (const item of raw) {
+          // 旧版数字 id 另有迁移（migratePracticeProgressIds），这里不碰
+          if (this.isLegacyPracticeId(item)) continue;
+          const key = String(item ?? '');
+          if (!key) continue;
+          if (!this.isLegacyDictKey(key)) {
+            next.add(key);
+            continue;
+          }
+          const mapped = remap(key);
+          if (mapped) {
+            next.add(mapped);
+            migrated++;
+          } else {
+            dropped++;
+          }
+        }
+        const before = raw.filter((item) => !this.isLegacyPracticeId(item)).map(String).sort();
+        const after = Array.from(next).sort();
+        if (JSON.stringify(before) !== JSON.stringify(after)) {
+          this._practiceDone[scope] = next;
+          progressChanged = true;
+        }
+      }
+      if (progressChanged) {
+        await this.savePracticeProgress();
+        this.refreshPracticeProgressUI();
+      }
+    }
+
+    let scopePassChanged = false;
+    if (scopePassLegacy) {
+      for (const scope of STUDY_SCOPE_VALUES) {
+        const set = this._scopePassDone[scope];
+        if (!set || set.size === 0) continue;
+        const next = new Set();
+        for (const key of set) {
+          if (!this.isLegacyDictKey(key)) {
+            next.add(key);
+            continue;
+          }
+          const mapped = remap(key);
+          if (mapped) {
+            next.add(mapped);
+            migrated++;
+          } else {
+            dropped++;
+          }
+        }
+        if (next.size !== set.size || Array.from(next).some((key) => !set.has(key))) {
+          this._scopePassDone[scope] = next;
+          scopePassChanged = true;
+        }
+      }
+      if (scopePassChanged) await this.saveScopePass();
+    }
+
+    if (migrated > 0 || dropped > 0) {
+      console.info(
+        `[dict] 学习标识已升级为「范围|词汇|音标|分类」：迁移 ${migrated} 条` +
+        (dropped > 0 ? `，${dropped} 条因同词多分类无法唯一对应已放弃` : '')
+      );
     }
     return migrated;
   }
@@ -6118,12 +6405,35 @@ class VocabApp {
     // 正面底部提示随题切换：英语题翻面看的是「答案」，粤拼题翻面看的是「音标释义」
     const frontHint = document.querySelector('#practiceFlashcard .flashcard-front .tap-hint');
     if (frontHint) frontHint.textContent = english ? '点击查看答案 Shift' : '点击查看释义 Shift';
-    // 顶部标签（语言 / 分类）与学习卡完全一致，用的是同一个生成方法
+    // 顶部标签（语言 / 分类）与学习卡完全一致，用的是同一个生成方法；
+    // 点击跳转也与学习卡完全一致：分类标签按分类跳（handleCategoryBadgeClick）、
+    // 类型标签按字词跳（typeBadgeAction 决定跳转 / 范围外轻提示，handleTypeBadgeClick），
+    // 用的都是学习页在用的同一套处理器（同名绑定见 showCard）
     const badgeRow = document.getElementById('practiceBadgeRow');
     if (badgeRow) {
       const badgesHtml = this.buildCardBadgesHtml(word);
       badgeRow.innerHTML = badgesHtml;
       badgeRow.style.display = badgesHtml ? '' : 'none';
+      // 第二个标签（分类）：跳词库并按该词条的真实分类筛选（一字类分类还会按字精确钉住）
+      const catBadge = badgeRow.querySelector('.category-badge');
+      if (catBadge) {
+        catBadge.classList.add('clickable-badge');
+        catBadge.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.handleCategoryBadgeClick(word);
+        });
+      }
+      // 第一个标签（类型）：与学习卡同款处理器（typeBadgeAction + handleTypeBadgeClick）。
+      // 词条在当前词典范围内 且 重复字词数>1 时点击跳转；不在当前范围内（练习范围与
+      // 词典导入互不联动，练习卡可能跨范围）时点击弹轻提示；范围内只有一行/无类型则不处理
+      const typeBadge = badgeRow.querySelector('.language-badge:not(.scope-badge):not(.category-badge)');
+      if (typeBadge && this.typeBadgeAction(word) !== 'none') {
+        typeBadge.classList.add('clickable-badge');
+        typeBadge.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.handleTypeBadgeClick(word);
+        });
+      }
     }
     this.applyPracticeTargets();
     const meaningEl = document.getElementById('practiceMeaning');
@@ -6445,8 +6755,10 @@ class VocabApp {
       words = words.filter((w) => this.selectedCategories.includes(w.category || '未分类'));
     }
 
-    // 一字类（一字多音/一字一音）从学习卡跳转时：仅展示该 word 字的全部记录，
-    // 而不是该分类下的所有字（此时 selectedCategories 已限定到该分类）
+    // 一字类（一字多音/一字一音）从学习卡「分类」标签跳转时：仅展示该 word 字的全部记录，
+    // 而不是该分类下的所有字（此时 selectedCategories 已限定到该分类）。
+    // 「类型」标签（按字跳转）时同样按字精确筛选：此时分类不勾选（= 显示全部），
+    // 叠加后列表就是该字的全部词条（如：房、房）
     if (this._libraryWordExactFilter) {
       words = words.filter((w) => String(w.word || '').trim() === this._libraryWordExactFilter);
     }
@@ -6454,12 +6766,25 @@ class VocabApp {
     // 搜索（支持单词、释义、粤拼、粤语字、粤语例句搜索）
     if (this.searchQuery) {
       const q = this.searchQuery;
+      // 粤拼调号（1-6）模糊匹配：输入 nei hou（无调值）也能命中「nei5 hou2」。
+      // 仅当查询串含字母（拼音/粤语拼输入）且**未含调号数字**时才启用去调模糊匹配：
+      // 用户一旦补全了调值（如 hou2），就只做精确匹配，避免 hou2 把其它含 hou 的词也带出来。
+      const stripTone = (s) => String(s).toLowerCase().replace(/[1-6]/g, ' ').replace(/\s+/g, ' ').trim();
+      const qIsPhonetic = /[a-z]/i.test(q);
+      const qNoTone = qIsPhonetic && !/[1-6]/.test(q) ? stripTone(q) : '';
       words = words.filter((w) => {
         const mean = (w.definition || w.meaning || '').toLowerCase();
         const phon = (w.phonetic || w.jyutping || '').toLowerCase();
         const canto = (w.cantonese || '').toLowerCase();
         const cantoEx = (w.cantoneseExample || w.example || '').toLowerCase();
-        return w.word.toLowerCase().includes(q) || mean.includes(q) || phon.includes(q) || canto.includes(q) || cantoEx.includes(q);
+        if (w.word.toLowerCase().includes(q) || mean.includes(q) || phon.includes(q) || canto.includes(q) || cantoEx.includes(q)) return true;
+        // 无调值粤拼模糊匹配：如「nei hou」命中「nei5 hou2」
+        if (qNoTone) {
+          const phonNoTone = stripTone(phon);
+          const cantoNoTone = stripTone(canto);
+          if (phonNoTone.includes(qNoTone) || cantoNoTone.includes(qNoTone)) return true;
+        }
+        return false;
       });
     }
 
@@ -7009,6 +7334,7 @@ class VocabApp {
           example: get('example'),
           category: get('category'),
           typeLabel: get('typeLabel'),
+          dupCount: get('dupCount'),
           language: get('language'),
           jyutping: get('jyutping'),
           cantonese: get('cantonese'),

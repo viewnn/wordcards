@@ -286,7 +286,7 @@
    * 取并集后，客户端发现「本地与云端不同」会把合并结果再推回云端，
    * 于是多台设备的练习进度能持续累加。
    *
-   * 列表元素是 practiceDictKey()（分类|词汇|音标）—— 跨设备稳定。
+   * 列表元素是 practiceDictKey()（范围|词汇|音标|分类）—— 跨设备稳定。
    * 早期版本的列表元素是 IndexedDB 自增 id，换设备必然错位，这里直接忽略
    * （客户端会先把旧 id 迁移成 dict_key 再上行，见 app.js 的 migratePracticeProgressIds）。
    */
@@ -319,8 +319,13 @@
 
   /**
    * 生成词条的跨设备稳定标识。
-   * 用「分类 + 文本 + 音标」而不是 id：id 是 IndexedDB 自增的，换设备导入
+   * 用「范围 + 文本 + 音标 + 分类」而不是 id：id 是 IndexedDB 自增的，换设备导入
    * 顺序不同就会错位。文本里若含分隔符 '|' 会破坏解析，统一替换掉。
+   *
+   * 「分类」是必须的：词典里有同词同音标、但属于不同分类的义项
+   * （如「万(数字)」「万(常见百家姓)」）。旧标识不含分类，这些义项共用云端一行，
+   * 任意一条被学习/同步，另一条也会变成同样的状态，待复习条数因此虚增。
+   * 加上分类后，不同分类的同词义项各自独立；同分类的同词多义项仍共用一行。
    */
   function makeDictKey(word) {
     if (!word) return '';
@@ -328,21 +333,29 @@
     var text = normalizeText(word.word).replace(/\|/g, '/');
     if (!text) return '';
     var phonetic = normalizeText(word.phonetic).replace(/\|/g, '/');
-    return scope + SEP + text + SEP + phonetic;
+    // 分类为空时记作「未分类」，与 app.js normalizeImportedWord() 的缺省值一致
+    var category = normalizeText(word.category).replace(/\|/g, '/') || '未分类';
+    return scope + SEP + text + SEP + phonetic + SEP + category;
   }
 
-  /** 「分类 + 文本」组成的宽松键，用于 dict_key 精确匹配失败时的回退匹配 */
+  /** 「范围 + 文本」组成的宽松键，用于 dict_key 精确匹配失败时的回退匹配 */
   function makeTextKey(scope, text) {
     return scope + SEP + normalizeText(text).replace(/\|/g, '/');
   }
 
-  /** 解析 dict_key → { scope, text }；解析不了返回 null */
+  /** 「范围 + 文本 + 分类」组成的宽松键：音标被词典纠正时，优先按分类找回原记录 */
+  function makeTextCategoryKey(scope, text, category) {
+    return makeTextKey(scope, text) + SEP + (normalizeText(category).replace(/\|/g, '/') || '未分类');
+  }
+
+  /** 解析 dict_key → { scope, text, category }；解析不了返回 null。
+   *  旧版 3 段 key（无分类）的 category 为空串，调用方据此走兼容回退。 */
   function parseDictKey(key) {
     var parts = String(key || '').split(SEP);
     if (parts.length < 2) return null;
     // 首段是词典范围：与 scopeOf 的取值保持一致（word/phrase/eng5k），其余按「字」兜底
     var scope = parts[0] === 'phrase' || parts[0] === 'eng5k' ? parts[0] : 'word';
-    return { scope: scope, text: parts[1] };
+    return { scope: scope, text: parts[1], category: parts.length >= 4 ? parts[3] : '' };
   }
 
   /** 数字兜底：非有限数一律返回 fallback */
@@ -1003,7 +1016,7 @@
   /**
    * 重建「dict_key → 词条[]」与「分类+文本 → 词条[]」两张索引表。
    *
-   * 用数组而不是单个词条：词典里可能存在「分类 + 词汇 + 音标」完全相同的多条词条
+   * 用数组而不是单个词条：词典里可能存在「范围 + 词汇 + 音标 + 分类」完全相同的多条词条
    * （同音同字但释义不同的义项）。原先只留最后一条，云端那一行就只会写到其中一条上，
    * 两台设备各自写中的是「不同的一条」时，看起来就是「都显示已同步、内容却不同」。
    * 现在同 key 的整组一起更新，两端必然一致。
@@ -1012,6 +1025,7 @@
     var words = await this.app.db.getAllWords();
     var byKey = new Map();
     var byText = new Map();
+    var byTextCategory = new Map();
 
     for (var i = 0; i < words.length; i++) {
       var word = words[i];
@@ -1023,18 +1037,28 @@
       var textKey = makeTextKey(scopeOf(word), word.word);
       if (!byText.has(textKey)) byText.set(textKey, []);
       byText.get(textKey).push(word);
+
+      // 音标被词典纠正时 dict_key 会变，回退匹配优先按「范围+文本+分类」找回
+      var textCategoryKey = makeTextCategoryKey(scopeOf(word), word.word, word.category);
+      if (!byTextCategory.has(textCategoryKey)) byTextCategory.set(textCategoryKey, []);
+      byTextCategory.get(textCategoryKey).push(word);
     }
 
     this._localByKey = byKey;
     this._localByText = byText;
-    return { byKey: byKey, byText: byText, total: words.length };
+    this._localByTextCategory = byTextCategory;
+    return { byKey: byKey, byText: byText, byTextCategory: byTextCategory, total: words.length };
   };
 
   /**
    * 按 dict_key 找本地词条（同 key 的多条全部返回）。
-   * 精确匹配失败时退化成「分类 + 文本」匹配——词典更新时音标可能被纠正，
-   * 此时 dict_key 会变，但学习记录不该丢。只有当该文本在本地唯一时才敢回退，
-   * 多读音字这种「同文本多条」的情况宁可放弃，也不错配。
+   * 精确匹配失败时退化成「范围 + 文本（+ 分类）」匹配——词典更新时音标可能被纠正，
+   * 此时 dict_key 会变，但学习记录不该丢。
+   *   1. 新格式 key 带分类：先按「范围+文本+分类」找，唯一时才认；
+   *   2. 旧格式 key（3 段，无分类）：只能按「范围+文本」找，唯一时才认。
+   * 同文本多条（多读音字 / 同词不同分类的义项）时宁可放弃，也不错配 ——
+   * 尤其是旧格式 key，若映射到整组，就会把一条记录的状态重新扩散到不同分类，
+   * 正是「点掉 3 张卡、待复习反而多 3 条」的来源。
    */
   CloudSyncEngine.prototype.resolveLocalWords = function (dictKey) {
     if (!this._localByKey) return [];
@@ -1043,6 +1067,12 @@
 
     var parsed = parseDictKey(dictKey);
     if (!parsed) return [];
+    if (parsed.category && this._localByTextCategory) {
+      var byCategory = this._localByTextCategory.get(
+        makeTextCategoryKey(parsed.scope, parsed.text, parsed.category)
+      );
+      if (byCategory && byCategory.length === 1) return byCategory;
+    }
     var list = this._localByText ? this._localByText.get(makeTextKey(parsed.scope, parsed.text)) : null;
     if (list && list.length === 1) return list;
     return [];
@@ -1420,6 +1450,22 @@
         var timeChanged =
           lastStudied !== null && toNumber(word.lastStudied, 0) !== lastStudied;
         var stampChanged = toNumber(word.syncUpdatedAt, 0) < clientUpdatedAt;
+
+        // 时间戳仲裁：本地记录比云端行更新时，本地状态/收藏优先，不用云端旧行改回去。
+        // 典型场景：刚在词库点了「掌握」，上行还在防抖等待（或刷新打断了推送），
+        // 启动拉取先拿到云端旧记录 —— 不做这层保护就会「点了掌握，刷新后又变回待复习」。
+        // 这里同时安排一次回推，把本机的新状态补上云（否则另一台设备一直拿旧值）。
+        // 只拦状态/收藏冲突；仅学习时间不同的情况由下面的分支按「保留较晚」规则处理。
+        if ((statusChanged || favoriteChanged) && toNumber(word.syncUpdatedAt, 0) > clientUpdatedAt) {
+          var localRow = this.rowFromWord(word);
+          // rowFromWord 会把明显超前的脏时间戳当作无效值；这种行推上去也赢不了云端，
+          // 就只保留本地显示，等真实时间追上（不把未来时间戳继续放大）
+          if (localRow && toNumber(localRow.client_updated_at, 0) > clientUpdatedAt) {
+            this.dirty.set(localRow.dict_key, localRow);
+            corrections++;
+          }
+          continue;
+        }
 
         // 状态与收藏都一致、只有学习时间不同时，保留较晚的那个。
         //

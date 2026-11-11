@@ -1,0 +1,5 @@
+job_id	pid	log_file	purpose
+job-20261111-103923-defe4730	23124	E:\repository\WordCards4.3\.temp\background-registry-20261111-183911-26456-76a86ecd.-job-20261111-103923-defe4730.log	8901 isolated category-filter test server
+job-20261111-114028-7a98eaa7	27644	.temp/background-registry-20261111-183911-26456-76a86ecd.-job-20261111-114028-7a98eaa7.log	8905 isolated type-badge test server
+job-20261111-120328-95b5298a	24076	.temp/background-registry-20261111-183911-26456-76a86ecd.-job-20261111-120328-95b5298a.log	8905 isolated practice-badge test server
+job-20261111-123911-6156bcbc	14608	.temp/background-registry-20261111-183911-26456-76a86ecd.-job-20261111-123911-6156bcbc.log	8905 isolated type-badge v4 test server
